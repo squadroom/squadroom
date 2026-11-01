@@ -162,8 +162,8 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
   const agent = (name = "Lead", permission = "edit", model = "haiku", kind = "claude-code") =>
     runCommand(store, { action: "createAgent", tabId: tab.id, name, kind, model, permission }).agent as { id: string };
   const codexAgent = (name = "Coder", permission = "edit") => agent(name, permission, "gpt-5.6-sol", "codex");
-  /** An OpenCode agent: not offered in the dialogs (the command refuses
-   * it), so made in the store, as only the tests do. */
+  /** An ACP agent (OpenCode by default), made in the store directly so a
+   * test can give it a level its kind is not qualified for. */
   const acpAgent = (name = "Scout", model = "openai/gpt-5.6-luna", permission: "look" | "edit" = "look", kind: AgentKind = "opencode") =>
     store.createAgent({ tabId: tab.id, name, role: "", kind, model, effort: null, permission });
   const send = (agentId: string, text: string) => (runCommand(store, { action: "send", agentId, text }) as { turnId: number }).turnId;
