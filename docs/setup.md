@@ -225,11 +225,13 @@ mail must be configured.
   in its own mirror; it never reaches an agent.
 - **Paid API keys** (`XAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`,
   `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`,
-  `KREA_API_KEY`, …): each needs the monthly cap you
-  set **first** on the provider's own limits page (the page is linked), its
-  amount and the date you checked it. Squadroom refuses to hand out a paid
-  key without one. The provider's cap is the hard ceiling; Squadroom's own
-  spend figures are estimates.
+  `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `KREA_API_KEY`, …): each needs the
+  monthly cap you set **first** on the provider's own limits page (the page
+  is linked), its amount and the date you checked it. Squadroom refuses to
+  hand out a paid key without one. The provider's cap is the hard ceiling;
+  Squadroom's own spend figures are estimates. OpenCode looks for the Z.ai
+  key under the name `ZHIPU_API_KEY`, so the launcher passes it under both
+  names, and only to a window that runs a GLM model.
 - **Override for this project** gives one project its own key.
 
 A stored key is never shown again (only its last four characters). No
@@ -395,13 +397,42 @@ macOS sandbox profile:
 | Grok Build | `XAI_API_KEY` (paid, capped) | Look only |
 | Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Look only |
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Look only |
-| OpenCode | the chosen model's key: `OPENAI_API_KEY` (GPT-5.6 Luna), `ANTHROPIC_API_KEY` (Claude Haiku 4.5), `DEEPSEEK_API_KEY` (DeepSeek V4 Pro, DeepSeek V4.1 Flash) or `MOONSHOT_API_KEY` (Kimi K3), each paid and capped | Look only |
+| OpenCode | the chosen model's key, each paid and capped (see below) | Look only, with the project's network on |
 
-All four are listed under **Add**, **Agent** and in the team setup once pull
-request [#9](https://github.com/squadroom/squadroom/pull/9) is merged
-(before that, only Grok Build is). Look only means the agent can read, run
-commands you approve and message its team, but not change files. Edit in
-its folder needs its own sandbox breakout tests for each kind first.
+All four are listed under **Add**, **Agent** and in the team setup (Gemini
+CLI, Kimi Code and OpenCode since pull request
+[#9](https://github.com/squadroom/squadroom/pull/9)). Look only means the
+agent can read, run commands you approve and message its team, but not
+change files. Edit in its folder needs its own sandbox breakout tests for
+each kind first.
+
+OpenCode's models and the key each one uses:
+
+| Model | Key |
+|---|---|
+| GPT-5.6 Luna | `OPENAI_API_KEY` |
+| Claude Haiku 4.5 | `ANTHROPIC_API_KEY` |
+| DeepSeek V4 Pro, DeepSeek V4.1 Flash | `DEEPSEEK_API_KEY` |
+| Kimi K3 | `MOONSHOT_API_KEY` |
+| GLM-5.3, GLM-5.3-Flash | `ZAI_API_KEY` |
+| Qwen 3.8 Max, through OpenRouter | `OPENROUTER_API_KEY` |
+
+**OpenCode needs the project's network switch on.** When it starts, OpenCode
+runs a small server of its own on a local port and talks to it. With
+network off the sandbox blocks that, and OpenCode quits straight away. Its
+model calls need the network anyway. If you try it with network off, the
+turn stops and its reason tells you to turn Network on.
+
+OpenCode 1.19.5 was tried on a real Mac on 2026-11-01 with DeepSeek V4.1
+Flash, DeepSeek V4 Pro, Kimi K3, GLM-5.3, GLM-5.3-Flash and Qwen 3.8 Max,
+each at Look only with network on. Each one answered, named its model and
+reported its usage. A short turn cost from $0.0013 (GLM-5.3-Flash) to
+$0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
+OpenCode's own system prompt, so even a one-line question is not free.
+Gemini CLI and Kimi Code have not had a live turn yet.
+
+If an agent program stops right after it starts, the turn's reason ends
+with the last lines it printed on its error output, with keys masked.
 
 The setup script installs the OpenCode, Grok Build, Gemini CLI and Kimi
 Code clients at the versions pinned in `src/lib/console/clients.ts`.

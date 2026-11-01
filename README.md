@@ -85,11 +85,20 @@ selectable once pull request
 - **Gemini CLI**, with a Gemini API key. It can only look for now.
 - **Kimi Code**, on your Kimi Code membership. It can only look for now.
 - **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
-  Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash or Kimi K3. It can
-  only look for now.
+  Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash, Kimi K3, GLM-5.3,
+  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It can only look for
+  now, and it needs the project's network switch on: with network off it
+  can't start.
 
 An agent that only looks can read the code, run commands you approve and
 message its teammates, but it can't change files.
+
+OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
+real Mac on 2026-11-01: each answered, named its model and reported what it
+used. A short turn cost between $0.0013 and $0.026. Gemini CLI and Kimi
+Code haven't had a live turn yet. See
+[docs/setup.md](docs/setup.md#12-other-agent-kinds-acp) for the keys each
+model needs.
 
 Claude Code agents that can edit can also make and edit images with
 [Krea](https://www.krea.ai), which helps when you're prototyping a design.
