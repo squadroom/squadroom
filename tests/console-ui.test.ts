@@ -14,7 +14,6 @@ import {
   fileLinks,
   firstModel,
   kindInitials,
-  lookOnly,
   money,
   needCount,
   offeredKinds,
@@ -172,9 +171,6 @@ test("agent kinds: offered ones, Codex off, a role's kind, first model, Look onl
   assert.equal(roleKind("codex", "no login"), "claude-code");
   assert.equal(roleKind("claude-code", "no login"), "claude-code");
   assert.equal(firstModel("claude-code"), AGENT_KINDS.find((k) => k.kind === "claude-code")!.models[0].id);
-  assert.equal(lookOnly("claude-code"), false);
-  assert.equal(lookOnly("opencode"), true);
-  assert.equal(lookOnly("no such kind"), true);
 });
 
 test("a team timeline entry's heading", () => {

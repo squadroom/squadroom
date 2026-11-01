@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { agentKind, agentModel } from "../agents.ts";
 import { callSummary, claimPattern, findTeammate, holdCycle, HoldCycleError, MESSAGE_MAX, REPORT_MAX, TeamError, TEAM_DIFF_CHARS, teamDiffMissing, teamDiffText, teamPrompt } from "../team.ts";
-import { agentStatus, type ConsoleAgent } from "../types.ts";
+import { agentStatus, PERMISSION_LABELS, type ConsoleAgent } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import type { ActiveTurn, Runtime } from "./shared.ts";
 
@@ -63,7 +63,7 @@ export const teamTools = {
             const hold = this.store.heldBy(a);
             // What the Orchestrator plans with: AI, model and thinking
             // level, access, role note, state, claims and holds.
-            return `- ${a.name} (id ${a.id})${a.id === me.id ? " (you)" : ""}: ${agentKind(a.kind)?.label ?? a.kind} ${model?.label ?? a.model}${a.effort ? ` (thinking ${a.effort})` : ""}, ${a.permission === "look" ? "Look only" : "edits its folder"}, ${agentStatus(a, turn)}${role ? `; role: ${role.slice(0, 160)}` : ""}${
+            return `- ${a.name} (id ${a.id})${a.id === me.id ? " (you)" : ""}: ${agentKind(a.kind)?.label ?? a.kind} ${model?.label ?? a.model}${a.effort ? ` (thinking ${a.effort})` : ""}, ${PERMISSION_LABELS[a.permission]}, ${agentStatus(a, turn)}${role ? `; role: ${role.slice(0, 160)}` : ""}${
               claims.length ? `; editing ${claims.map((c) => `${c.pattern}${c.note ? ` (${c.note})` : ""}`).join(", ")}` : ""
             }${hold ? `; on hold by ${hold.holderName}: ${hold.reason}` : ""}`;
           })

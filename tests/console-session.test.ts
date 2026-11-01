@@ -219,7 +219,7 @@ test("a prompt whose durable 'prompted' mark cannot be written is never handed t
   assert.ok(!driver().sent.includes(turn), "nothing was sent");
 });
 
-test("team setup refuses an access level the chosen kind is not qualified for", async () => {
+test("team setup takes an ACP kind at Code edit", async () => {
   const { checkTeamSetup } = await import("../src/lib/console/team-setup.ts");
   const { agentKind } = await import("../src/lib/console/agents.ts");
   assert.equal(agentKind("opencode")!.offered, true);
@@ -231,7 +231,6 @@ test("team setup refuses an access level the chosen kind is not qualified for", 
       },
       { roles: [], takenNames: [], codexOff: false },
     );
-    assert.equal(result.ok, false);
-    assert.match(JSON.stringify(result), /OpenCode is qualified for Look only so far/);
+    assert.equal(result.ok, true, JSON.stringify(result));
   }
 });

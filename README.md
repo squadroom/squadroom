@@ -1,9 +1,10 @@
 # Squadroom
 
 Squadroom is a browser console for running a squad of coding agents —
-Claude Code, Codex and Grok Build today, with Gemini CLI, Kimi Code and
-OpenCode built in but not yet switched on — side by side. You
-open projects, add tabs, and put named agent windows in each tab. Every
+Claude Code, Codex, Grok Build, Gemini CLI, Kimi Code and OpenCode — side
+by side. You open projects, add tabs, and put named agent windows in each
+tab. Each window either changes code in its own folder (**Code edit**) or
+only reads it (**Code analysis**). Every
 agent runs as a dedicated, sandboxed macOS user in its own Git clone, and
 agents in a tab talk to each other through mailboxes (team tools), so a
 Lead can ask a Reviewer for a review without you copying text between

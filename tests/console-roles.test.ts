@@ -45,7 +45,7 @@ test("the owner's roles: add, change, delete; built-ins: rewrite the prompt and 
   runCommand(h.store, { action: "saveRole", role: { id: made.id, name: "Data engineer", description: "Pipelines.", access: "look", ai: "claude-code", prompt: "Review the data layer." } });
   assert.equal(rolesView(h.store).find((r) => r.id === made.id)!.prompt, "Review the data layer.");
   assert.throws(() => runCommand(h.store, { action: "saveRole", role: { name: "lead", description: "", access: "edit", ai: "codex", prompt: "x" } }), /Another role has that name/);
-  assert.throws(() => runCommand(h.store, { action: "saveRole", role: { name: "X", description: "", access: "admin", ai: "codex", prompt: "x" } }), /Choose Edit in its folder or Look only/);
+  assert.throws(() => runCommand(h.store, { action: "saveRole", role: { name: "X", description: "", access: "admin", ai: "codex", prompt: "x" } }), /Choose Code edit or Code analysis/);
   assert.throws(() => runCommand(h.store, { action: "resetRole", id: made.id }), /Only a built-in role/);
   runCommand(h.store, { action: "deleteRole", id: made.id });
   assert.equal(rolesView(h.store).some((r) => r.id === made.id), false);

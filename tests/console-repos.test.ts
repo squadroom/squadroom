@@ -174,7 +174,7 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
     );
   assert.ok(!leak(h.agentHome), "the GitHub token reached the agent's files");
   assert.ok(!leak(h.shared), "the GitHub token reached the shared folder");
-  assert.throws(() => runCommand(h.store, { action: "push", agentId: look.id }), /Look only/);
+  assert.throws(() => runCommand(h.store, { action: "push", agentId: look.id }), /Code analysis/);
 
   // A branch holding a credential the Console handed out is never pushed.
   const leaked = h.send(lead.id, "leak debug.txt");
@@ -226,7 +226,7 @@ test("team_push: the owner approves in Needs you; the branch is pushed after the
   assert.match(h.said(lead.id).at(-1)!, /^team_push: Approved/);
   // A Look only agent has no branch to push.
   await h.ended(h.send(look.id, "team_push"));
-  assert.match(h.said(look.id).at(-1)!, /error: A Look only agent has no branch to push/);
+  assert.match(h.said(look.id).at(-1)!, /error: A Code analysis agent has no branch to push/);
 });
 
 test("cleanup: a closed agent's branch that was never pushed carries a warning; a pushed one does not", async (t) => {

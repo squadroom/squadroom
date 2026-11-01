@@ -29,7 +29,7 @@ test("a tab's run as Markdown: summary, agents, each message and reply, commits 
   const md = runReport(reportData(store, tab.id, clock)!);
   assert.match(md, /^# Site › Main: run report/);
   assert.match(md, /- Turns: 2 \(1 done, 1 failed, 0 interrupted, 0 stopped\)/);
-  assert.match(md, /\| Dev \| Claude Code, Haiku \| Edits its folder \|/);
+  assert.match(md, /\| Dev \| Claude Code, Haiku \| Code edit \|/);
   // A message's own heading stays inside its quotation.
   assert.match(md, /The owner:\n\n> # Fix the build\n> It fails on CI\./);
   assert.match(md, /Dev:\n\n> Fixed: the import path was wrong\./);
@@ -52,7 +52,7 @@ test("stored text cannot change the report's structure, and every commit of a tu
     tab: "Main",
     generatedAt: 0,
     steps: null,
-    agents: [{ name: "Dev | x\n\n# Injected", ai: "Claude Code, Haiku", access: "Edits its folder", approval: null }],
+    agents: [{ name: "Dev | x\n\n# Injected", ai: "Claude Code, Haiku", access: "Code edit", approval: null }],
     turns: [
       {
         id: 1, agentId: "a", agentName: "Dev", trigger: "owner", prompt: "hello\r\r## Forged summary\rnot quoted", status: "failed",

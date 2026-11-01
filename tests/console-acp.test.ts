@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
@@ -19,7 +20,7 @@ import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 // usage (delayed, repeated, missing), partial owner waits, credential mode,
 // model confirmation, cancellation, a resumed session and a restart. Against
 // a scripted fake agent (fake-acp.mjs): no sudo, no network, no model call.
-// OpenCode is qualified at Look only first.
+// OpenCode runs at Code edit or Code analysis.
 
 const OPENAI = "sk-proj-FAKE-openai-key-for-acp-0000000000ABCD";
 const CAP = { usd: 10, url: "https://platform.openai.com/settings/organization/limits", checkedAt: "2026-10-20" };
@@ -95,23 +96,27 @@ test("an ACP agent's permission requests: reads allowed; edits never at Look onl
     assert.equal(decideAcp({ kind: "other", title }, look).behavior, "ask", title);
 });
 
-test("OpenCode is offered at Look only, and Edit is refused", async (t) => {
-  const h = await harness(t);
-  // The owner's commands make it at Look only and refuse Edit.
-  h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode");
-  assert.throws(() => h.agent("Scout2", "edit", "openai/gpt-5.6-luna", "opencode"), /qualified for Look only so far/);
+test("OpenCode is offered at Code edit and Code analysis; at Code edit an edit in its folder is committed, one outside it refused", async (t) => {
+  const h = await acp(t);
+  // The owner's commands make it at either level.
+  h.agent("Scout2", "look", "openai/gpt-5.6-luna", "opencode");
+  h.agent("Editor2", "edit", "openai/gpt-5.6-luna", "opencode");
   assert.equal(agentKind("opencode")!.offered, true);
   assert.equal(agentKind("opencode")!.version, ACP_CLIENTS.opencode.version);
-  assert.deepEqual(agentKind("opencode")!.levels, ["look"]);
-  // An agent at a level its kind is not qualified for never runs.
-  keys(h.keysFile);
-  await h.worker.start();
-  const editing = h.acpAgent("Editor", "openai/gpt-5.6-luna", "edit");
-  await h.ready(editing.id);
-  const turn = h.send(editing.id, "hello");
+  const editor = h.acpAgent("Editor", "openai/gpt-5.6-luna", "edit");
+  await h.ready(editor.id);
+  const folder = h.store.agent(editor.id)!.folder;
+  const turn = h.send(editor.id, `edit ${join(folder, "notes.txt")}`);
   await h.ended(turn);
-  assert.deepEqual([h.store.turn(turn)!.status, h.store.turn(turn)!.reason], ["failed", "OpenCode is not qualified for this access level yet."]);
-  assert.deepEqual(h.acpCalls(), []);
+  assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+  assert.match(said(h, editor.id), /decision: yes/);
+  assert.match(h.log(), /^sandbox --sandbox edit$/m);
+  await h.until(() => !!h.store.turn(turn)!.commitAfter, "turn committed");
+  assert.equal(execFileSync("git", ["-C", folder, "show", "HEAD:notes.txt"], { encoding: "utf8" }), "edited\n");
+  const outside = join(h.root, "outside.txt");
+  await h.ended(h.send(editor.id, `edit ${outside}`));
+  assert.match(said(h, editor.id), /decision: no/);
+  assert.equal(existsSync(outside), false);
 });
 
 test("a turn end to end: sandboxed at Look only, network off, the model confirmed, only its key crosses, streamed, charged at catalog prices", async (t) => {

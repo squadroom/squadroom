@@ -323,7 +323,7 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   assert.match(h.said(lead.id).at(-1)!, /error: comment must be a comment's number/);
   // A Look only agent has no pull request of its own.
   await h.ended(h.send(look.id, call("team_pr")));
-  assert.match(h.said(look.id).at(-1)!, /error: A Look only agent has no branch/);
+  assert.match(h.said(look.id).at(-1)!, /error: A Code analysis agent has no branch/);
 
   // A reply waits for the owner, then is posted and the thread resolved.
   const reply = h.send(lead.id, call("team_pr_reply", { thread: "PRRT_one", message: "Fixed in abc1234: force is carried into the resume.", resolve: true }));

@@ -80,7 +80,7 @@ test("a template the setup screen would refuse now makes no tab", () => {
   const { store, project, tabId, agent } = setup();
   agent("Only", "look");
   // A team needs an editing member: refused when saved.
-  assert.throws(() => runCommand(store, { action: "saveTemplate", tabId, name: "Lookers" }), /must edit its folder/);
+  assert.throws(() => runCommand(store, { action: "saveTemplate", tabId, name: "Lookers" }), /must have Code edit/);
   assert.throws(() => runCommand(store, { action: "saveTemplate", tabId, name: "Bad steps", steps: [{ name: "X", files: ["../up.md"] }] }), /not a path inside/);
   const before = store.tabs(project.id).length;
   // A project without files takes no template, and keeps no empty tab.

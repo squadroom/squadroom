@@ -36,11 +36,10 @@ test("the Console's agent kinds carry the one pinned client version", () => {
   assert.equal(AGENT_KINDS.find((k) => k.kind === "codex")!.version, CLIENT_VERSIONS.codex);
 });
 
-test("every agent kind is offered, and the ACP kinds at Look only with their pinned clients", () => {
+test("every agent kind is offered, and the ACP kinds with their pinned clients", () => {
   for (const kind of AGENT_KINDS) assert.equal(kind.offered, true, kind.kind);
   for (const [kind, client] of [["opencode", "opencode"], ["gemini-cli", "gemini"], ["grok-build", "grok"], ["kimi-code", "kimi"]] as const) {
     const k = AGENT_KINDS.find((x) => x.kind === kind)!;
-    assert.deepEqual(k.levels, ["look"], kind);
     assert.equal(k.version, ACP_CLIENTS[client].version, kind);
   }
 });

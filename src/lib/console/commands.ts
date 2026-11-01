@@ -434,7 +434,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       const agent = store.agent(id(input.agentId, "Agent"));
       if (!agent || agent.state !== "ready") throw new CommandError("That agent is not ready.");
       if (store.project(agent.projectId)?.source !== "github") throw new CommandError("Only a GitHub project's agents push branches.");
-      if (agent.permission !== "edit") throw new CommandError("A Look only agent has no branch to push.");
+      if (agent.permission !== "edit") throw new CommandError("A Code analysis agent has no branch to push.");
       if (store.openTurns().some((t) => t.agentId === agent.id && t.status !== "queued"))
         throw new CommandError("This agent is working. Push after its turn ends.");
       return { job: store.queuePush(agent.id, { by: "owner" }) };
@@ -445,7 +445,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       const agent = store.agent(id(input.agentId, "Agent"));
       if (!agent || agent.state !== "ready") throw new CommandError("That agent is not ready.");
       if (store.project(agent.projectId)?.source !== "github") throw new CommandError("Only a GitHub project's agents open pull requests.");
-      if (agent.permission !== "edit") throw new CommandError("A Look only agent has no branch to push.");
+      if (agent.permission !== "edit") throw new CommandError("A Code analysis agent has no branch to push.");
       return { turnId: store.queueTurn(agent.id, OPEN_PR_PROMPT, null, { pushApproved: true }).id };
     }
     case "archive":
@@ -482,18 +482,15 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
         if (!model.efforts.includes(input.effort as ConsoleEffort)) throw new CommandError(`${model.label} does not offer that thinking level.`);
         effort = input.effort as ConsoleEffort;
       }
-      if (input.permission !== "look" && input.permission !== "edit") throw new CommandError("Choose Look only or Edit in its folder.");
+      if (input.permission !== "look" && input.permission !== "edit") throw new CommandError("Choose Code edit or Code analysis.");
       const tab = store.tab(id(input.tabId, "Tab"));
       if (!tab) throw new CommandError("That tab does not exist.");
-      // "No project files" means agents that only talk: Look only.
+      // "No project files" means agents that only talk: Code analysis.
       if (store.project(tab.projectId)?.source === "none" && input.permission !== "look")
-        throw new CommandError("A project without files has Look only agents.");
+        throw new CommandError("A project without files has Code analysis agents only.");
       if (input.askFirst === true && kind.kind !== "claude-code") throw new CommandError(ASK_FIRST_CLAUDE_ONLY);
       const stepProblems = store.tabSteps(tab.id) ? stepTabProblems([{ name: "This agent", kind: kind.kind, model: model.id, permission: String(input.permission) }]) : [];
       if (stepProblems.length) throw new CommandError(stepProblems.join(" "));
-      // An ACP kind starts at Look only.
-      if (!kind.levels.includes(input.permission as Permission))
-        throw new CommandError(`${kind.label} is qualified for Look only so far: Edit in its folder follows its sandbox tests.`);
       return {
         agent: store.createAgent({
           tabId: tab.id,

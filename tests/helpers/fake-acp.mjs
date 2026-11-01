@@ -17,7 +17,7 @@
 //   ask        asks to run a command, says the answer
 //   ask2       asks two things at once, says both answers
 //   askhang    asks, then waits; a cancel must answer the ask "cancelled"
-//   edit P     asks to edit P, says the answer
+//   edit P     asks to edit P, says the answer; writes P when allowed
 //   refuse     answers the prompt with an error, having said nothing
 //   error      says something, then answers with an error
 // Setup: { models: null | {current, available}, setModelFails, loadSession,
@@ -220,6 +220,8 @@ async function prompt(id, params) {
       for (const a of answers) {
         const r = await a;
         got.push(r.outcome.outcome === "selected" ? r.outcome.optionId : r.outcome.outcome);
+        // An agent writes the file itself, in its sandbox (no client fs).
+        if (word === "edit" && (got[0] === "yes" || got[0] === "always")) fs.writeFileSync(rest[0], "edited\n");
         if (word === "ask2" && got.length === 1) {
           fs.writeFileSync("parallel-resumed", "");
           for (let i = 0; i < 8; i++) say(sessionId, ` working ${i}`);

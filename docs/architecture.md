@@ -48,7 +48,7 @@ sign-in's state. Events are redacted before they are written.
   own group, not in `staff`), which cannot read your home folder.
 - **One clone each.** Each agent works in
   `/Users/agent/work/<project>/<agent>`, a Git clone on its own
-  `console/<id>-<name>` branch (a Look only agent sees the base branch). The
+  `console/<id>-<name>` branch (a Code analysis agent sees the base branch). The
   worker commits each turn as `agent` with hooks off.
 - **Clients.** Claude Code (one process per window, `--setting-sources ""`
   and the Console's own settings: its sandbox on, reads outside the folder
@@ -58,7 +58,7 @@ sign-in's state. Events are redacted before they are written.
   profile: writes only in its clone and temporary folder, no network except
   the Console's loopback port unless the project allows it).
 - **Permissions.** The Console answers each permission request itself
-  (writes only inside the agent's own folder, never at Look only; reads
+  (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused) or files it in Needs you (network per host, unknown
   tools, pushes). "Always" rules are the Console's own, never the client's.
 - **Only what ran counts.** Changes and commits come from the folder on

@@ -264,10 +264,10 @@ without any model request.
   the ruleset first.
 - **A new empty folder** for each agent (a local repository on the Mac
   stands in for GitHub, so agents share one history).
-- **No project files**: agents that only talk (Look only).
+- **No project files**: agents that only talk (Code analysis).
 
 Then **+ New agent**: a name, the AI and model, the thinking level, the
-access (**Edit in its folder** or **Look only**) and role instructions. Or
+access (**Code edit** or **Code analysis**) and role instructions. Or
 **+ Coding team** for an Orchestrator with Leads and a Reviewer.
 
 Things to know while using it:
@@ -370,7 +370,7 @@ Set the check to a 5-minute period and a 10-minute grace time. The health
 check answers only on the internal Host `127.0.0.1:<port>`, and returns no
 data.
 
-**Image tools.** Claude Code windows at Edit in its folder can generate and
+**Image tools.** Claude Code windows at Code edit can generate and
 edit images through [Krea](https://www.krea.ai) when the project's **Image
 tools** switch is on (project menu; turning it on needs a fresh
 confirmation) and the Keys page has `KREA_API_KEY` with its cap. Each call is
@@ -396,10 +396,17 @@ macOS sandbox profile. All of them, and the login or key each one uses:
 
 All four are listed under **Add**, **Agent** and in the team setup (Gemini
 CLI, Kimi Code and OpenCode since pull request
-[#9](https://github.com/squadroom/squadroom/pull/9)). Look only means the
-agent can read, run commands you approve and message its team, but not
-change files. Edit in its folder needs its own sandbox breakout tests for
-each kind first.
+[#9](https://github.com/squadroom/squadroom/pull/9)), at either access level:
+
+- **Code edit**: the agent changes files in its own folder, and Squadroom
+  commits them after each turn. The sandbox lets it write only in its own
+  clone and its temporary folder, and a request to change a file anywhere
+  else is refused.
+- **Code analysis**: the agent can read, run commands you approve and
+  message its team, but not change files.
+
+The four ACP kinds have been tested at Code edit with a stand-in agent
+program, not yet with the real clients, so expect rough edges.
 
 OpenCode's models and the key each one uses:
 
@@ -420,7 +427,7 @@ turn stops and its reason tells you to turn Network on.
 
 OpenCode 1.19.5 was tried on a real Mac on 2026-11-01 with DeepSeek V4.1
 Flash, DeepSeek V4 Pro, Kimi K3, GLM-5.3, GLM-5.3-Flash and Qwen 3.8 Max,
-each at Look only with network on. Each one answered, named its model and
+each at Code analysis (then called Look only) with network on. Each one answered, named its model and
 reported its usage. A short turn cost from $0.0013 (GLM-5.3-Flash) to
 $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.

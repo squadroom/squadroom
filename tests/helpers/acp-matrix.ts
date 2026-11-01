@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel, type AgentKind } from "../../src/lib/console/agents.ts";
@@ -35,7 +36,7 @@ export interface AcpVendor {
   /** It reports usage in session/prompt's `_meta.usage` with xAI's meaning
    * (Grok Build). */
   xaiUsage?: boolean;
-  /** Offered in New agent (at Look only) after its live qualification. */
+  /** Offered in New agent and the team setup. */
   offered?: boolean;
   /** A paid kind's key, by its credential name; null for a membership. */
   key: { name: string; value: string; cap: { usd: number; url: string; checkedAt: string } } | null;
@@ -81,27 +82,50 @@ export function acpConformance(v: AcpVendor) {
     }
   }
 
-  test(`${v.label}: qualified at Look only${v.offered ? ", offered at that level" : " and not offered"}; started with its own ACP command`, async (t) => {
+  test(`${v.label}: ${v.offered ? "offered at Code edit and Code analysis" : "not offered"}; started with its own ACP command`, async (t) => {
     const kind = agentKind(v.kind)!;
-    assert.deepEqual([kind.offered, kind.levels, kind.acpArgs], [!!v.offered, ["look"], v.args]);
+    assert.deepEqual([kind.offered, kind.acpArgs], [!!v.offered, v.args]);
     assert.equal(!!model.paid, paid);
     if (v.key) assert.equal(model.paid!.credential, v.key.name);
     const h = await acp(t);
-    // Not offered: New agent refuses it. Offered: at Look only, never Edit.
+    // Not offered: New agent refuses it. Offered: at either level.
     if (v.offered) {
       h.agent("Offered", "look", v.model, v.kind);
-      assert.throws(() => h.agent("Editor2", "edit", v.model, v.kind), /qualified for Look only so far/);
+      h.agent("Editor2", "edit", v.model, v.kind);
     } else assert.throws(() => h.agent("Scout", "look", v.model, v.kind), /Choose an agent/);
-    const editing = h.acpAgent("Editor", v.model, "edit", v.kind);
-    await h.ready(editing.id);
-    const refused = h.send(editing.id, "hello");
-    await h.ended(refused);
-    assert.deepEqual([h.store.turn(refused)!.status, h.store.turn(refused)!.reason], ["failed", `${v.label} is not qualified for this access level yet.`]);
-    assert.deepEqual(h.acpCalls(), []);
     const scout = agent(h);
     await h.ready(scout.id);
     await h.ended(h.send(scout.id, "hello"));
     assert.deepEqual(h.acpCalls().find((c) => c.method === "initialize")!.argv, v.args);
+  });
+
+  test(`${v.label}: at Code edit, sandboxed for edit; an edit in its folder is allowed and committed, one outside it refused`, async (t) => {
+    const h = await acp(t);
+    const editor = h.acpAgent("Editor", v.model, "edit", v.kind);
+    await h.ready(editor.id);
+    const folder = h.store.agent(editor.id)!.folder;
+    const turn = h.send(editor.id, `edit ${join(folder, "notes.txt")}`);
+    await h.ended(turn);
+    assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+    assert.match(said(h, editor.id), /decision: yes/);
+    assert.match(h.log(), /^sandbox --sandbox edit$/m);
+    await h.until(() => !!h.store.turn(turn)!.commitAfter, "turn committed");
+    assert.notEqual(h.store.turn(turn)!.commitAfter, h.store.turn(turn)!.commitBefore);
+    assert.equal(execFileSync("git", ["-C", folder, "show", "HEAD:notes.txt"], { encoding: "utf8" }), "edited\n");
+    // Outside its folder: refused without asking the owner, nothing written.
+    const outside = join(h.root, "outside.txt");
+    const out = h.send(editor.id, `edit ${outside}`);
+    await h.ended(out);
+    assert.match(said(h, editor.id), /decision: no/);
+    assert.equal(existsSync(outside), false);
+    // At Code analysis, even its own folder is refused.
+    const scout = agent(h);
+    await h.ready(scout.id);
+    const own = join(h.store.agent(scout.id)!.folder, "look.txt");
+    const look = h.send(scout.id, `edit ${own}`);
+    await h.ended(look);
+    assert.match(said(h, scout.id), /decision: no/);
+    assert.equal(existsSync(own), false);
   });
 
   test(`${v.label}: a turn end to end, sandboxed at Look only, its model confirmed, only its own key crossing`, async (t) => {

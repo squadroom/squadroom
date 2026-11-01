@@ -244,7 +244,7 @@ export const TEAM_NOTE = [
   "- team_ask(to, message) to ask for something (a review, an answer). It never waits: end your turn, and the answer arrives as your next message;",
   "- team_reply(correlation_id, message) to answer an ask you were given; otherwise your final message answers it;",
   "- team_report(message) to put a blocker, a question or a decision for the owner in their Needs you tray. It does not wait: carry on, or end your turn if you cannot go on without the answer;",
-  "- team_diff(from, path?) to read a teammate's committed changes. You cannot open other agents' folders, so use this (or your own folder, if you are Look only) instead of asking anyone to paste a patch;",
+  "- team_diff(from, path?) to read a teammate's committed changes. You cannot open other agents' folders, so use this (or your own folder, if you are Code analysis) instead of asking anyone to paste a patch;",
   "- team_push(title, body) to ask the owner to push your branch and open its pull request, which may then get a Codex review (GitHub projects);",
   "- team_pr to read your pull request (Codex's findings, every comment in full; team_pr(comment: n) or team_pr(thread: id) for one long item), and team_pr_reply(thread, message, resolve) to answer a finding. team_push also replaces the pull request's title and description with the ones you give. GitHub is reached only through these tools: there is no gh login or token in your sandbox, by design, so do not try gh, curl or the web for it;",
   "- team_pull(from) to bring a teammate's committed work into your branch (team_pull_abort to give up a conflicted merge);",
@@ -459,7 +459,7 @@ export function teamDiffText(
     if (!wanted.length) {
       const listed = diff.files.filter((f) => claimCovers(p, f));
       return listed.length
-        ? `${head}\n\nThe changes${scope} (${listed.join(", ")}) could not be read here; read them with git in your own folder if you are Look only, or ask ${who.name} which parts matter.`
+        ? `${head}\n\nThe changes${scope} (${listed.join(", ")}) could not be read here; read them with git in your own folder if you are Code analysis, or ask ${who.name} which parts matter.`
         : `${head}\n\nNo changes${scope}. Changed files: ${diff.files.join(", ") || "none"}.`;
     }
   }

@@ -211,7 +211,7 @@ export const git = {
       if (reviewerId) {
         const reviewer = this.agent(reviewerId);
         if (!reviewer || reviewer.tabId !== agent.tabId || reviewer.permission !== "look" || reviewer.state === "closed")
-          throw new Error("The reviewer must be a Look only agent open in the same tab.");
+          throw new Error("The reviewer must be a Code analysis agent open in the same tab.");
         reviewedAt = this.reviewedAt(reviewerId, agentId, sha);
         if (reviewedAt === null) throw new Error(`${reviewer.name} has not reviewed this commit yet: it reaches its folder before its next turn.`);
       }

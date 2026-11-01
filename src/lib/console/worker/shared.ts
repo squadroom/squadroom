@@ -97,7 +97,7 @@ export const SYSTEM = (agent: ConsoleAgent, base: { branch: string | null; baseC
     `Your working folder is ${agent.folder}; work only there.`,
     agent.permission === "look"
       ? [
-          "This window is Look only: read, search and explain; do not change files.",
+          "This window is Code analysis: read, search and explain; do not change files.",
           "Your folder is your own copy of the project. When an editing teammate's turn ends, the Console checks out that teammate's latest commit in your folder (a detached HEAD) and keeps each teammate's latest commit at refs/console/team/<its id>; your next prompt says which. Read their work there with git (git log, git show, git diff) or with team_diff.",
         ].join("\n")
       : base.commits

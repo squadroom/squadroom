@@ -624,18 +624,15 @@ export class ConsoleWorker {
       // A team turn that waited (a slot, a push) still keeps to its
       // instruction's wall time.
       if (row.trigger === "team" && row.instructionId && this.instructionOverdue(agent.tabId, this.store.instructionUse(row.instructionId, agent.tabId).startedAt)) continue;
-      // A model or kind no longer offered, an access level the kind is not
-      // qualified for, or the kind is off (Codex without its permission
-      // profile).
+      // A model or kind no longer offered, or the kind is off (Codex
+      // without its permission profile).
       const model = agentModel(agent.kind, agent.model);
       const driver = this.drivers.get(agent.kind);
       const refused = !model
         ? "This agent's model is no longer offered."
         : !driver
           ? "This agent's kind is not available."
-          : !agentKind(agent.kind)?.levels.includes(agent.permission)
-            ? `${driver.label} is not qualified for this access level yet.`
-            : driver.refusal(agent);
+          : driver.refusal(agent);
       if (refused || !model || !driver) {
         this.safe(() => this.store.finishTurn(epoch, row.id, "failed", refused));
         continue;

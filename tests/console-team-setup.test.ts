@@ -56,7 +56,7 @@ test("the setup screen refuses what cannot work and warns past the per-login lim
   };
   assert.deepEqual(errors({ members: [] }), ["Add at least one team member."]);
   assert.deepEqual(errors({ members: [member("Rev", { permission: "look", roleId: "reviewer" })] }), [
-    "At least one member must edit its folder (Look only members cannot write code).",
+    "At least one member must have Code edit (Code analysis members cannot write code).",
   ]);
   assert.deepEqual(errors({ members: [member("Ann"), member("ann")] }), ["ann: two members share that name."]);
   assert.deepEqual(errors({ members: [member("Lead A")] }, { takenNames: ["lead a"], codexOff: false }), ["Lead A: an agent in this tab already has that name."]);
@@ -103,10 +103,10 @@ test("a team made from the setup screen: members as chosen, the goal sent to the
   await h.ready(...agents.map((a) => a.id));
   await h.until(() => h.said(agents[0].id).some((s) => s.startsWith("team_list:")), "goal sent");
   const list = h.said(agents[0].id).find((s) => s.startsWith("team_list:"))!;
-  assert.match(list, /- Orchestrator \(id [a-z0-9]+\) \(you\): Claude Code Opus 5\.5 \(thinking high\), Look only, working; role: Orchestrator/);
-  assert.match(list, /- Front \(id [a-z0-9]+\): Claude Code Sonnet 5 \(thinking low\), edits its folder, idle; role: Designer \(frontend\)/);
-  assert.match(list, /- Tests \(id [a-z0-9]+\): Claude Code Sonnet 5, edits its folder, idle; role: Tester/);
-  assert.match(list, /- Rev \(id [a-z0-9]+\): Claude Code Sonnet 5, Look only, idle; role: Reviewer/);
+  assert.match(list, /- Orchestrator \(id [a-z0-9]+\) \(you\): Claude Code Opus 5\.5 \(thinking high\), Code analysis, working; role: Orchestrator/);
+  assert.match(list, /- Front \(id [a-z0-9]+\): Claude Code Sonnet 5 \(thinking low\), Code edit, idle; role: Designer \(frontend\)/);
+  assert.match(list, /- Tests \(id [a-z0-9]+\): Claude Code Sonnet 5, Code edit, idle; role: Tester/);
+  assert.match(list, /- Rev \(id [a-z0-9]+\): Claude Code Sonnet 5, Code analysis, idle; role: Reviewer/);
   // The Orchestrator started only once its team was set up, goal first.
   await h.ended(early);
   const said = h.said(agents[0].id);

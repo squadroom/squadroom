@@ -65,13 +65,13 @@ export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<Console
     case "edit":
     case "delete":
     case "move":
-      if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+      if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
       if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
       if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p))) return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
       decision = { behavior: "allow", reason: "Files in this agent's own folder." };
       break;
     case "execute":
-      decision = agent.permission === "look" ? ask("A command needs the owner's approval in a Look only window.") : { behavior: "allow", reason: "Commands run in the sandbox." };
+      decision = agent.permission === "look" ? ask("A command needs the owner's approval in a Code analysis window.") : { behavior: "allow", reason: "Commands run in the sandbox." };
       break;
     case "fetch":
       return ask("Network access needs the owner's approval.");

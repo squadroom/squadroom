@@ -263,7 +263,7 @@ function boundaries(
   const input = (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>;
   if (OWN_TOOL.test(tool)) return { behavior: "allow", reason: "A Console tool." };
   if (FILE_WRITE.has(tool)) {
-    if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+    if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
     const path = targetPath(tool, input);
     if (!path) return { behavior: "deny", reason: "The Console could not tell which file this changes." };
     if (!inside(agent.folder, path) || !realInside(agent.folder, path))
@@ -394,7 +394,7 @@ export function decideCodexFiles(
   agent: { folder: string; permission: Permission },
   check: (folder: string, path: string) => boolean = realInside,
 ): Decision {
-  if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+  if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
   if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
   if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p)))
     return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };

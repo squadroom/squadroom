@@ -3,8 +3,7 @@
 //
 // The kinds: Claude Code, Codex and the ACP agents (OpenCode, Gemini CLI,
 // Grok Build, Kimi Code). Every kind is offered in the New agent and team
-// dialogs. An ACP kind runs at Look only: Edit in its folder needs its own
-// sandbox qualification first.
+// dialogs, at Code edit or Code analysis.
 
 import { MODELS, type Provider, type TokenPrices } from "../../config/models.ts";
 import { ACP_CLIENTS, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
@@ -76,10 +75,6 @@ export interface AgentKindInfo {
    * (Codex's ChatGPT login, Kimi Code's membership): no key crosses, and
    * Check connection reports it where the client has a status command. */
   accountLogin?: boolean;
-  /** The access levels it is qualified for: an ACP kind starts at Look
-   * only; Edit in its folder follows the tests that try to break out of
-   * its sandbox. */
-  levels: ("look" | "edit")[];
   /** Offered in the New agent and team dialogs. Every kind is; false
    * would leave a kind to the worker and the tests only. */
   offered: boolean;
@@ -154,7 +149,6 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     binary: consoleClientPath("claude"),
     version: CLIENT_VERSIONS.claude,
     credential: "CLAUDE_CODE_OAUTH_TOKEN",
-    levels: ["look", "edit"],
     offered: true,
     models: [
       // Checked 2026-10-16: the pinned 2.1.282 runs
@@ -178,7 +172,6 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     version: CLIENT_VERSIONS.codex,
     credential: null,
     accountLogin: true,
-    levels: ["look", "edit"],
     offered: true,
     // Bundled by 0.155.1 (GPT-6 Sol is not, so it is not offered here).
     models: [
@@ -208,7 +201,6 @@ AGENT_KINDS.push({
   // Each model names its own API key (`paid.credential`): only the chosen
   // model's key crosses.
   credential: null,
-  levels: ["look"],
   offered: true,
   models: [
     // The model OpenCode is asked to run is the one its session must
@@ -321,7 +313,7 @@ AGENT_KINDS.push({
 
 // Gemini CLI, Grok Build and Kimi Code: each runs through the ACP driver
 // and OpenCode's conformance matrix (tests/console-acp-{gemini,grok,kimi}
-// .test.ts) and is offered at Look only. ACP modes from each client's
+// .test.ts) and is offered at both levels. ACP modes from each client's
 // documentation, 2026-10-21.
 AGENT_KINDS.push(
   {
@@ -331,8 +323,7 @@ AGENT_KINDS.push(
     version: ACP_CLIENTS.gemini.version,
     acpArgs: ["--acp"],
     credential: null,
-    levels: ["look"],
-    // Offered at Look only. Its reported usage is checked offline but not
+      // Its reported usage is checked offline but not
     // yet against Google's bill, so the key's provider-side monthly cap
     // (required before any agent gets it) is the backstop; a turn whose
     // usage is missing or does not add up is charged its full allowance.
@@ -368,10 +359,8 @@ AGENT_KINDS.push(
     // Live check 2026-10-22: its usage is in session/prompt's _meta.usage.
     acpUsage: "xai-meta",
     credential: null,
-    levels: ["look"],
     // Qualified live at Look only on 2026-10-22/23: model, usage, and the
-    // sandbox breakout tests with the real client. Edit in its folder needs
-    // its own qualification.
+    // sandbox breakout tests with the real client.
     offered: true,
     models: [
       {
@@ -402,8 +391,7 @@ AGENT_KINDS.push(
     // user, like Codex's.
     credential: null,
     accountLogin: true,
-    levels: ["look"],
-    // Offered at Look only, on the owner's membership: nothing is metered.
+      // On the owner's membership: nothing is metered.
     offered: true,
     models: [
       // The membership's coding model, as Kimi Code names it; not metered.
