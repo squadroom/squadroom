@@ -227,7 +227,7 @@ export class Repos {
     step: { files: string[]; since: string } | null = null,
   ): Promise<string | null> {
     if (step && project.source !== "none") await this.keepToStep(agent, epoch, step);
-    return this.commit(agent, project, turnId, commitMessage({ request: prompt, summary, agentName: agent.name, agentId: agent.id, turnId }), epoch);
+    return this.commit(agent, project, turnId, commitMessage({ request: prompt, summary, agentName: agent.name, agentId: agent.id, turnId }), epoch, "throw", step?.files);
   }
 
   /**
@@ -307,16 +307,19 @@ export class Repos {
    * never counted as this turn's; in a tab with steps, only those in the
    * step's files (`stepFiles`). */
   async beforeTurn(agent: ConsoleAgent, project: ConsoleProject, turnId: number, epoch: number, stepFiles: string[] | null = null): Promise<{ head: string | null; committed: string | null }> {
-    const head = stepFiles && project.source !== "none" ? await this.head(agent) : null;
-    if (stepFiles && head) await this.keepToStep(agent, epoch, { files: stepFiles, since: head });
+    // In a tab with steps, leftovers are checked from where the last turn
+    // that reached the folder ended, or began if it was cut off before its
+    // commit (a stop or crash mid-turn), not from a HEAD it may have moved.
+    const since = stepFiles && project.source !== "none" ? (this.o.store.stepBaseline(agent.id, turnId) ?? (await this.head(agent))) : null;
+    if (stepFiles && since) await this.keepToStep(agent, epoch, { files: stepFiles, since });
     // An unfinished merge is left for the agent to resolve in this turn.
-    const committed = await this.commit(agent, project, turnId, `Console: changes not committed before turn ${turnId}`, epoch, "skip");
+    const committed = await this.commit(agent, project, turnId, `Console: changes not committed before turn ${turnId}`, epoch, "skip", stepFiles);
     return { head: await this.head(agent), committed };
   }
   /** Changes since `since` outside the step's files are put back, and
    * named in Needs you. */
   private async keepToStep(agent: ConsoleAgent, epoch: number, step: { files: string[]; since: string }) {
-    const back = await this.clone(agent).keepOnly(step.since, (p) => inStep(agent.folder, join(agent.folder, p), step.files));
+    const back = await this.clone(agent).keepOnly(step.since, this.o.store.agentBase(agent.id).branch, (p) => inStep(agent.folder, join(agent.folder, p), step.files));
     if (!back.length) return;
     const named = back.slice(0, 5).map((f) => (this.o.redactor.holdsSecret(f) ? "[a file whose name holds a credential]" : this.o.redactor.text(f)));
     this.o.store.addNotice(
@@ -332,10 +335,12 @@ export class Repos {
     message: string,
     epoch: number,
     unresolved: "skip" | "throw" = "throw",
+    stepFiles: string[] | null = null,
   ): Promise<string | null> {
     if (project.source === "none") return null;
     const clone = this.clone(agent);
-    const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files });
+    const only = stepFiles ? (p: string) => inStep(agent.folder, join(agent.folder, p), stepFiles) : undefined;
+    const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files, only });
     // A finished merge (team_pull) is no longer waiting.
     if (sha && this.o.store.merging(agent.id) && !(await clone.merging())) this.o.store.setMerging(epoch, agent.id, null);
     if (!sha) return null;

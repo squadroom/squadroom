@@ -682,7 +682,7 @@ export class Clone {
     message: string,
     name: string,
     agentId: string,
-    options: { unresolved?: "skip" | "throw"; conflicts?: string[] } = {},
+    options: { unresolved?: "skip" | "throw"; conflicts?: string[]; only?: (path: string) => boolean } = {},
   ): Promise<string | null> {
     // A merge from team_pull is committed only once no conflict marker is
     // left in its conflicted files: every file the pull reported,
@@ -701,32 +701,61 @@ export class Clone {
     // the agent staged there itself is unstaged (the files stay on disk),
     // and files the repository already tracks there are kept, never deleted.
     await this.git(["reset", "--quiet", "--", CLONE_TMP, ".console-uploads"], "Clearing the index");
-    await this.git(["add", "--all", "--", ...EXCLUDE], "Adding the changes");
+    if (options.only && !merging) {
+      // A tab with steps: the index goes back to HEAD and only the paths
+      // the step allows are staged, so nothing else is ever committed.
+      await this.git(["reset", "--quiet"], "Clearing the index");
+      const paths = (await this.changes()).map((c) => c.path).filter(options.only);
+      if (!paths.length && !merging) return null;
+      for (let i = 0; i < paths.length; i += 100) await this.git(["add", "--all", "--", ...paths.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Adding the changes");
+    } else await this.git(["add", "--all", "--", ...EXCLUDE], "Adding the changes");
     await this.git([...author(name, agentId), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
     return this.head();
   }
-  /** A tab with steps: every path changed since `since` (the
-   * turn's first commit) that `allowed` refuses is put back as it was
-   * there, whichever way it was written (a tool that never asked, a
-   * command). Commits the agent made itself since then are first undone
-   * into the working tree, so their changes are checked too. Returns the
-   * paths put back; the rest is committed as usual. */
-  async keepOnly(since: string, allowed: (path: string) => boolean): Promise<string[]> {
-    const head = await this.head();
-    if (head && head !== since) await this.git(["reset", "--quiet", "--soft", since], "Undoing the agent's own commits");
+  /** Every path that differs from HEAD, in the index or on disk (the
+   * excluded folders aside), with its two-letter status. */
+  private async changes(): Promise<{ code: string; path: string }[]> {
     const status = await this.git(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
-    const outside = status.stdout
+    return status.stdout
       .split("\0")
       .filter(Boolean)
-      .map((entry) => entry.slice(3))
-      .filter((path) => !allowed(path));
-    for (let i = 0; i < outside.length; i += 100) {
-      const paths = outside.slice(i, i + 100).map((p) => `:(literal)${p}`);
-      // Added first, so a new file is tracked and removed by the restore.
-      await this.git(["add", "--all", "--", ...paths], "Adding the changes");
-      await this.git(["restore", `--source=${since}`, "--staged", "--worktree", "--", ...paths], "Putting back files outside the step");
+      .map((entry) => ({ code: entry.slice(0, 2), path: entry.slice(3) }));
+  }
+  /** A tab with steps: every path changed since `since` (where
+   * the turn began) that `allowed` refuses is put back as it was there,
+   * whichever way it was written (a tool that never asked, a command).
+   * The agent's own branch (`branch`, the one pushed) is moved back to
+   * `since` and checked out again without touching the files, so commits
+   * the agent made, on it or on a branch it switched to, are checked as
+   * changes too. Putting a file back (a `.gitignore`) can show others, so
+   * the changes are read again until none is outside. Returns the paths
+   * put back; commitTurn with `only` then stages allowed paths alone. */
+  async keepOnly(since: string, branch: string | null, allowed: (path: string) => boolean): Promise<string[]> {
+    if (branch) {
+      await this.git(["update-ref", `refs/heads/${branch}`, since], "Undoing the agent's own commits");
+      await this.git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], "Returning to the agent's branch");
+    } else if ((await this.head()) !== since) await this.git(["reset", "--quiet", "--soft", since], "Undoing the agent's own commits");
+    const back = new Set<string>();
+    for (let round = 0; round < 5; round++) {
+      const outside = (await this.changes()).map((c) => c.path).filter((p) => !allowed(p));
+      if (!outside.length) break;
+      for (let i = 0; i < outside.length; i += 100) await this.putBack(since, outside.slice(i, i + 100));
+      for (const p of outside) back.add(p);
     }
-    return outside;
+    return [...back];
+  }
+  /** Paths as they were in `since`: restored where it has them, removed
+   * (from the index and the disk) where it does not. */
+  private async putBack(since: string, paths: string[]) {
+    const literal = (list: string[]) => list.map((p) => `:(literal)${p}`);
+    const known = new Set((await this.git(["ls-tree", "-r", "-z", "--name-only", since, "--", ...literal(paths)], "Reading the step's start", 16 * 1024 * 1024)).stdout.split("\0").filter(Boolean));
+    const there = paths.filter((p) => known.has(p));
+    const added = paths.filter((p) => !known.has(p));
+    if (there.length) await this.git(["restore", `--source=${since}`, "--staged", "--worktree", "--", ...literal(there)], "Putting back files outside the step");
+    if (added.length) {
+      await this.git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ...literal(added)], "Putting back files outside the step");
+      await this.git(["clean", "-f", "-q", "-x", "--", ...literal(added)], "Putting back files outside the step");
+    }
   }
   /** One commit's summary and patch, for the changes view. */
   async show(sha: string, maxBytes: number): Promise<{ stat: string; patch: string; files: string[] }> {

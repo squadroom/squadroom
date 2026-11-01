@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { runCommand } from "../src/lib/console/commands.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // A tab with steps: any agent kind may edit, on any login, and
@@ -77,4 +78,103 @@ test("a write that never asked: outside the step's files it is put back after th
   await h.ended(next);
   await h.until(() => !!h.store.turn(next)!.commitAfter, "turn committed");
   assert.ok(committed(folder, "notes.md"));
+});
+
+// What an agent can do with Git itself mid-turn (a command): each of these
+// must still leave nothing outside the step on its branch (review #279).
+const git = (folder: string, ...args: string[]) =>
+  execFileSync("git", ["-C", folder, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", ...args], { encoding: "utf8" }).trim();
+const onBranch = (folder: string, branch: string, path: string) => {
+  try {
+    execFileSync("git", ["-C", folder, "cat-file", "-e", `refs/heads/${branch}:${path}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** A turn of the Lead that hangs while `act` changes its folder, then ends
+ * by Stop (so the worker commits it). */
+async function midTurn(h: Awaited<ReturnType<typeof stepped>>, lead: { id: string }, act: (folder: string) => void) {
+  const turn = h.send(lead.id, "hang");
+  await h.started(turn);
+  act(h.store.agent(lead.id)!.folder);
+  runCommand(h.store, { action: "stop", agentId: lead.id });
+  await h.ended(turn);
+  await h.until(() => h.store.settlingAgents().length === 0 && h.store.turn(turn)!.commitAfter !== undefined, "turn settled");
+  await new Promise((r) => setTimeout(r, 300));
+  return turn;
+}
+
+test("an outside commit on its branch, then a switch to another branch: the agent's branch keeps nothing outside the step, and it is back on it", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const branch = h.store.agentBase(lead.id).branch!;
+  await midTurn(h, lead, (folder) => {
+    writeFileSync(join(folder, "brief.md"), "forbidden\n");
+    writeFileSync(join(folder, "notes.md"), "allowed\n");
+    git(folder, "add", "-A");
+    git(folder, "commit", "-q", "-m", "outside");
+    git(folder, "checkout", "-q", "-b", "elsewhere");
+  });
+  const folder = h.store.agent(lead.id)!.folder;
+  assert.equal(git(folder, "symbolic-ref", "--short", "HEAD"), branch);
+  assert.equal(onBranch(folder, branch, "brief.md"), false);
+  assert.equal(onBranch(folder, branch, "notes.md"), true);
+});
+
+test("an outside .gitignore that hides an outside file: neither is committed", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await midTurn(h, lead, (folder) => {
+    writeFileSync(join(folder, ".gitignore"), "secret.txt\n");
+    writeFileSync(join(folder, "secret.txt"), "hidden\n");
+    writeFileSync(join(folder, "notes.md"), "allowed\n");
+  });
+  const folder = h.store.agent(lead.id)!.folder;
+  assert.equal(committed(folder, "secret.txt"), false);
+  assert.equal(committed(folder, ".gitignore"), false);
+  assert.equal(committed(folder, "notes.md"), true);
+});
+
+test("a turn cut off by a worker stop: its outside commit is checked against where that turn began, before the next turn", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const turn = h.send(lead.id, "hang");
+  await h.started(turn);
+  const folder = h.store.agent(lead.id)!.folder;
+  writeFileSync(join(folder, "brief.md"), "forbidden\n");
+  git(folder, "add", "-A");
+  git(folder, "commit", "-q", "-m", "outside");
+  await h.worker.stop();
+  assert.equal(h.store.turn(turn)!.status, "interrupted");
+  const next = h.newWorker();
+  await next.start();
+  const after = h.send(lead.id, "hello");
+  await h.ended(after);
+  assert.equal(committed(folder, "brief.md"), false);
+  assert.equal(existsSync(join(folder, "brief.md")), false);
+});
+
+test("a tracked outside file deleted (and the deletion committed) is put back, and later turns still commit", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  // Already in the folder before the turn: part of where it begins.
+  writeFileSync(join(folder, "other.md"), "approved\n");
+  git(folder, "add", "-A");
+  git(folder, "commit", "-q", "-m", "earlier");
+  await midTurn(h, lead, (f) => {
+    git(f, "rm", "-q", "other.md");
+    git(f, "commit", "-q", "-m", "delete");
+  });
+  assert.equal(committed(folder, "other.md"), true);
+  assert.equal(existsSync(join(folder, "other.md")), true);
+  const next = h.send(lead.id, "write notes.md");
+  await h.ended(next);
+  await h.until(() => !!h.store.turn(next)!.commitAfter, "next turn committed");
+  assert.ok(!h.events(lead.id).some((e) => e.kind === "error"), JSON.stringify(h.events(lead.id).filter((e) => e.kind === "error")));
 });
