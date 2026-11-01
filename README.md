@@ -90,8 +90,8 @@ The pictures use invented demo data; they follow your light or dark setting.
   is the simplest; any equivalent works.
 - **A GitHub OAuth app of your own** for sign-in.
 - **Accounts with the agent providers you want to use**: a Claude
-  subscription or API key for Claude Code, a ChatGPT login for Codex, API
-  keys for the others.
+  subscription or an Anthropic API key for Claude Code, a ChatGPT login or
+  an OpenAI API key for Codex, API keys for the others.
 - **A [Resend](https://resend.com) account** for e-mailed codes and
   notifications. Squadroom signs in without it, but refuses weighty actions
   (including adding keys) until mail is configured.

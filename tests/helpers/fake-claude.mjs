@@ -3,6 +3,7 @@
 // folder, and acts on each prompt's first word:
 //   hello      streams text, runs a tool whose output contains its token
 //   apikey     reports API credentials in its init event
+//   nokey      reports no API credentials (the login) in its init event
 //   wrongmodel reports another model
 //   approve P  asks the Console's permission tool to Write P, says the answer
 //   network    asks the host for network access, says the answer
@@ -63,7 +64,19 @@ const model = arg("--model") === "haiku" ? "claude-haiku-4-5-20251001" : arg("--
 const session = arg("--resume") ?? `sess-${process.pid}`;
 const mcp = JSON.parse(fs.readFileSync(arg("--mcp-config"), "utf8")).mcpServers.console;
 const send = (x) => process.stdout.write(JSON.stringify(x) + "\n");
-const init = (extra = {}) => send({ type: "system", subtype: "init", session_id: session, model, apiKeySource: "none", ...extra });
+// As Claude Code reports it: the API key when one is in its environment.
+const keySource = process.env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : "none";
+const init = (extra = {}) => send({ type: "system", subtype: "init", session_id: session, model, apiKeySource: keySource, ...extra });
+// On an API key, each model's usage too (the window's model and a small
+// Haiku request of the client's own).
+const modelUsage = process.env.ANTHROPIC_API_KEY
+  ? {
+      modelUsage: {
+        [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 1, cacheCreationInputTokens: 0, webSearchRequests: 0, contextWindow: 200000 },
+        ...(model.startsWith("claude-haiku") ? {} : { "claude-haiku-4-5-20251001": { inputTokens: 20, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0 } }),
+      },
+    }
+  : {};
 const result = (text, extra = {}) =>
   send({
     type: "result",
@@ -74,6 +87,7 @@ const result = (text, extra = {}) =>
     num_turns: 1,
     duration_ms: 5,
     usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1, cache_creation_input_tokens: 0 },
+    ...modelUsage,
     ...extra,
   });
 const say = (text) => {
@@ -141,6 +155,11 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   const [word, rest] = [asked.split(" ")[0], asked.split(" ").slice(1).join(" ")];
   if (word === "apikey") {
     init({ apiKeySource: "ANTHROPIC_API_KEY" });
+    say("should not be kept");
+    return result("x");
+  }
+  if (word === "nokey") {
+    init({ apiKeySource: "none" });
     say("should not be kept");
     return result("x");
   }

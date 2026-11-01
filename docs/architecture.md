@@ -52,8 +52,8 @@ sign-in's state. Events are redacted before they are written.
   worker commits each turn as `agent` with hooks off.
 - **Clients.** Claude Code (one process per window, `--setting-sources ""`
   and the Console's own settings: its sandbox on, reads outside the folder
-  blocked), Codex (one App Server per ChatGPT login, one thread per window,
-  each with a permission profile that denies every other agent's folder),
+  blocked), Codex (one App Server per ChatGPT login and one per OpenAI API key,
+  one thread per window, each with a permission profile that denies every other agent's folder),
   and ACP clients (one program per window inside the launcher's sandbox
   profile: writes only in its clone and temporary folder, no network except
   the Console's loopback port unless the project allows it).
@@ -64,7 +64,8 @@ sign-in's state. Events are redacted before they are written.
 - **Only what ran counts.** Changes and commits come from the folder on
   disk; executed commands are shown from the client's own items, never from
   the agent's reply. A client that reports a different model, or an API-key
-  login where a subscription was selected, has its turn discarded.
+  login where a subscription was selected (or the other way round), has
+  its turn discarded.
 
 ## Mailboxes and team tools
 

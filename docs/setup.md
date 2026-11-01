@@ -38,8 +38,9 @@ You need:
   verified there, for e-mailed codes (step 6). Without it Squadroom signs
   in, but refuses weighty actions, adding keys among them.
 - **A GitHub account** (for signing in) and the provider accounts you want
-  agents to use: a Claude subscription for Claude Code, a ChatGPT login for
-  Codex, API keys for the others.
+  agents to use: a Claude subscription or an Anthropic API key for Claude
+  Code, a ChatGPT login or an OpenAI API key for Codex, API keys for the
+  others.
 
 ## 2. Install the code
 
@@ -107,8 +108,17 @@ do not paste it anywhere else.
 sudo -u agent /usr/local/libexec/console-agent spawn /Users/agent /opt/console-clients/bin/codex login --device-auth
 ```
 
-It shows a code to enter at the address it prints. Squadroom refuses to
-run Codex on an API key.
+It shows a code to enter at the address it prints.
+
+Both can also run on an API key instead. Each Claude Code and Codex model
+has a second entry marked "(API key)": Claude Code's use
+`ANTHROPIC_API_KEY` and Codex's use `OPENAI_API_KEY`, from the Keys page
+(step 8). Those models are paid like any other API-key model and count
+toward the tab's spend limit. You can skip the logins above if you only
+want the API-key models. A window never switches between its login and
+a key: if the client reports the other one, the turn stops. Web search is
+off for the API-key models, because it is billed per search and Squadroom
+can't work out its cost from the usage the client reports.
 
 ## 5. An https address
 
@@ -370,10 +380,12 @@ folder and committed with the turn. Models and prices:
 
 Besides Claude Code and Codex, Squadroom drives agents that speak the
 [Agent Client Protocol](https://agentclientprotocol.com), each inside a
-macOS sandbox profile:
+macOS sandbox profile. All of them, and the login or key each one uses:
 
 | Kind | Login | Status |
 |---|---|---|
+| Claude Code | your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`), or `ANTHROPIC_API_KEY` (paid, capped) for its "(API key)" models | Offered |
+| Codex | your ChatGPT login, kept in the agent account, or `OPENAI_API_KEY` (paid, capped) for its "(API key)" models | Offered |
 | Grok Build | `XAI_API_KEY` (paid, capped) | Offered at Look only |
 | Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Built in, not offered yet (its usage reporting is not yet trusted) |
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Built in, not offered yet |

@@ -31,6 +31,11 @@ const send = (x) => process.stdout.write(JSON.stringify(x) + "\n");
 const log = (x) => fs.appendFileSync("codex-calls.jsonl", JSON.stringify({ pid: process.pid, ...x }) + "\n");
 // Setup `ignoreTerm`: the server survives TERM (only KILL ends it).
 if (setup.ignoreTerm) process.on("SIGTERM", () => {});
+// A server keeping its login in memory only (an API-key server) starts with
+// none; it records how it was started, and which keys its environment has.
+const ephemeral = process.argv.includes('cli_auth_credentials_store="ephemeral"');
+let account = ephemeral ? null : (setup.account ?? "chatgpt");
+fs.appendFileSync("codex-starts.jsonl", JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), keys: Object.keys(process.env).filter((k) => k.endsWith("_API_KEY")) }) + "\n");
 const threads = new Map(); // id -> { cwd, model, config }
 /** The prompt without the Console's notes before it (as fake-claude). */
 const body = (text) => text.replace(/^Your folder now has your teammates' [\s\S]*?\n\n/, "").replace(/^These teammates' commits could not be checked out[\s\S]*?\n\n/, "");
@@ -210,7 +215,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     case "initialized":
       return;
     case "account/read":
-      return reply({ account: { type: setup.account ?? "chatgpt" } });
+      return reply({ account: account ? { type: account } : null });
+    case "account/login/start":
+      // Setup `loginAs`: what the login turns out to be.
+      account = setup.loginAs ?? q.params.type;
+      return reply({ type: q.params.type });
     case "thread/start": {
       const id = `thread-${process.pid}-${nextThread++}`;
       threads.set(id, q.params);

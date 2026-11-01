@@ -174,8 +174,14 @@ test("connection panels: versions, logins, and which keys are present", () => {
     new Map(),
   );
   const claude = panels.find((p) => p.kind === "claude-code")!;
-  assert.deepEqual(claude.credentials, [{ name: "CLAUDE_CODE_OAUTH_TOKEN", global: true, projects: 0, needsCap: false }]);
-  assert.equal(panels.find((p) => p.kind === "codex")!.accountLogin, true);
+  // Its login token, and the Anthropic key its API-key models use.
+  assert.deepEqual(claude.credentials, [
+    { name: "CLAUDE_CODE_OAUTH_TOKEN", global: true, projects: 0, needsCap: false },
+    { name: "ANTHROPIC_API_KEY", global: false, projects: 0, needsCap: false },
+  ]);
+  const codex = panels.find((p) => p.kind === "codex")!;
+  assert.equal(codex.accountLogin, true);
+  assert.deepEqual(codex.credentials, [{ name: "OPENAI_API_KEY", global: false, projects: 1, needsCap: true }]);
   const open = panels.find((p) => p.kind === "opencode")!;
   assert.deepEqual(open.credentials.find((c) => c.name === "OPENAI_API_KEY"), { name: "OPENAI_API_KEY", global: false, projects: 1, needsCap: true });
   assert.equal(open.pinned, "unpinned");

@@ -46,7 +46,7 @@ function packageCacheEnv(dir: string): Record<string, string> {
 const DOCUMENTS_ONLY_DENY = ["Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"];
 
 /** `--settings` for one window: flags only, with `--setting-sources ""`. */
-export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false) {
+export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false, apiKey = false) {
   // Unreadable: the shared folder and each client's login, Kimi Code's
   // membership login too (only its own client reads it).
   const hidden = [paths.shared, `${paths.agentHome}/.codex`, `${paths.agentHome}/.claude`, `${paths.agentHome}/.kimi-code`];
@@ -69,6 +69,9 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
         ...hidden.map((p) => `Read(/${p}/**)`),
         ...(permission === "look" ? ["Edit", "Write", "NotebookEdit"] : []),
         ...(documentsOnly ? DOCUMENTS_ONLY_DENY : []),
+        // On an API key a web search is billed per search, which the
+        // Console cannot price from usage: not offered.
+        ...(apiKey && !documentsOnly ? ["WebSearch"] : []),
       ],
     },
     // The launcher passes no other variables, so the client's own switches
@@ -344,6 +347,7 @@ export function codexThreadConfig(
   paths: ConsolePaths,
   mcp: { url: string; token: string },
   tmp: string,
+  apiKey = false,
 ) {
   const denied = [
     ...otherFolders.filter((f) => f && f !== agent.folder),
@@ -366,6 +370,9 @@ export function codexThreadConfig(
     // Console's own server gets a day instead of Codex's 60-second default.
     mcp_servers: { console: { url: mcp.url, http_headers: { Authorization: `Bearer ${mcp.token}` }, tool_timeout_sec: 86_400 } },
     shell_environment_policy: { set: { TMPDIR: `${tmp}/`, ...(agent.permission === "edit" ? packageCacheEnv(`${tmp}/cache`) : {}) } },
+    // On an API key a web search is billed per search, which the Console
+    // cannot price from usage: off.
+    ...(apiKey ? { web_search: "disabled" } : {}),
   };
 }
 
