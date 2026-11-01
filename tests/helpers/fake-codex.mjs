@@ -38,7 +38,7 @@ let account = ephemeral ? null : (setup.account ?? "chatgpt");
 fs.appendFileSync("codex-starts.jsonl", JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), keys: Object.keys(process.env).filter((k) => k.endsWith("_API_KEY")) }) + "\n");
 const threads = new Map(); // id -> { cwd, model, config }
 /** The prompt without the Console's notes before it (as fake-claude). */
-const body = (text) => text.replace(/^Your folder now has your teammates' [\s\S]*?\n\n/, "").replace(/^These teammates' commits could not be checked out[\s\S]*?\n\n/, "");
+const body = (text) => text.replace(/^Step \d+ of \d+: [\s\S]*?\n\n/, "").replace(/^Your folder now has your teammates' [\s\S]*?\n\n/, "").replace(/^These teammates' commits could not be checked out[\s\S]*?\n\n/, "");
 const turns = new Map(); // threadId -> { id, hang }
 const pending = new Map(); // server request id -> resolve
 let nextRequest = 1000;

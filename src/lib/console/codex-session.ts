@@ -303,7 +303,7 @@ class CodexSession implements AgentSession {
       case "item/fileChange/requestApproval": {
         if (!this.turn) return server.respond(id, { decision: "decline" });
         const paths = this.items.get(String(params.itemId ?? "")) ?? [];
-        const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, ctx.agent, this.driver.host.realInside));
+        const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, { ...ctx.agent, stepFiles: ctx.stepFiles?.() }, this.driver.host.realInside));
         return server.respond(id, { decision: answer.allow ? "accept" : "decline" });
       }
       case "item/tool/requestUserInput": {

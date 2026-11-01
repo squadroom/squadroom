@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { projectView, templatesView } from "../src/lib/console/views.ts";
-import { claudeSettings, decide } from "../src/lib/console/permissions.ts";
-import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, stepNote, stepTabProblems } from "../src/lib/console/templates.ts";
+import { claudeSettings, decide, decideCodexFiles } from "../src/lib/console/permissions.ts";
+import { decideAcp } from "../src/lib/console/acp-session.ts";
+import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, stepNote } from "../src/lib/console/templates.ts";
 
 // The Document review template: a
 // document sequence as a tab with steps, built from templates
@@ -53,10 +54,17 @@ test("a tab with steps runs document turns: no commands, web access or helpers",
   }
 });
 
-test("only Claude Code edits, and only on a subscription login, in a tab with steps", () => {
-  assert.deepEqual(stepTabProblems([{ name: "L", kind: "claude-code", model: "claude-sonnet-5", permission: "edit" }, { name: "R", kind: "codex", model: "gpt-5.6-sol", permission: "look" }]), []);
-  assert.match(stepTabProblems([{ name: "C", kind: "codex", model: "gpt-5.6-sol", permission: "edit" }])[0], /only Claude Code agents edit/);
-  assert.match(stepTabProblems([{ name: "P", kind: "opencode", model: "openai/gpt-5.6-luna", permission: "look" }])[0], /subscription logins only/);
+test("Codex's and an ACP agent's writes keep to the step's files, with Claude's message", () => {
+  const stepFiles = DOCUMENT_REVIEW.steps[3].files;
+  const always = () => true;
+  assert.equal(decideCodexFiles(["/work/lead/adrs/001-storage.md", "/work/lead/parking-lot.md"], { ...lead, stepFiles }, always).behavior, "allow");
+  assert.match(decideCodexFiles(["/work/lead/architecture.md", "/work/lead/brief.md"], { ...lead, stepFiles }, always).reason, /^This step may change only: architecture\.md, adrs\/\*\.md, parking-lot\.md\.$/);
+  const acp = (path: string) => decideAcp({ kind: "edit", locations: [{ path }] }, { ...lead, stepFiles }, always);
+  assert.equal(acp("/work/lead/architecture.md").behavior, "allow");
+  assert.match(acp("/work/lead/brief.md").reason, /^This step may change only: /);
+  // Without steps, any file in its folder, as before.
+  assert.equal(decideCodexFiles(["/work/lead/brief.md"], lead, always).behavior, "allow");
+  assert.equal(decideAcp({ kind: "edit", locations: [{ path: "/work/lead/brief.md" }] }, lead, always).behavior, "allow");
 });
 
 test("each turn opens with the step and what may change", () => {
@@ -77,8 +85,6 @@ test("a Document review tab: its lead and reviewer, routes both ways, and steps 
   assert.deepEqual(store.routes(tab.id).map((r) => [r.fromName, r.toName, r.phrase]), [["Lead", "Reviewer", "READY FOR REVIEW"], ["Reviewer", "Lead", "FINDINGS FOR THE LEAD"]]);
   assert.equal(projectView(store, project.id)!.tabs.find((t) => t.id === tab.id)!.steps!.index, 0);
 
-  // Only Claude Code edits here, and no paid model joins.
-  assert.throws(() => runCommand(store, { action: "createAgent", tabId: tab.id, name: "X", kind: "codex", model: "gpt-5.6-sol", permission: "edit" }), /only Claude Code agents edit/);
 
   const [leadAgent, reviewer] = agents;
   for (const a of agents) store.setAgentFolder(epoch, a.id, `/work/${a.name}`);
@@ -110,4 +116,7 @@ test("a Document review tab: its lead and reviewer, routes both ways, and steps 
   // Back to an earlier step at any time.
   runCommand(store, { action: "setStep", tabId: tab.id, step: 0 });
   assert.equal(store.tabSteps(tab.id)!.index, 0);
+  // Any kind edits here, on any login.
+  runCommand(store, { action: "createAgent", tabId: tab.id, name: "X", kind: "codex", model: "gpt-5.6-sol", permission: "edit" });
+  runCommand(store, { action: "createAgent", tabId: tab.id, name: "Y", kind: "opencode", model: "openai/gpt-5.6-luna", permission: "edit" });
 });

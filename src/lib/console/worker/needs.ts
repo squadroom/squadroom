@@ -10,6 +10,7 @@ import { IMAGE_TOOL_NAMES, IMAGE_TOOLS, ImageError } from "../image-tools.ts";
 import type { ConsoleAgent } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import { REPLY_MAX, type OwnerAnswer, type Runtime } from "./shared.ts";
+import { currentStepFiles } from "../templates.ts";
 
 // Permissions and the owner (Needs you), and the loopback MCP backend that
 // serves the team tools and Claude Code's permission prompt tool.
@@ -209,7 +210,7 @@ export const needs = {
         const tool = typeof a.tool_name === "string" ? a.tool_name : "";
         // A tab with steps: writes only to the current step's files.
         const stepped = this.store.tabSteps(rt.agent.tabId);
-        const agent = { ...rt.agent, stepFiles: stepped ? (stepped.steps[stepped.index]?.files ?? []) : null };
+        const agent = { ...rt.agent, stepFiles: currentStepFiles(stepped) };
         const answer = await this.permit(rt, tool, a.input, this.claimed(rt.agent, tool, a.input) ?? decide(tool, a.input, agent, this.options.realInside ?? realInside));
         return text(answer.allow ? { behavior: "allow", updatedInput: a.input ?? {} } : { behavior: "deny", message: answer.reason });
       },

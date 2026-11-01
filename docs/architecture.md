@@ -59,8 +59,11 @@ sign-in's state. Events are redacted before they are written.
   the Console's loopback port unless the project allows it).
 - **Permissions.** The Console answers each permission request itself
   (writes only inside the agent's own folder, never at Code analysis; reads
-  outside it refused) or files it in Needs you (network per host, unknown
-  tools, pushes). "Always" rules are the Console's own, never the client's.
+  outside it refused; in a tab with steps, only the current step's files)
+  or files it in Needs you (network per host, unknown tools, pushes).
+  "Always" rules are the Console's own, never the client's. In a tab with
+  steps the worker also puts back, before each commit, anything the turn
+  changed outside the step's files, whichever way it was written.
 - **Only what ran counts.** Changes and commits come from the folder on
   disk; executed commands are shown from the client's own items, never from
   the agent's reply. A client that reports a different model, or an API-key

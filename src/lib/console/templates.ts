@@ -1,4 +1,3 @@
-import { agentModel, type AgentKind } from "./agents.ts";
 import type { ConsoleAgent } from "./types.ts";
 import type { TeamSetup } from "./team-setup.ts";
 
@@ -154,13 +153,7 @@ export const DOCUMENT_REVIEW: TabTemplate = {
   ],
 };
 
-/** Who may work in a tab with steps: an editing agent is Claude Code (its
- * permission check is where a step's files are enforced), and every agent
- * runs on a subscription login (paid API-key models are not supported in
- * such a tab yet). Problems as plain sentences. */
-export function stepTabProblems(agents: { name: string; kind: AgentKind; model: string; permission: string }[]): string[] {
-  return agents.flatMap((a) => [
-    ...(a.permission === "edit" && a.kind !== "claude-code" ? [`${a.name}: in a tab with steps, only Claude Code agents edit (that is where a step's files are enforced).`] : []),
-    ...(agentModel(a.kind, a.model)?.paid ? [`${a.name}: a tab with steps runs on subscription logins only for now.`] : []),
-  ]);
-}
+/** The files the current step may change; null for a tab without steps.
+ * Any agent kind, on any login, works in a tab with steps. */
+export const currentStepFiles = (stepped: { steps: TemplateStep[]; index: number } | null): string[] | null =>
+  stepped ? (stepped.steps[stepped.index]?.files ?? []) : null;

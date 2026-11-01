@@ -115,7 +115,7 @@ async function teamTool(name, args) {
 }
 /** A team prompt's first message is the command (with its sender). */
 function command(content) {
-  let text = content.replace(/^The owner uploaded [\s\S]*?\n\n/, "");
+  let text = content.replace(/^Step \d+ of \d+: [\s\S]*?\n\n/, "").replace(/^The owner uploaded [\s\S]*?\n\n/, "");
   text = text.replace(/^Your folder now has your teammates' [\s\S]*?\n\n/, "");
   text = text.replace(/^These teammates' commits could not be checked out[\s\S]*?\n\n/, "");
   if (/^Your previous attempt was interrupted after/.test(text)) return { text: "resumed", from: null, cid: null };

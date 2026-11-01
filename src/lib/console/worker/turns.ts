@@ -9,7 +9,7 @@ import { MESSAGE_MAX, resendNote } from "../team.ts";
 import type { ConsoleAgent, TurnStatus, TurnUsage } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import type { ActiveTurn, Credential, Runtime } from "./shared.ts";
-import { stepNote } from "../templates.ts";
+import { currentStepFiles, stepNote } from "../templates.ts";
 
 // A turn from start to end: its credential, its prompt, its limits and stops,
 // and its end (recorded, charged and committed).
@@ -76,7 +76,8 @@ export const turns = {
     if (project && project.source !== "none") {
       // Leftover changes are committed on their own first; a folder that
       // cannot be committed stops the turn, visibly.
-      const { head, committed } = await this.repos.beforeTurn(rt.agent, project, t.id, this.epoch!).catch((error: unknown) => {
+      const stepFiles = rt.agent.permission === "edit" ? currentStepFiles(this.store.tabSteps(rt.agent.tabId)) : null;
+      const { head, committed } = await this.repos.beforeTurn(rt.agent, project, t.id, this.epoch!, stepFiles).catch((error: unknown) => {
         throw new Error(`The agent's folder could not be committed before this turn: ${message(error)}`);
       });
       this.safe(() => this.store.setTurnCommit(this.epoch!, t.id, "before", head));
@@ -244,8 +245,12 @@ export const turns = {
     if (!settles) return;
     // A merge from team_pull that this commit may complete.
     const merge = this.store.merging(agent.id);
+    // A tab with steps: only the step's files are kept, for any
+    // agent kind (a tool that never asked, or a command, wrote the rest).
+    const files = agent.permission === "edit" ? currentStepFiles(this.store.tabSteps(agent.tabId)) : null;
+    const since = this.store.turn(t.id)?.commitBefore ?? null;
     rt.busy = this.repos
-      .afterTurn(agent, project, t.id, t.prompt, epoch, t.lastText && t.lastText.slice(0, MESSAGE_MAX))
+      .afterTurn(agent, project, t.id, t.prompt, epoch, t.lastText && t.lastText.slice(0, MESSAGE_MAX), files && since ? { files, since } : null)
       .then(async (sha) => {
         this.safe(() => this.store.setTurnCommit(epoch, t.id, "after", sha));
         if (sha && merge && !this.store.merging(agent.id)) this.mergeSources.set(sha, merge.from);

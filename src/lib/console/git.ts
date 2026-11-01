@@ -705,6 +705,29 @@ export class Clone {
     await this.git([...author(name, agentId), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
     return this.head();
   }
+  /** A tab with steps: every path changed since `since` (the
+   * turn's first commit) that `allowed` refuses is put back as it was
+   * there, whichever way it was written (a tool that never asked, a
+   * command). Commits the agent made itself since then are first undone
+   * into the working tree, so their changes are checked too. Returns the
+   * paths put back; the rest is committed as usual. */
+  async keepOnly(since: string, allowed: (path: string) => boolean): Promise<string[]> {
+    const head = await this.head();
+    if (head && head !== since) await this.git(["reset", "--quiet", "--soft", since], "Undoing the agent's own commits");
+    const status = await this.git(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
+    const outside = status.stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((entry) => entry.slice(3))
+      .filter((path) => !allowed(path));
+    for (let i = 0; i < outside.length; i += 100) {
+      const paths = outside.slice(i, i + 100).map((p) => `:(literal)${p}`);
+      // Added first, so a new file is tracked and removed by the restore.
+      await this.git(["add", "--all", "--", ...paths], "Adding the changes");
+      await this.git(["restore", `--source=${since}`, "--staged", "--worktree", "--", ...paths], "Putting back files outside the step");
+    }
+    return outside;
+  }
   /** One commit's summary and patch, for the changes view. */
   async show(sha: string, maxBytes: number): Promise<{ stat: string; patch: string; files: string[] }> {
     const stat = await this.git(["show", "--no-color", "--stat", "--format=", sha], "Reading the commit", 64 * 1024);

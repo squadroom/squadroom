@@ -3,7 +3,7 @@ import { Redactor } from "./redact.ts";
 import { parseRepo, validBranch } from "./git.ts";
 import { agentFilePath } from "./files.ts";
 import { checkTeamSetup, defaultTeamSetup } from "./team-setup.ts";
-import { TEMPLATE_NAME_MAX, checkRoutes, checkSteps, stepTabProblems, templateFromTab, type TabTemplate, type TemplateStep } from "./templates.ts";
+import { TEMPLATE_NAME_MAX, checkRoutes, checkSteps, templateFromTab, type TabTemplate, type TemplateStep } from "./templates.ts";
 import { BUILT_IN_ROLES, checkRole, customRoleId, type RoleDef } from "./roles.ts";
 import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
@@ -199,8 +199,6 @@ function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes
   const roles = rolesView(store);
   const checked = checkTeamSetup(setup ?? defaultTeamSetup(codexOff, taken, roles), { takenNames: taken, codexOff, roles, exactPrompts });
   if (!checked.ok) throw new CommandError(checked.errors.join(" "));
-  const stepProblems = store.tabSteps(tab.id) ? stepTabProblems(checked.agents) : [];
-  if (stepProblems.length) throw new CommandError(stepProblems.join(" "));
   const agents = checked.agents.map((a) => store.createAgent({ tabId: tab.id, ...a }));
   // The goal is the Orchestrator's (a pair: the Lead's) first owner
   // message, queued now (so anything sent later waits behind it); no
@@ -218,7 +216,7 @@ function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes
 function checkTemplate(store: ConsoleStore, t: TabTemplate) {
   const checked = checkTeamSetup(t.setup, { takenNames: [], codexOff: store.flag(CODEX_DISABLED) !== null, roles: rolesView(store), exactPrompts: true });
   const errors = checked.ok
-    ? [...checkRoutes(t.routes, t.setup.members.map((m) => m.name)), ...(t.steps.length ? stepTabProblems(checked.agents) : [])]
+    ? checkRoutes(t.routes, t.setup.members.map((m) => m.name))
     : checked.errors;
   if (errors.length) throw new CommandError(errors.join(" "));
 }
@@ -489,8 +487,6 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (store.project(tab.projectId)?.source === "none" && input.permission !== "look")
         throw new CommandError("A project without files has Code analysis agents only.");
       if (input.askFirst === true && kind.kind !== "claude-code") throw new CommandError(ASK_FIRST_CLAUDE_ONLY);
-      const stepProblems = store.tabSteps(tab.id) ? stepTabProblems([{ name: "This agent", kind: kind.kind, model: model.id, permission: String(input.permission) }]) : [];
-      if (stepProblems.length) throw new CommandError(stepProblems.join(" "));
       return {
         agent: store.createAgent({
           tabId: tab.id,

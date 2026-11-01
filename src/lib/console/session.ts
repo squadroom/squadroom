@@ -130,6 +130,9 @@ export interface SessionContext {
   system(): string;
   /** Its tab has steps: document turns, no commands. */
   documentsOnly?: boolean;
+  /** The current step's files, read when a write is decided; null
+   * without steps. */
+  stepFiles?(): string[] | null;
 }
 
 /** One agent window's client session. */

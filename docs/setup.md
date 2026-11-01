@@ -284,6 +284,13 @@ Things to know while using it:
   pull request, for repositories that use Codex's GitHub reviewer.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
+- **Tabs with steps** (from a template such as **Document review**): each
+  step names the files the agents may change during it. Any AI may edit
+  there, on a subscription or an API key. A request to change another file
+  is refused, and anything an agent changes outside the step's files
+  without asking (a tool that writes directly, a command) is put back
+  after its turn and listed in Needs you. Claude Code runs no commands in
+  such a tab; Codex and the ACP agents still can.
 - **Clean up** (or `npm run console:cleanup`) lists folders no open agent
   uses, with commits never pushed marked; nothing is removed until you
   confirm.

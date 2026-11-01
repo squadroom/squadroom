@@ -172,6 +172,13 @@ export function inStep(folder: string, path: string, files: string[]): boolean {
   }
 }
 
+/** A tab with steps: a write to any path outside the
+ * current step's files is refused, the same for every agent kind. */
+export function outsideStep(folder: string, paths: string[], stepFiles: string[] | null | undefined): Decision | null {
+  if (!stepFiles || paths.every((p) => inStep(folder, p, stepFiles))) return null;
+  return { behavior: "deny", reason: `This step may change only: ${stepFiles.join(", ")}.` };
+}
+
 /**
  * Decide one permission prompt. `realInside` confirms, on disk, that the
  * path's nearest existing folder (or the file itself) resolves inside the
@@ -269,8 +276,8 @@ function boundaries(
     if (!inside(agent.folder, path) || !realInside(agent.folder, path))
       return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
     // A tab with steps: only the current step's files.
-    if (agent.stepFiles && !inStep(agent.folder, path, agent.stepFiles))
-      return { behavior: "deny", reason: `This step may change only: ${agent.stepFiles.join(", ")}.` };
+    const step = outsideStep(agent.folder, [path], agent.stepFiles);
+    if (step) return step;
     return { behavior: "allow", reason: "A file in this agent's own folder." };
   }
   if (FILE_READ.has(tool)) {
@@ -391,12 +398,12 @@ export function decideCodexCommand(params: Record<string, unknown>): Decision {
  * allowed only for an editing window and only inside its own folder. */
 export function decideCodexFiles(
   paths: string[],
-  agent: { folder: string; permission: Permission },
+  agent: { folder: string; permission: Permission; stepFiles?: string[] | null },
   check: (folder: string, path: string) => boolean = realInside,
 ): Decision {
   if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
   if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
   if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p)))
     return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
-  return { behavior: "allow", reason: "Files in this agent's own folder." };
+  return outsideStep(agent.folder, paths, agent.stepFiles) ?? { behavior: "allow", reason: "Files in this agent's own folder." };
 }

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { agentKind } from "./agents.ts";
 import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "./acp.ts";
 import type { SandboxSpec } from "./launcher.ts";
-import { inside, realInside, type Decision } from "./permissions.ts";
+import { inside, outsideStep, realInside, type Decision } from "./permissions.ts";
 import { TEAM_TOOL_NAMES } from "./team.ts";
 import { acpToolLabel } from "./transcript.ts";
 import { errorMessage as message, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
@@ -35,7 +35,7 @@ function profileKey(spec: SandboxSpec) {
  * anything else, go to the owner. Ask me first sends every one that is not
  * refused to the owner.
  */
-export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst">, check = realInside): Decision {
+export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst"> & { stepFiles?: string[] | null }, check = realInside): Decision {
   const kind = typeof toolCall.kind === "string" ? toolCall.kind : "other";
   const title = typeof toolCall.title === "string" ? toolCall.title : kind;
   const summary = `${title}${toolCall.rawInput === undefined ? "" : `: ${JSON.stringify(toolCall.rawInput)}`}`;
@@ -68,6 +68,9 @@ export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<Console
       if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
       if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
       if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p))) return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
+      // A tab with steps: only the current step's files.
+      const step = outsideStep(agent.folder, paths, agent.stepFiles);
+      if (step) return step;
       decision = { behavior: "allow", reason: "Files in this agent's own folder." };
       break;
     case "execute":
@@ -366,7 +369,7 @@ class AcpSession implements AgentSession {
     const answer = await this.ctx.permit(
       typeof toolCall.kind === "string" ? toolCall.kind : "other",
       toolCall.rawInput ?? toolCall.title ?? {},
-      decideAcp(toolCall, this.ctx.agent, this.driver.host.realInside),
+      decideAcp(toolCall, { ...this.ctx.agent, stepFiles: this.ctx.stepFiles?.() }, this.driver.host.realInside),
     );
     // Cancelled meanwhile: already answered.
     if (!this.asking.delete(id)) return;
