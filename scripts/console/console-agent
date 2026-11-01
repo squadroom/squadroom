@@ -66,6 +66,10 @@ case ${1-} in
         (( ${CREDENTIALS[(Ie)$name]} )) || die "--keep: $name is not a credential the launcher passes"
         [[ -n ${arrived[$name]-} ]] || die "--keep: $name was not given"
         export "$name=${arrived[$name]}"
+        # OpenCode's Z.AI provider reads the Z.AI key as ZHIPU_API_KEY: the
+        # same key, under the name that client looks for. It crosses only
+        # with ZAI_API_KEY itself, so only a window given that key gets it.
+        if [[ $name == ZAI_API_KEY ]]; then export "ZHIPU_API_KEY=${arrived[$name]}"; fi
       done
       set -- spawn "${@[4,-1]}"
     fi

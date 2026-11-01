@@ -38,6 +38,12 @@ const setupPath = join(home, "fake-acp.json");
 const setup = fs.existsSync(setupPath) ? JSON.parse(fs.readFileSync(setupPath, "utf8")) : {};
 const send = (x) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...x }) + "\n");
 const log = (x) => fs.appendFileSync(join(home, "acp-calls.jsonl"), JSON.stringify({ pid: process.pid, cwd: process.cwd(), argv: process.argv.slice(2), ...x }) + "\n");
+// `crash`: print it on stderr and exit 1 at once (OpenCode's start failing
+// in the sandbox, live check 2026-11-01).
+if (setup.crash) {
+  process.stderr.write(setup.crash);
+  process.exit(1);
+}
 if (setup.ignoreTerm) process.on("SIGTERM", () => {});
 const sessions = new Map(); // id -> { mcp, model, history: [] }
 const pending = new Map(); // our request id -> resolve

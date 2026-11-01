@@ -12,6 +12,7 @@ import { ConsoleStore } from "../src/lib/console/store.ts";
 import { Redactor } from "../src/lib/console/redact.ts";
 import type { Launcher, RunResult } from "../src/lib/console/launcher.ts";
 import { AGENT_KINDS, agentModel } from "../src/lib/console/agents.ts";
+import { ACP_CLIENTS } from "../src/lib/console/clients.ts";
 import { chargeTurn, pricedAt } from "../src/lib/console/spend.ts";
 import { harness, TOKEN } from "./helpers/console-harness.ts";
 
@@ -184,7 +185,7 @@ test("connection panels: versions, logins, and which keys are present", () => {
   assert.deepEqual(codex.credentials, [{ name: "OPENAI_API_KEY", global: false, projects: 1, needsCap: true }]);
   const open = panels.find((p) => p.kind === "opencode")!;
   assert.deepEqual(open.credentials.find((c) => c.name === "OPENAI_API_KEY"), { name: "OPENAI_API_KEY", global: false, projects: 1, needsCap: true });
-  assert.equal(open.pinned, "unpinned");
+  assert.equal(open.pinned, ACP_CLIENTS.opencode.version);
 });
 
 test("Check connection runs only --version (and Codex's login status), as agent, with no credential", async () => {

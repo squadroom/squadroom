@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentKind, AgentModel } from "./agents.ts";
-import type { ModelConfig } from "../../config/models.ts";
-import { costUsd } from "../shared/pricing.ts";
+import { costUsd, type PricedModel } from "../shared/pricing.ts";
 import type { ProjectKey } from "./keys.ts";
 import { SPEND_PAUSE, type TurnUsage } from "./types.ts";
 
@@ -57,9 +56,9 @@ export function usageAddsUp(usage: TurnUsage | null | undefined): usage is TurnU
   return (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) <= usage.inputTokens;
 }
 
-function billing(model: AgentModel): ModelConfig {
+function billing(model: AgentModel): PricedModel {
   const paid = model.paid!;
-  return { id: model.id, label: model.label, provider: paid.provider, model: model.model, ...paid.prices, longContext: paid.longContext, scheduledPrices: paid.scheduledPrices };
+  return { id: model.id, label: model.label, model: model.model, ...paid.prices, longContext: paid.longContext, scheduledPrices: paid.scheduledPrices };
 }
 
 /** When a turn is priced: when it started, whenever it is charged (its end,
