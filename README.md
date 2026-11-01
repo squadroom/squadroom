@@ -9,6 +9,11 @@ agents in a tab talk to each other through mailboxes (team tools), so a
 Lead can ask a Reviewer for a review without you copying text between
 windows.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-desktop-dark.png">
+  <img src="docs/images/console-desktop-light.png" alt="Squadroom with the Weather Station project open: four agent windows side by side (Lead, Backend, Frontend and Reviewer), the team timeline above them, and two items waiting in Needs you.">
+</picture>
+
 Website: [squadroom.github.io](https://squadroom.github.io)
 
 It runs on your own Mac, uses your own provider accounts and keys, and is
@@ -46,6 +51,31 @@ supported.
   a run report as Markdown, full-text search over conversations, an
   Overview page, browser and e-mail notifications, nightly backups, and
   optional image tools (Krea) for Claude Code windows.
+
+## Screenshots
+
+The pictures use invented demo data; they follow your light or dark setting.
+
+**Team messages.** The Team panel shows every message between the agents in a tab, with asks and their answers, and the routes that pass a finished turn on.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/team-messages-dark.png">
+  <img src="docs/images/team-messages-light.png" alt="The Team panel open above the agent windows: messages from Lead to Frontend and Backend, Backend reporting a commit to Lead, Lead asking Reviewer for a review and Reviewer answering.">
+</picture>
+
+**Changes and pull requests.** Each agent's Changes view shows its branch, the pull request it opened, the approve gate, every file changed against main, and each turn's commit with its diff.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/changes-pr-dark.png">
+  <img src="docs/images/changes-pr-light.png" alt="Backend's Changes dialog: branch console/a2-backend, pull request #42 opened, an Approve button, five changed files, and one turn's commit expanded to its stat and diff.">
+</picture>
+
+**Needs you on a phone.** Network requests, questions and pushes wait in one tray, on desktop or phone.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/phone-needs-you-dark.png">
+  <img src="docs/images/phone-needs-you-light.png" alt="The Needs you tray on a phone: Frontend asks for network access to registry.npmjs.org with Allow once and Always buttons, and Docs asks a question with an answer box." width="320">
+</picture>
 
 ## Requirements
 
