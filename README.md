@@ -1,10 +1,10 @@
 # Squadroom
 
-Squadroom is a web page you run on your own Mac for working with several
-coding agents at once. You can have a few repos open, a few pieces of work
-going in each, and a different group of agents on each piece of work. The
-agents pass messages to each other themselves, and you get asked when one
-of them needs a decision from you.
+Squadroom lets you put several coding agents on a job as a team. They
+message each other on their own, each in a role you pick from the built-in
+ones or write yourself as a prompt, and they only come to you when they
+need a decision. It's a web page you run on your own Mac, and you can have
+several repos open with a different squad on each piece of work.
 
 Website: [squadroom.github.io](https://squadroom.github.io)
 
@@ -16,43 +16,10 @@ sign in to.
 Setup takes an afternoon and needs `sudo` once. Linux and Windows aren't
 supported.
 
-## How it's organised
+## How a squad works together
 
-- **Projects.** A project is usually a GitHub repo. It can also be a new
-  local folder, or no files at all for agents that only talk. You can have
-  several projects going.
-- **Tabs.** A tab is one piece of work inside a project, such as a feature,
-  a security review or the docs. Tabs run at the same time, and each has
-  its own agents.
-- **Squads.** The agents in a tab work as a squad. It can be one agent, a
-  pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
-  seven members, and you can add more agents by hand. Each agent has its own
-  name, model and thinking level, and either edits in its own folder or only
-  looks. You can mix tools in one squad.
-- **Agent tools.** You can pick Claude Code, Codex and Grok Build today.
-  Grok Build can only look for now, not edit. Gemini CLI, Kimi Code and
-  OpenCode are in the code but switched off until each has been tested
-  against real accounts.
-
-Up to six agent turns run at once across everything, and three per account
-or API key. Anything over that waits in a queue.
-
-## Roles
-
-A role is a prompt with a name. It tells the agent what its job is and how
-to work with the others. There are eight built in: Orchestrator, Planner,
-Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
-you add an agent, and you can change the prompt for that one agent.
-
-To make your own, open **Settings**, then **Roles**, then **New role**: a
-name, a one-line description, edit or look only, a suggested tool (Claude
-Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
-a built-in role's prompt and reset it later. A tab can be saved as a
-template with its agents, roles and routes.
-
-## How the agents work together
-
-Agents in a tab have team tools. With them an agent can send a teammate a
+A squad is the group of agents on one piece of work. Each of them has team
+tools, and with them an agent can send a teammate a
 message (`team_send`), ask a question and get the answer back (`team_ask`,
 `team_reply`), merge in a teammate's work (`team_pull`), claim the files
 it's about to edit (`team_claim`), ask a teammate to hold off (`team_hold`),
@@ -74,6 +41,63 @@ Squadroom commits what changed at the end of each turn, so you can check the
 work one turn at a time in the window's **Changes** view. Nothing is pushed
 until you approve it.
 
+## Roles
+
+A role is a prompt with a name. It tells the agent what its job is and how
+to work with the others. There are eight built in: Orchestrator, Planner,
+Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
+you add an agent, and you can change the prompt for that one agent.
+
+To make your own, open **Settings**, then **Roles**, then **New role**: a
+name, a one-line description, edit or look only, a suggested tool (Claude
+Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
+a built-in role's prompt and reset it later. A tab can be saved as a
+template with its agents, roles and routes.
+
+## Projects, tabs and squads
+
+- **Projects.** A project is usually a GitHub repo. It can also be a new
+  local folder, or no files at all for agents that only talk. You can have
+  several projects going.
+- **Tabs.** A tab is one piece of work inside a project, such as a feature,
+  a security review or the docs. Tabs run at the same time, and each has
+  its own agents.
+- **Squads.** The agents in a tab work as a squad. It can be one agent, a
+  pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
+  seven members, and you can add more agents by hand. Each agent has its own
+  name, model and thinking level, and either edits in its own folder or only
+  looks. You can mix tools in one squad.
+
+Up to six agent turns run at once across everything, and three per account
+or API key. Anything over that waits in a queue.
+
+## Agent tools
+
+You can pick any of these when you add an agent or set up a team, and you
+can mix them in one squad. Gemini CLI, Kimi Code and OpenCode become
+selectable once pull request
+[#9](https://github.com/squadroom/squadroom/pull/9) is merged.
+
+- **Claude Code**, on your Claude subscription or an API key. It can edit
+  in its own folder or only look.
+- **Codex**, on your ChatGPT login. It can edit or only look.
+- **Grok Build**, with an xAI API key. It can only look for now.
+- **Gemini CLI**, with a Gemini API key. It can only look for now.
+- **Kimi Code**, on your Kimi Code membership. It can only look for now.
+- **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
+  Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash or Kimi K3. It can
+  only look for now.
+
+An agent that only looks can read the code, run commands you approve and
+message its teammates, but it can't change files.
+
+Claude Code agents that can edit can also make and edit images with
+[Krea](https://www.krea.ai), which helps when you're prototyping a design.
+You switch this on per project. Each image costs between $0.015 and $0.065
+and is charged to the tab, and one turn can make at most 8 images and spend
+at most $1. The images go in the agent's `design/` folder and are committed
+with its turn.
+
 ## Limits
 
 - **Spend, per tab.** Each tab has a spend limit for API-key models: $5
@@ -91,8 +115,8 @@ until you approve it.
 - You can pause a tab, a project or everything at any time.
 
 Other things it has: a run report as Markdown, full-text search over
-conversations, an Overview page, browser and e-mail notifications, nightly
-backups, and optional image tools (Krea) for Claude Code windows.
+conversations, an Overview page, browser and e-mail notifications and
+nightly backups.
 
 ## Requirements
 
@@ -107,8 +131,8 @@ backups, and optional image tools (Krea) for Claude Code windows.
   is the simplest; any equivalent works.
 - **A GitHub OAuth app of your own** for sign-in.
 - **Accounts with the agent providers you want to use**: a Claude
-  subscription or API key for Claude Code, a ChatGPT login for Codex, API
-  keys for the others.
+  subscription or API key for Claude Code, a ChatGPT login for Codex, a
+  Kimi Code membership for Kimi Code, and API keys for the others.
 - **A [Resend](https://resend.com) account** for e-mailed codes and
   notifications. Squadroom signs in without it, but refuses weighty actions
   (including adding keys) until mail is configured.
@@ -201,7 +225,7 @@ Gemini CLI, Grok Build, Kimi Code, OpenCode) with **your own** accounts,
 subscriptions and API keys. You are responsible for using each of them
 under that provider's terms. Squadroom is an independent project and is not
 affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google,
-xAI, Moonshot AI, Krea or any other provider. Product names are their
+xAI, Moonshot AI, DeepSeek, Krea or any other provider. Product names are their
 owners' trademarks.
 
 The model price tables in [`src/config/models.ts`](src/config/models.ts)
