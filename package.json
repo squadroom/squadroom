@@ -28,7 +28,7 @@
     "console:cleanup": "node scripts/console-cleanup.ts"
   },
   "dependencies": {
-    "@next/env": "16.4.2",
+    "@next/env": "16.4.3",
     "next": "16.4.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
