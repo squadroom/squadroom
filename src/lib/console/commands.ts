@@ -473,8 +473,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "createAgent": {
       const kind = agentKind(input.kind);
-      // Only kinds offered in the dialogs: an ACP kind is offered once it
-      // has been qualified live.
+      // Only kinds offered in the dialogs.
       if (!kind || !kind.offered) throw new CommandError("Choose an agent.");
       const model = agentModel(kind.kind, input.model);
       if (!model) throw new CommandError(`${kind.label} does not offer that model.`);

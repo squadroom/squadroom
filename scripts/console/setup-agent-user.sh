@@ -45,7 +45,7 @@ readonly CLAUDE_VERSION=${versions[1]} CODEX_VERSION=${versions[2]}
 acp_clients=("${(@f)$($node --no-warnings --input-type=module -e 'const { ACP_CLIENTS: a } = await import(process.argv[1]); for (const [name, c] of Object.entries(a)) console.log(`${c.package} ${c.version} ${name}`);' "file://${HERE:h:h}/src/lib/console/clients.ts")}") ||
   fail "could not read the ACP clients from src/lib/console/clients.ts"
 for line in $acp_clients; do
-  [[ $line =~ '^@[a-z0-9-]+/[a-z0-9-]+ [0-9]+\.[0-9]+\.[0-9]+ [a-z]+$' ]] || fail "src/lib/console/clients.ts gave an ACP client this script does not understand: $line"
+  [[ $line =~ '^(@[a-z0-9-]+/)?[a-z0-9-]+ [0-9]+\.[0-9]+\.[0-9]+ [a-z]+$' ]] || fail "src/lib/console/clients.ts gave an ACP client this script does not understand: $line"
 done
 
 step "Checking free disk space"
@@ -167,11 +167,13 @@ for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai
 done
 /usr/sbin/chown -R root:wheel $CLIENTS
 /bin/chmod -R go-w $CLIENTS
-print "  $(sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
-print "  $(sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
+# From /: the agent user cannot read the owner's folder this runs in, and
+# Bun and Node clients fail to start in a folder they cannot read.
+print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
+print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
 for line in $acp_clients; do
   name=${line##* }
-  print "  $name: $(sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
+  print "  $name: $(cd / && sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
 done
 
 step "Installing the launcher at $LAUNCHER"

@@ -57,6 +57,23 @@ test("spawn --keep passes only the listed credential, even with another key in t
   }
 });
 
+test("spawn --keep ZAI_API_KEY also sets ZHIPU_API_KEY, the name OpenCode's Z.AI provider reads; no other key does", { skip: !zsh }, (t) => {
+  const { root, run } = launcher(t);
+  const env = { ...AMBIENT, ZAI_API_KEY: "zai-FAKE-key-for-launcher-0000000000", ZHIPU_API_KEY: "zhipu-ambient-owner-0000000000" };
+  const zai = run(["spawn", "--keep", "ZAI_API_KEY", root, "/usr/bin/env"], env);
+  assert.equal(zai.status, 0, zai.stderr);
+  assert.deepEqual(names(zai.stdout), ["HOME", "LANG", "LOGNAME", "PATH", "PWD", "SHLVL", "TMPDIR", "USER", "ZAI_API_KEY", "ZHIPU_API_KEY"]);
+  assert.match(zai.stdout, /^ZHIPU_API_KEY=zai-FAKE-key-for-launcher-0000000000$/m);
+  // Another key, or none: no ZHIPU_API_KEY, not even the one in the environment.
+  for (const keep of ["OPENAI_API_KEY", ""]) {
+    const other = run(["spawn", "--keep", keep, root, "/usr/bin/env"], env);
+    assert.equal(other.status, 0, other.stderr);
+    assert.ok(!names(other.stdout).includes("ZHIPU_API_KEY"), keep);
+  }
+  // It is not a credential the worker may name itself.
+  assert.match(run(["spawn", "--keep", "ZHIPU_API_KEY", root, "/usr/bin/env"], env).stderr, /ZHIPU_API_KEY is not a credential/);
+});
+
 test("spawn --keep refuses names outside the credential list and credentials that were not given", { skip: !zsh }, (t) => {
   const { root, run } = launcher(t);
   const unlisted = run(["spawn", "--keep", "OWNER_SECRET", root, "/usr/bin/env"], AMBIENT);

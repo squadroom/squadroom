@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
+import { ACP_CLIENTS } from "../src/lib/console/clients.ts";
 import { readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { acpToolLabel, teamToolLabel, transcript } from "../src/lib/console/transcript.ts";
@@ -94,12 +95,13 @@ test("an ACP agent's permission requests: reads allowed; edits never at Look onl
     assert.equal(decideAcp({ kind: "other", title }, look).behavior, "ask", title);
 });
 
-test("OpenCode is qualified at Look only first, and not offered in the dialogs yet", async (t) => {
+test("OpenCode is offered at Look only, and Edit is refused", async (t) => {
   const h = await harness(t);
-  // The owner's commands refuse a kind that is not offered, at any level.
-  assert.throws(() => h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode"), /Choose an agent/);
-  assert.throws(() => h.agent("Scout", "edit", "openai/gpt-5.6-luna", "opencode"), /Choose an agent/);
-  assert.equal(agentKind("opencode")!.offered, false);
+  // The owner's commands make it at Look only and refuse Edit.
+  h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode");
+  assert.throws(() => h.agent("Scout2", "edit", "openai/gpt-5.6-luna", "opencode"), /qualified for Look only so far/);
+  assert.equal(agentKind("opencode")!.offered, true);
+  assert.equal(agentKind("opencode")!.version, ACP_CLIENTS.opencode.version);
   assert.deepEqual(agentKind("opencode")!.levels, ["look"]);
   // An agent at a level its kind is not qualified for never runs.
   keys(h.keysFile);
@@ -139,6 +141,28 @@ test("a turn end to end: sandboxed at Look only, network off, the model confirme
   await h.ended(env);
   assert.match(said(h, scout.id), /env: OPENAI_API_KEY(?!,)/);
   assert.ok(!JSON.stringify(h.events(scout.id)).includes(OPENAI));
+});
+
+test("a program that ends at once shows its stderr, redacted; OpenCode with network off says to turn it on", async (t) => {
+  const h = await acp(t);
+  // A client that ends at once: its stderr's tail is the reason, the key
+  // it was given and any other key shape masked, colour codes dropped.
+  writeFileSync(join(h.agentHome, "fake-acp.json"), JSON.stringify({ crash: `\x1b[91mError:\x1b[0m boot ${OPENAI} sk-other-shaped-key-000000000000\n${"x".repeat(400)}\nServeError\n` }));
+  const crashed = h.acpAgent("Crashed");
+  await h.ready(crashed.id);
+  const turn = h.send(crashed.id, "hello");
+  await h.ended(turn);
+  const reason = h.store.turn(turn)!.reason!;
+  assert.match(reason, /^OpenCode ended unexpectedly \(exit 1\): …x+ ServeError OpenCode needs Network on for this project \(the project's menu, Network…\)\.$/);
+  assert.ok(reason.length < 500, reason);
+  const short = h.acpAgent("Short");
+  writeFileSync(join(h.agentHome, "fake-acp.json"), JSON.stringify({ crash: `Error: boot ${OPENAI} sk-other-shaped-key-000000000000\n` }));
+  await h.ready(short.id);
+  const second = h.send(short.id, "hello");
+  await h.ended(second);
+  const told = h.store.turn(second)!.reason!;
+  assert.match(told, /^OpenCode ended unexpectedly \(exit 1\): Error: boot \[redacted …ABCD\] \[redacted …0000\] OpenCode needs/);
+  assert.ok(!JSON.stringify(h.events(short.id)).includes(OPENAI));
 });
 
 test("the team tools offered to an ACP agent: what it may use, and no approve tool", async (t) => {
@@ -953,4 +977,39 @@ test("team tool rows read as what they do, for every client's naming, also when 
   // In a transcript, stored rows are relabelled.
   const blocks = transcript([{ id: 1, turnId: 1, agentId: "a", kind: "tool", body: { id: "t", name: "mcp__console__team_send", summary: send }, createdAt: 0 }]);
   assert.deepEqual(blocks.map((b) => (b.type === "tool" ? [b.name, b.summary] : null)), [["Message to Backend", "Validate hours."]]);
+});
+
+test("a crashed client's stderr tail never shows a key split by a colour code or cut at the buffer's front", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const { ClientProcess } = await import("../src/lib/console/session.ts");
+  const { Redactor } = await import("../src/lib/console/redact.ts");
+  class Probe extends ClientProcess {
+    protected received() {}
+  }
+  const fake = () => Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), stdin: new PassThrough(), pid: 1 });
+  const key = "sk-proj-SPLITKEY0123456789abcdefXYZ";
+  const redactor = new Redactor();
+  redactor.add(key);
+  const wait = () => new Promise((r) => setImmediate(r));
+
+  // A colour code inside the key: escapes go before redaction.
+  const a = fake();
+  const pa = new Probe(a as never, "/tmp", "Test");
+  a.stderr.write(`Error: ${key.slice(0, 12)}\x1b[31m${key.slice(12)}\x1b[0m failed\n`);
+  await wait();
+  const tailA = pa.stderrTail(redactor);
+  assert.equal(tailA.includes(key), false, tailA);
+  assert.equal(tailA.includes(key.slice(12)), false, tailA);
+
+  // The buffer's cut lands just after the key's prefix, padded with spaces:
+  // the partial word at the cut is dropped.
+  const b = fake();
+  const pb = new Probe(b as never, "/tmp", "Test");
+  const rest = key.slice(3);
+  const pad = " ".repeat(8_192 - rest.length);
+  b.stderr.write("x".repeat(9_000) + " " + key + pad);
+  await wait();
+  const tailB = pb.stderrTail(redactor);
+  assert.equal(tailB.includes(rest), false, tailB);
 });

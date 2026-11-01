@@ -234,6 +234,13 @@ export const isObject = (v: unknown): v is Record<string, unknown> => !!v && typ
  * credential is never cut in two. */
 export const oneLine = (redactor: Redactor, text: string) => redactor.shorten(text.replace(/\s+/g, " ").trim(), 200);
 
+/** A client's stderr held while it runs (characters), and what is kept
+ * when it grows past that: only its tail is ever shown. */
+const STDERR_HOLD = 16_384;
+const STDERR_KEEP = 8_192;
+/** The most of it a turn's reason carries. */
+export const STDERR_TAIL_CHARS = 300;
+
 /** One stdout line longer than this is not the protocol: the client's
  * `onOversize` (the turn stops on "output limit", a server is ended). */
 export const MAX_LINE_BYTES = 8 * 1024 * 1024;
@@ -242,7 +249,8 @@ export const MAX_LINE_BYTES = 8 * 1024 * 1024;
  * A client program run as `agent` through the launcher, one JSON message per
  * line on its stdio (Claude Code's stream-json, Codex's App Server, ACP). It
  * is owned from its spawn; stderr can carry anything the client prints, so
- * it is drained, never stored.
+ * it is drained and only its last few kilobytes are held, for `stderrTail`
+ * when the program ends unexpectedly.
  */
 export abstract class ClientProcess {
   readonly child: ChildProcessWithoutNullStreams;
@@ -254,6 +262,8 @@ export abstract class ClientProcess {
   private label: string;
   private decoder = new StringDecoder("utf8");
   private pending = "";
+  private stderr = "";
+  private stderrDecoder = new StringDecoder("utf8");
 
   /** `label` names it in a refused write ("Claude Code is not running."). */
   constructor(child: ChildProcessWithoutNullStreams, folder: string, label: string) {
@@ -261,13 +271,29 @@ export abstract class ClientProcess {
     this.folder = folder;
     this.label = label;
     child.stdout.on("data", (chunk: Buffer) => this.read(chunk));
-    child.stderr.resume();
+    // Held from the front: once over STDERR_HOLD it is cut back to the
+    // last STDERR_KEEP, and the word the cut lands in is dropped, so a
+    // credential cut in two (its prefix gone, unrecognisable) never stays.
+    child.stderr.on("data", (chunk: Buffer) => {
+      this.stderr += this.stderrDecoder.write(chunk);
+      if (this.stderr.length > STDERR_HOLD) this.stderr = this.stderr.slice(-STDERR_KEEP).replace(/^\S*/, "");
+    });
     child.stdin.on("error", () => {});
     child.on("error", () => this.exit(null, null));
     child.on("close", (code, signal) => this.exit(code, signal));
   }
   get pid(): number {
     return this.child.pid ?? 0;
+  }
+  /** The end of what the program printed on stderr, redacted before it is
+   * cut, without colour codes, on one line: why it ended, for the turn's
+   * reason. Empty when it printed nothing. */
+  stderrTail(redactor: Redactor, maxChars = STDERR_TAIL_CHARS): string {
+    // Terminal escapes go first, so a key split by a colour code is whole
+    // when the redactor sees it.
+    const plain = this.stderr.replace(/\x1b(?:\[[0-?]*[ -\/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g, "");
+    const text = redactor.text(plain).replace(/\s+/g, " ").trim();
+    return text.length <= maxChars ? text : `…${text.slice(-(maxChars - 1))}`;
   }
   /** Settle what waits on the process (its calls), before `onExit`. */
   protected ended(): void {}
@@ -373,11 +399,13 @@ export abstract class OwnProcessDriver<H extends DriverHost = DriverHost> {
   }
   /** Own a new session's process: it leaves the live set when it exits,
    * which ends the session under any running turn. */
-  track(proc: ClientProcess, ctx: SessionContext) {
+  track(proc: ClientProcess, ctx: SessionContext, hint?: string) {
     this.live.add(proc);
     proc.onExit = (code, signal) => {
       this.live.delete(proc);
-      ctx.emit({ kind: "ended", status: "failed", reason: `${this.label} ended unexpectedly (${signal ?? `exit ${code}`}).` });
+      const said = proc.stderrTail(this.host.redactor);
+      const reason = `${this.label} ended unexpectedly (${signal ?? `exit ${code}`})${said ? `: ${said}` : "."}`;
+      ctx.emit({ kind: "ended", status: "failed", reason: hint ? `${reason} ${hint}` : reason });
     };
   }
   /** Take a process out of service: it stays tracked until it has exited,

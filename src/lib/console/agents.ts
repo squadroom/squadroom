@@ -2,14 +2,18 @@
 // New agent dialog reads it, and the worker validates against it.
 //
 // The kinds: Claude Code, Codex and the ACP agents (OpenCode, Gemini CLI,
-// Grok Build, Kimi Code). An ACP kind is tested offline and qualified live
-// at Look only before it is offered.
+// Grok Build, Kimi Code). Every kind is offered in the New agent and team
+// dialogs. An ACP kind runs at Look only: Edit in its folder needs its own
+// sandbox qualification first.
 
 import { MODELS, type Provider, type TokenPrices } from "../../config/models.ts";
 import { ACP_CLIENTS, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
 
 export type AgentKind = "claude-code" | "codex" | "opencode" | "gemini-cli" | "grok-build" | "kimi-code";
 export type ConsoleEffort = "low" | "medium" | "high" | "xhigh" | "max";
+/** Who bills an API-key model: a catalog provider, or OpenRouter, which
+ * resells other providers' models through its own key. */
+export type AgentProvider = Provider | "openrouter";
 
 export interface AgentModel {
   /** Stored with the agent; a stable history key, never reused. */
@@ -31,7 +35,7 @@ export interface AgentModel {
    * a turn without trustworthy usage is charged (its whole context window
    * as input, its maximum output as output). */
   paid?: {
-    provider: Provider;
+    provider: AgentProvider;
     credential: string;
     prices: TokenPrices;
     longContext?: { aboveTokens: number; inputMultiplier: number; outputMultiplier: number };
@@ -56,6 +60,10 @@ export interface AgentKindInfo {
   /** An ACP kind's arguments that start its agent mode (`["acp"]` when
    * left out, OpenCode's). */
   acpArgs?: string[];
+  /** An ACP kind that cannot start with its project's network off
+   * (OpenCode's `acp` serves its own API on loopback and calls it): a
+   * failed start says to turn Network on. */
+  needsNetwork?: boolean;
   /** The ACP `authenticate` method that only tells the client to use the
    * API key in its environment (Grok Build's `xai.api_key`), called when
    * the client advertises it, before any session. Never a sign-in: a
@@ -73,9 +81,8 @@ export interface AgentKindInfo {
    * only; Edit in its folder follows the tests that try to break out of
    * its sandbox. */
   levels: ("look" | "edit")[];
-  /** Offered in the New agent dialog. An ACP kind is offered only once it
-   * has been qualified live and its usage shown trustworthy; until then
-   * only the worker and the tests use it. */
+  /** Offered in the New agent and team dialogs. Every kind is; false
+   * would leave a kind to the worker and the tests only. */
   offered: boolean;
   models: AgentModel[];
   /** Dated sources for the facts above. */
@@ -129,10 +136,13 @@ export const AGENT_KINDS: AgentKindInfo[] = [
   },
 ];
 
-/** A price catalog entry's prices and limits for an API-key model. */
-function catalog(id: string, credential: string, maxOutputTokens: number, prices?: Partial<TokenPrices>): NonNullable<AgentModel["paid"]> {
+/** A price catalog entry's prices and limits for an API-key model. The
+ * context window is the catalog's unless the provider documents a larger
+ * one (or the catalog has none), so the full allowance never undercharges. */
+function catalog(id: string, credential: string, maxOutputTokens: number, prices?: Partial<TokenPrices>, contextWindow?: number): NonNullable<AgentModel["paid"]> {
   const m = MODELS.find((x) => x.id === id);
-  if (!m?.contextTokens) throw new Error(`The catalog has no context window for ${id}.`);
+  const window = contextWindow ?? m?.contextTokens;
+  if (!m || !window) throw new Error(`The catalog has no context window for ${id}.`);
   return {
     provider: m.provider,
     credential,
@@ -146,7 +156,7 @@ function catalog(id: string, credential: string, maxOutputTokens: number, prices
     },
     longContext: m.longContext,
     scheduledPrices: m.scheduledPrices,
-    contextWindow: m.contextTokens,
+    contextWindow: window,
     maxOutputTokens,
   };
 }
@@ -155,12 +165,17 @@ AGENT_KINDS.push({
   kind: "opencode",
   label: "OpenCode",
   binary: consoleClientPath("opencode"),
-  // Pinned when it is qualified live; the setup script does not
-  // install it yet.
-  version: "unpinned",
+  version: ACP_CLIENTS.opencode.version,
+  // `opencode acp` starts its HTTP server and its ACP side calls it over
+  // loopback; a network-off sandbox refuses the listen and it exits 1
+  // ("ServeError", live check 2026-11-01). Its model calls need the
+  // network anyway.
+  needsNetwork: true,
+  // Each model names its own API key (`paid.credential`): only the chosen
+  // model's key crosses.
   credential: null,
   levels: ["look"],
-  offered: false,
+  offered: true,
   models: [
     // The model OpenCode is asked to run is the one its session must
     // confirm (`provider/model`). Prices: src/config/models.ts.
@@ -185,16 +200,95 @@ AGENT_KINDS.push({
       // for Claude, the higher bound.
       paid: catalog("claude-haiku-4-5", "ANTHROPIC_API_KEY", 128_000, { cachedInputPerMtok: 0.1, cacheWritePerMtok: 2 }),
     },
+    // DeepSeek through OpenCode's own `deepseek` provider, which reads
+    // DEEPSEEK_API_KEY. Charged at the catalog's peak rates always (the
+    // off-peak half price is never assumed). The full allowance: the
+    // 1,048,576-token window and 393,216 maximum output OpenCode's catalog
+    // gives, above the catalog's
+    // 1,000,000, so a turn without usage is never undercharged.
+    {
+      id: "deepseek/deepseek-v4-pro",
+      label: "DeepSeek V4 Pro (API key)",
+      model: "deepseek/deepseek-v4-pro",
+      runs: "deepseek/deepseek-v4-pro",
+      efforts: [],
+      paid: catalog("deepseek-v4-pro", "DEEPSEEK_API_KEY", 393_216, undefined, 1_048_576),
+    },
+    {
+      id: "deepseek/deepseek-flash",
+      label: "DeepSeek V4.1 Flash (API key)",
+      model: "deepseek/deepseek-flash",
+      runs: "deepseek/deepseek-flash",
+      efforts: [],
+      paid: catalog("deepseek-flash", "DEEPSEEK_API_KEY", 393_216, undefined, 1_048_576),
+    },
+    // Kimi K3 through OpenCode's `moonshotai` provider, which reads
+    // MOONSHOT_API_KEY. Cache writes at the one-hour rate ($6, twice the
+    // five-minute one), the higher, since the client chooses; the full
+    // allowance's output is the 1,048,576 maximum Moonshot documents.
+    {
+      id: "moonshotai/kimi-k3",
+      label: "Kimi K3 (API key)",
+      model: "moonshotai/kimi-k3",
+      runs: "moonshotai/kimi-k3",
+      efforts: [],
+      paid: catalog("kimi-k3", "MOONSHOT_API_KEY", 1_048_576, { cacheWritePerMtok: 6 }),
+    },
+    // GLM through OpenCode's `zai` provider. It reads ZHIPU_API_KEY, which
+    // the launcher sets from the Console's ZAI_API_KEY (one key on the
+    // Keys page). The full allowance: the 1,000,000-token window and
+    // 131,072 maximum output OpenCode's catalog gives (the price catalog
+    // has no window for the Flash tier).
+    {
+      id: "zai/glm-5.3",
+      label: "GLM-5.3 (API key)",
+      model: "zai/glm-5.3",
+      runs: "zai/glm-5.3",
+      efforts: [],
+      paid: catalog("glm-5.3", "ZAI_API_KEY", 131_072),
+    },
+    {
+      id: "zai/glm-5.3-flash",
+      label: "GLM-5.3-Flash (API key)",
+      model: "zai/glm-5.3-flash",
+      runs: "zai/glm-5.3-flash",
+      efforts: [],
+      paid: catalog("glm-5.3-flash", "ZAI_API_KEY", 131_072, undefined, 1_000_000),
+    },
+    // Qwen 3.8 Max through OpenCode's `openrouter` provider, which reads
+    // OPENROUTER_API_KEY. Not in the price catalog, so priced here from
+    // OpenRouter's own listing (2026-11-01, the same in OpenCode 1.19.5's
+    // catalog): Alibaba is its only provider, so OpenRouter has one price
+    // for it. Open-weight models are served by many providers at different
+    // prices, so none is offered: their bill cannot be pinned.
+    {
+      id: "openrouter/qwen/qwen3.8-max-0902",
+      label: "Qwen 3.8 Max via OpenRouter (API key)",
+      model: "openrouter/qwen/qwen3.8-max-0902",
+      runs: "openrouter/qwen/qwen3.8-max-0902",
+      efforts: [],
+      paid: {
+        provider: "openrouter",
+        credential: "OPENROUTER_API_KEY",
+        prices: { inputPerMtok: 2, outputPerMtok: 6, cachedInputPerMtok: 0.25 },
+        contextWindow: 1_000_000,
+        maxOutputTokens: 131_072,
+      },
+    },
   ],
   sources: [
     "src/config/models.ts: prices, context windows",
+    "src/lib/console/clients.ts: opencode-ai pinned",
+    "OpenCode 1.19.5's bundled models.dev catalog (checked 2026-11-01): provider ids `deepseek` (DEEPSEEK_API_KEY), `moonshotai` (MOONSHOT_API_KEY), `zai` (ZHIPU_API_KEY) and `openrouter` (OPENROUTER_API_KEY); model ids and limits",
+    "https://openrouter.ai/api/v1/models/qwen/qwen3.8-max-0902/endpoints (2026-11-01): one provider (Alibaba), $2 / $6 / $0.25 cache reads per million",
+    "Live checks 2026-11-01 (OpenCode 1.19.5, network on, Look only): every API-key model answered, named its model and reported usage",
   ],
 });
 
 // Gemini CLI, Grok Build and Kimi Code: each runs through the ACP driver
 // and OpenCode's conformance matrix (tests/console-acp-{gemini,grok,kimi}
-// .test.ts), is qualified at Look only, and is not offered until it passes
-// live. ACP modes from each client's documentation, 2026-10-21.
+// .test.ts) and is offered at Look only. ACP modes from each client's
+// documentation, 2026-10-21.
 AGENT_KINDS.push(
   {
     kind: "gemini-cli",
@@ -206,7 +300,11 @@ AGENT_KINDS.push(
     acpUsage: "gemini",
     credential: null,
     levels: ["look"],
-    offered: false,
+    // Offered at Look only. Its reported usage is checked offline but not
+    // yet against Google's bill, so the key's provider-side monthly cap
+    // (required before any agent gets it) is the backstop; a turn whose
+    // usage is missing or does not add up is charged its full allowance.
+    offered: true,
     models: [
       {
         id: "gemini-3.8-flash",
@@ -240,8 +338,8 @@ AGENT_KINDS.push(
     credential: null,
     levels: ["look"],
     // Qualified live at Look only on 2026-10-22/23: model, usage, and the
-    // sandbox breakout tests with the real client. Offered at that level;
-    // Edit in its folder needs its own qualification.
+    // sandbox breakout tests with the real client. Edit in its folder needs
+    // its own qualification.
     offered: true,
     models: [
       {
@@ -273,7 +371,8 @@ AGENT_KINDS.push(
     credential: null,
     accountLogin: true,
     levels: ["look"],
-    offered: false,
+    // Offered at Look only, on the owner's membership: nothing is metered.
+    offered: true,
     models: [
       // The membership's coding model, as Kimi Code names it; not metered.
       { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding (membership)", model: "kimi-code/kimi-for-coding", runs: "kimi-code/kimi-for-coding", efforts: [] },
