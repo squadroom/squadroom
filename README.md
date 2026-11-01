@@ -19,12 +19,12 @@ supported.
 ## How a squad works together
 
 A squad is the group of agents on one piece of work. Each of them has team
-tools, and with them an agent can send a teammate a
-message (`team_send`), ask a question and get the answer back (`team_ask`,
-`team_reply`), merge in a teammate's work (`team_pull`), claim the files
-it's about to edit (`team_claim`), ask a teammate to hold off (`team_hold`),
-ask you to push its branch and open a pull request (`team_push`), and read
-the review on it (`team_pr`). A message waits until the other agent
+tools, and with them an agent can send a teammate a message (`team_send`),
+ask a question and get the answer back (`team_ask`, `team_reply`), merge in
+a teammate's work (`team_pull`), claim the files it's about to edit
+(`team_claim`), ask a teammate to hold off (`team_hold`), ask you to push
+its branch and open a pull request (`team_push`), and read the review on it
+(`team_pr`). A message waits until the other agent
 finishes its current turn, then arrives as its next prompt. Routes pass one
 agent's finished reply straight to another, for example when the Lead ends
 with "ready for review".
