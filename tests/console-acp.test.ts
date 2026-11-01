@@ -4,7 +4,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
 import { ACP_CLIENTS } from "../src/lib/console/clients.ts";
-import { readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
+import { readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { acpToolLabel, teamToolLabel, transcript } from "../src/lib/console/transcript.ts";
 import { currentSpendLimit, needsFreshCode, runCommand, spendLimitInput } from "../src/lib/console/commands.ts";
@@ -493,6 +493,22 @@ test("a refusal and an error: either way the turn fails, and a prompt that reach
   assert.match(said(h, scout.id), /Trying\./);
 });
 
+test("a request the provider turns away as unauthorized before the agent says anything costs nothing; after it has, the allowance", async (t) => {
+  const h = await acp(t);
+  const scout = h.acpAgent();
+  await h.ready(scout.id);
+  const forbidden = h.send(scout.id, "forbidden");
+  await h.ended(forbidden);
+  assert.equal(h.store.turn(forbidden)!.status, "failed");
+  assert.match(h.store.turn(forbidden)!.reason!, /blocked/);
+  assert.equal(h.store.turn(forbidden)!.costBasis, "reported");
+  assert.equal(h.store.turn(forbidden)!.costUsd, 0);
+  assert.equal(h.store.tab(h.tab.id)!.pauseReason, null);
+  const late = h.send(scout.id, "lateforbidden");
+  await h.ended(late);
+  assert.equal(h.store.turn(late)!.costBasis, "allowance");
+});
+
 test("a resumed session and a restart: a new program loads the saved session, its replayed history is not shown again", async (t) => {
   const h = await acp(t);
   const scout = h.acpAgent();
@@ -911,6 +927,19 @@ test("Grok Build's usage in _meta.usage (live check 2026-10-22): priced at catal
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, totalTokens: 5 } }), {});
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, cachedReadTokens: 20000 } }), {});
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, reasoningTokens: null } }), {});
+});
+
+test("Gemini CLI's usage (live check 2026-11-01): cached tokens are inside input, thinking is outside output", () => {
+  // The shape 0.65.0 sends: usage under ACP's names, total = input + output.
+  const usage = { inputTokens: 9000, outputTokens: 7, cachedReadTokens: 4000, thoughtTokens: 40, totalTokens: 9007 };
+  assert.deepEqual(readGeminiUsage(usage), { inputTokens: 9000, cacheReadTokens: 4000, cacheWriteTokens: 0, outputTokens: 47 });
+  // Read as plain ACP usage it does not add up, which charged the allowance.
+  assert.deepEqual(readAcpUsage(usage), {});
+  assert.equal(readGeminiUsage(undefined), null);
+  assert.deepEqual(readGeminiUsage({ ...usage, totalTokens: 9047 }), {});
+  assert.deepEqual(readGeminiUsage({ ...usage, cachedReadTokens: 9001 }), {});
+  assert.deepEqual(readGeminiUsage({ ...usage, thoughtTokens: null }), {});
+  assert.deepEqual(readGeminiUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 12 }), { inputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 2 });
 });
 
 test("ACP tool rows show readable names, never the bare kind 'other'", () => {

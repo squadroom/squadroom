@@ -159,7 +159,7 @@ The pictures use invented demo data; they follow your light or dark setting.
 
 ## Requirements
 
-- **macOS** (Apple silicon or Intel) with at least 40 GB free disk.
+- **A Mac** with about 10 GB of free disk.
 - **Node.js** at the version in [`.nvmrc`](.nvmrc) (24), installed from
   Homebrew or the official installer (the setup script looks for it in
   `/opt/homebrew/bin` or `/usr/local/bin`).

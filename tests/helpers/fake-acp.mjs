@@ -20,6 +20,8 @@
 //   edit P     asks to edit P, says the answer
 //   refuse     answers the prompt with an error, having said nothing
 //   error      says something, then answers with an error
+//   forbidden  answers the prompt with a 403, having said nothing
+//   lateforbidden  says something, then answers with a 403
 // Setup: { models: null | {current, available}, setModelFails, loadSession,
 // http, protocolVersion, authRequired, ignoreTerm, keyAuth }. `keyAuth`
 // (Grok Build): the method advertised for the key in the environment, and
@@ -97,9 +99,10 @@ async function prompt(id, params) {
   const turn = { id, cancelled: false, resolveCancel: null };
   prompts.set(sessionId, turn);
   const cancelled = () => new Promise((resolve) => (turn.resolveCancel = resolve));
-  // `xaiUsage` (Grok Build): usage in `_meta.usage` with xAI's meaning
+  // `usage: "xai"` (Grok Build): usage in `_meta.usage` with xAI's meaning
   // (input includes the cache, reasoning beside output, total = input +
-  // output), the same tokens as ACP's `usage` above.
+  // output), the same tokens as ACP's `usage` above. `usage: "gemini"`
+  // (Gemini CLI): the same meaning in ACP's `usage`, with no cache writes.
   const xai = (u) => {
     if (u.totalTokens === 10) return { inputTokens: 1000, outputTokens: 200, totalTokens: 10 };
     const input = u.inputTokens + (u.cachedReadTokens ?? 0) + (u.cachedWriteTokens ?? 0);
@@ -107,7 +110,8 @@ async function prompt(id, params) {
   };
   const end = (stopReason, extra = {}) => {
     if (prompts.get(sessionId) === turn) prompts.delete(sessionId);
-    const shaped = setup.xaiUsage && extra.usage ? { _meta: { usage: xai(extra.usage) } } : extra;
+    const gemini = (u) => ({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, cachedReadTokens: u.cachedReadTokens, thoughtTokens: u.reasoningTokens, totalTokens: u.totalTokens });
+    const shaped = !extra.usage ? extra : setup.usage === "xai" ? { _meta: { usage: xai(extra.usage) } } : setup.usage === "gemini" ? { usage: gemini(xai(extra.usage)) } : extra;
     send({ id, result: { stopReason, ...shaped } });
   };
   switch (word) {
@@ -231,6 +235,13 @@ async function prompt(id, params) {
     case "refuse":
       prompts.delete(sessionId);
       return send({ id, error: { code: -32603, message: "the model is not available" } });
+    case "forbidden":
+      prompts.delete(sessionId);
+      return send({ id, error: { code: 403, message: "Requests to this API are blocked." } });
+    case "lateforbidden":
+      say(sessionId, "Trying.");
+      prompts.delete(sessionId);
+      return send({ id, error: { code: 403, message: "Requests to this API are blocked." } });
     case "error":
       say(sessionId, "Trying.");
       prompts.delete(sessionId);

@@ -27,9 +27,9 @@ Squadroom is **macOS only** for now.
 
 You need:
 
-- macOS with **at least 40 GB free** (`df -h /System/Volumes/Data`); the
-  setup script refuses to run with less, and the worker makes no new clone
-  when free disk would fall below 20 GB.
+- macOS with **about 10 GB free**, which is plenty
+  (`df -h /System/Volumes/Data`); the setup script warns you with less.
+  The worker makes no new agent copy when free disk would fall below 5 GB.
 - **Node.js** at the version in `.nvmrc` (24), from Homebrew
   (`brew install node@24`) or the official installer. The setup script looks
   for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
