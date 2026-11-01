@@ -8,5 +8,6 @@ acpConformance({
   model: "gemini-3.8-flash",
   other: "gemini-3.5-pro",
   args: ["--acp"],
+  usage: "gemini",
   key: { name: "GEMINI_API_KEY", value: "AIzaSyFAKE-gemini-acp-key-000000000000ABCD", cap: { usd: 10, url: "https://aistudio.google.com/", checkedAt: "2026-10-21" } },
 });

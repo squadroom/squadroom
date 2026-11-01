@@ -61,9 +61,10 @@ export interface AgentKindInfo {
    * the client advertises it, before any session. Never a sign-in: a
    * client that asks for any other method is refused. */
   acpKeyAuth?: string;
-  /** Where it reports a turn's usage: ACP's `usage` (left out), or Grok
-   * Build's own `_meta.usage` with xAI's meaning. */
-  acpUsage?: "xai-meta";
+  /** Where it reports a turn's usage: ACP's `usage` (left out), Grok
+   * Build's own `_meta.usage` with xAI's meaning, or ACP's `usage` with
+   * Gemini's meaning. */
+  acpUsage?: "xai-meta" | "gemini";
   /** Its login lives in the agent account itself, set up by the owner
    * (Codex's ChatGPT login, Kimi Code's membership): no key crosses, and
    * Check connection reports it where the client has a status command. */
@@ -201,6 +202,8 @@ AGENT_KINDS.push(
     binary: consoleClientPath("gemini"),
     version: ACP_CLIENTS.gemini.version,
     acpArgs: ["--acp"],
+    // Live check 2026-11-01: its usage has Gemini's meaning, not ACP's.
+    acpUsage: "gemini",
     credential: null,
     levels: ["look"],
     offered: false,

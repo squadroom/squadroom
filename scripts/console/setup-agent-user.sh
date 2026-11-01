@@ -24,6 +24,7 @@ readonly HERE=${0:A:h}
 
 step() { print -P "%B==> $*%b" }
 fail() { print -u2 -P "%F{red}Stopped:%f $*"; exit 1 }
+warn() { print -u2 -P "%F{yellow}Warning:%f $*" }
 
 (( EUID == 0 )) || fail "run with sudo: sudo zsh scripts/console/setup-agent-user.sh"
 readonly OWNER=${SUDO_USER-}
@@ -50,7 +51,7 @@ done
 step "Checking free disk space"
 free_gb=$(( $(/bin/df -k /System/Volumes/Data | /usr/bin/awk 'NR==2 {print $4}') / 1024 / 1024 ))
 print "  $free_gb GB free"
-(( free_gb >= 40 )) || fail "at least 40 GB must be free first; $free_gb GB is free now"
+(( free_gb >= 10 )) || warn "only $free_gb GB is free; about 10 GB is plenty, so you may run short"
 
 step "Group '$AGENT' (id $ID)"
 if /usr/bin/dscl . -read /Groups/$AGENT >/dev/null 2>&1; then
