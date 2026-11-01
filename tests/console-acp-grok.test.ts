@@ -9,7 +9,7 @@ acpConformance({
   other: "grok-code-fast-2",
   args: ["agent", "stdio"],
   keyAuth: "xai.api_key",
-  xaiUsage: true,
+  usage: "xai",
   offered: true,
   key: { name: "XAI_API_KEY", value: "xai-FAKEgrokacpkey000000000000000000ABCD", cap: { usd: 10, url: "https://console.x.ai/", checkedAt: "2026-10-21" } },
 });

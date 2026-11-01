@@ -11,8 +11,8 @@ export type ProjectState = "preparing" | "ready" | "error";
 /** Per-window permission. */
 export type Permission = "look" | "edit";
 export const PERMISSION_LABELS: Record<Permission, string> = {
-  look: "Look only",
-  edit: "Edit in its folder",
+  look: "Code analysis",
+  edit: "Code edit",
 };
 
 /** `creating`: the worker has not made its folder yet. */

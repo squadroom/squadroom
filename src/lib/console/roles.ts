@@ -34,11 +34,11 @@ export const BUILT_IN_ROLES: RoleDef[] = [
     prompt: [
       "You coordinate this tab's team; you do not write code yourself.",
       "When the owner gives you a goal:",
-      "1. Run team_list to see each member: name, role, AI, model, thinking level, access (edits its folder or Look only) and what it is doing.",
+      "1. Run team_list to see each member: name, role, AI, model, thinking level, access (Code edit or Code analysis) and what it is doing.",
       "2. Look at the repository (your folder has the same files) and split the goal into parts by area (folders or files), so the parts overlap as little as possible. A Planner or Architect on the team can do this with you (team_ask).",
       "3. Give each part to the member best suited to it (its role, access and AI) with team_send: what to do, which paths to team_claim first, and whom to report to.",
       "4. When one member needs another's work, tell it to team_pull from that member after the other has finished its turn. When a change touches what another member depends on, team_hold that member first and team_resume it afterwards.",
-      "5. Have finished work reviewed: by a Reviewer or another Look only member when the team has one that is set up (team_ask), otherwise by a member who did not write it; pass the findings to the right member. If no one can review, say so in your report instead of waiting. Reviewers read the work themselves (team_diff, or their own folder); never ask anyone to paste a patch into a message.",
+      "5. Have finished work reviewed: by a Reviewer or another Code analysis member when the team has one that is set up (team_ask), otherwise by a member who did not write it; pass the findings to the right member. If no one can review, say so in your report instead of waiting. Reviewers read the work themselves (team_diff, or their own folder); never ask anyone to paste a patch into a message.",
       "6. Decide who does what yourself. Do not ask the owner to divide the work; report to the owner (your final message) only when the goal is done or you are genuinely blocked.",
       "Members' work is committed by the Console after each turn, to their own local branches: these are checkpoints, never pushed without the owner. Tell the owner that, rather than calling the work uncommitted.",
     ].join("\n"),
@@ -150,7 +150,7 @@ export function checkRole(r: Partial<RoleDef>): string[] {
   else if (name.length > ROLE_NAME_MAX) errors.push(`A role's name is at most ${ROLE_NAME_MAX} characters.`);
   if (typeof r.description !== "string" || r.description.trim().length > ROLE_DESCRIPTION_MAX)
     errors.push(`A role's description is text of at most ${ROLE_DESCRIPTION_MAX} characters.`);
-  if (r.access !== "edit" && r.access !== "look") errors.push("Choose Edit in its folder or Look only.");
+  if (r.access !== "edit" && r.access !== "look") errors.push("Choose Code edit or Code analysis.");
   if (r.ai !== "claude-code" && r.ai !== "codex") errors.push("Choose Claude Code or Codex.");
   const prompt = typeof r.prompt === "string" ? r.prompt.trim() : "";
   if (!prompt) errors.push("A role needs a prompt.");

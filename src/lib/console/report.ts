@@ -2,6 +2,7 @@ import { agentKind, agentModel } from "./agents.ts";
 import type { ConsoleStore, TabTurn } from "./store.ts";
 import type { TemplateStep } from "./templates.ts";
 import { usd } from "./spend.ts";
+import { PERMISSION_LABELS } from "./types.ts";
 
 // The run report and Markdown export: a tab's run as one Markdown
 // document, from what the store already holds (redacted as stored). No
@@ -90,7 +91,7 @@ export function reportData(store: ConsoleStore, tabId: string, now: number): Rep
       return {
         name: a.state === "closed" ? `${a.name} (closed)` : a.name,
         ai: `${agentKind(a.kind)?.label ?? a.kind}, ${agentModel(a.kind, a.model)?.label ?? a.model}`,
-        access: a.permission === "edit" ? "Edits its folder" : "Look only",
+        access: PERMISSION_LABELS[a.permission],
         approval: approval ? `\`${approval.sha.slice(0, 12)}\` ${approval.current ? "approved" : "approval cancelled by a later commit"}` : null,
       };
     }),

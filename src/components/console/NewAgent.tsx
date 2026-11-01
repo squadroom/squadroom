@@ -1,8 +1,8 @@
 import type { CommandFields } from "@/lib/console/commands";
 import { useState } from "react";
 import { roleText, type RoleDef } from "@/lib/console/roles";
-import { NAME_MAX } from "@/lib/console/types";
-import { firstModel, lookOnly, offeredKinds, roleKind } from "@/lib/console/ui";
+import { NAME_MAX, PERMISSION_LABELS } from "@/lib/console/types";
+import { firstModel, offeredKinds, roleKind } from "@/lib/console/ui";
 import AiPicker, { type Ai } from "./AiPicker";
 import Dialog from "./Dialog";
 import styles from "./console.module.css";
@@ -15,7 +15,7 @@ export default function NewAgent({
   onCreate,
 }: {
   roles: RoleDef[];
-  /** A project without files: its agents are Look only. */
+  /** A project without files: its agents are Code analysis only. */
   talkOnly: boolean;
   /** Why Codex windows are off, when they are. */
   codexOff: string | null;
@@ -32,7 +32,6 @@ export default function NewAgent({
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [roleId, setRoleId] = useState("");
-  const canEdit = !lookOnly(kind);
   /** A role fills in access, the suggested AI and the instructions. */
   const pickRole = (id: string) => {
     setRoleId(id);
@@ -64,21 +63,17 @@ export default function NewAgent({
       <AiPicker
         value={ai}
         codexOff={codexOff}
-        onChange={(next) => {
-          setAi(next);
-          // A kind qualified at Look only so far.
-          if (next.kind !== kind && lookOnly(next.kind)) setPermission("look");
-        }}
+        onChange={setAi}
       />
       <fieldset>
         <legend>Permission</legend>
         <label className={styles.radio}>
-          <input type="radio" checked={permission === "edit"} disabled={talkOnly || !canEdit} onChange={() => setPermission("edit")} />
-          Edit in its folder{!canEdit && " (not qualified yet)"}
+          <input type="radio" checked={permission === "edit"} disabled={talkOnly} onChange={() => setPermission("edit")} />
+          {PERMISSION_LABELS.edit}
         </label>
         <label className={styles.radio}>
           <input type="radio" checked={permission === "look"} onChange={() => setPermission("look")} />
-          Look only
+          {PERMISSION_LABELS.look}
         </label>
         {kind === "claude-code" && (
           <label className={styles.radio} title="Its changes, commands and web access wait for you in Needs you">

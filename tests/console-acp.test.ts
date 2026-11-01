@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
 import { ACP_CLIENTS } from "../src/lib/console/clients.ts";
-import { readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
+import { readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { acpToolLabel, teamToolLabel, transcript } from "../src/lib/console/transcript.ts";
 import { currentSpendLimit, needsFreshCode, runCommand, spendLimitInput } from "../src/lib/console/commands.ts";
@@ -19,7 +20,7 @@ import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 // usage (delayed, repeated, missing), partial owner waits, credential mode,
 // model confirmation, cancellation, a resumed session and a restart. Against
 // a scripted fake agent (fake-acp.mjs): no sudo, no network, no model call.
-// OpenCode is qualified at Look only first.
+// OpenCode runs at Code edit or Code analysis.
 
 const OPENAI = "sk-proj-FAKE-openai-key-for-acp-0000000000ABCD";
 const CAP = { usd: 10, url: "https://platform.openai.com/settings/organization/limits", checkedAt: "2026-10-20" };
@@ -95,23 +96,27 @@ test("an ACP agent's permission requests: reads allowed; edits never at Look onl
     assert.equal(decideAcp({ kind: "other", title }, look).behavior, "ask", title);
 });
 
-test("OpenCode is offered at Look only, and Edit is refused", async (t) => {
-  const h = await harness(t);
-  // The owner's commands make it at Look only and refuse Edit.
-  h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode");
-  assert.throws(() => h.agent("Scout2", "edit", "openai/gpt-5.6-luna", "opencode"), /qualified for Look only so far/);
+test("OpenCode is offered at Code edit and Code analysis; at Code edit an edit in its folder is committed, one outside it refused", async (t) => {
+  const h = await acp(t);
+  // The owner's commands make it at either level.
+  h.agent("Scout2", "look", "openai/gpt-5.6-luna", "opencode");
+  h.agent("Editor2", "edit", "openai/gpt-5.6-luna", "opencode");
   assert.equal(agentKind("opencode")!.offered, true);
   assert.equal(agentKind("opencode")!.version, ACP_CLIENTS.opencode.version);
-  assert.deepEqual(agentKind("opencode")!.levels, ["look"]);
-  // An agent at a level its kind is not qualified for never runs.
-  keys(h.keysFile);
-  await h.worker.start();
-  const editing = h.acpAgent("Editor", "openai/gpt-5.6-luna", "edit");
-  await h.ready(editing.id);
-  const turn = h.send(editing.id, "hello");
+  const editor = h.acpAgent("Editor", "openai/gpt-5.6-luna", "edit");
+  await h.ready(editor.id);
+  const folder = h.store.agent(editor.id)!.folder;
+  const turn = h.send(editor.id, `edit ${join(folder, "notes.txt")}`);
   await h.ended(turn);
-  assert.deepEqual([h.store.turn(turn)!.status, h.store.turn(turn)!.reason], ["failed", "OpenCode is not qualified for this access level yet."]);
-  assert.deepEqual(h.acpCalls(), []);
+  assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+  assert.match(said(h, editor.id), /decision: yes/);
+  assert.match(h.log(), /^sandbox --sandbox edit$/m);
+  await h.until(() => !!h.store.turn(turn)!.commitAfter, "turn committed");
+  assert.equal(execFileSync("git", ["-C", folder, "show", "HEAD:notes.txt"], { encoding: "utf8" }), "edited\n");
+  const outside = join(h.root, "outside.txt");
+  await h.ended(h.send(editor.id, `edit ${outside}`));
+  assert.match(said(h, editor.id), /decision: no/);
+  assert.equal(existsSync(outside), false);
 });
 
 test("a turn end to end: sandboxed at Look only, network off, the model confirmed, only its key crosses, streamed, charged at catalog prices", async (t) => {
@@ -491,6 +496,22 @@ test("a refusal and an error: either way the turn fails, and a prompt that reach
   await h.ended(error);
   assert.match(h.store.turn(error)!.reason!, /provider error/);
   assert.match(said(h, scout.id), /Trying\./);
+});
+
+test("a request the provider turns away as unauthorized before the agent says anything costs nothing; after it has, the allowance", async (t) => {
+  const h = await acp(t);
+  const scout = h.acpAgent();
+  await h.ready(scout.id);
+  const forbidden = h.send(scout.id, "forbidden");
+  await h.ended(forbidden);
+  assert.equal(h.store.turn(forbidden)!.status, "failed");
+  assert.match(h.store.turn(forbidden)!.reason!, /blocked/);
+  assert.equal(h.store.turn(forbidden)!.costBasis, "reported");
+  assert.equal(h.store.turn(forbidden)!.costUsd, 0);
+  assert.equal(h.store.tab(h.tab.id)!.pauseReason, null);
+  const late = h.send(scout.id, "lateforbidden");
+  await h.ended(late);
+  assert.equal(h.store.turn(late)!.costBasis, "allowance");
 });
 
 test("a resumed session and a restart: a new program loads the saved session, its replayed history is not shown again", async (t) => {
@@ -911,6 +932,19 @@ test("Grok Build's usage in _meta.usage (live check 2026-10-22): priced at catal
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, totalTokens: 5 } }), {});
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, cachedReadTokens: 20000 } }), {});
   assert.deepEqual(readXaiUsage({ usage: { ...meta.usage, reasoningTokens: null } }), {});
+});
+
+test("Gemini CLI's usage (live check 2026-11-01): cached tokens are inside input, thinking is outside output", () => {
+  // The shape 0.65.0 sends: usage under ACP's names, total = input + output.
+  const usage = { inputTokens: 9000, outputTokens: 7, cachedReadTokens: 4000, thoughtTokens: 40, totalTokens: 9007 };
+  assert.deepEqual(readGeminiUsage(usage), { inputTokens: 9000, cacheReadTokens: 4000, cacheWriteTokens: 0, outputTokens: 47 });
+  // Read as plain ACP usage it does not add up, which charged the allowance.
+  assert.deepEqual(readAcpUsage(usage), {});
+  assert.equal(readGeminiUsage(undefined), null);
+  assert.deepEqual(readGeminiUsage({ ...usage, totalTokens: 9047 }), {});
+  assert.deepEqual(readGeminiUsage({ ...usage, cachedReadTokens: 9001 }), {});
+  assert.deepEqual(readGeminiUsage({ ...usage, thoughtTokens: null }), {});
+  assert.deepEqual(readGeminiUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 12 }), { inputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 2 });
 });
 
 test("ACP tool rows show readable names, never the bare kind 'other'", () => {

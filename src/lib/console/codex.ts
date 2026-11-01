@@ -3,11 +3,19 @@ import { Redactor } from "./redact.ts";
 import { count, oneLine as shorten, RpcProcess, str } from "./session.ts";
 import { codexPlanOp, type TaskOp } from "./tasks.ts";
 
-// The Codex driver: one `codex app-server` per ChatGPT login, run as
+// The Codex driver: one `codex app-server` per login, run as
 // `agent` through the launcher, holding one thread per agent window.
-// JSON-RPC over stdio. The login lives in the agent account's own
+// JSON-RPC over stdio. The ChatGPT login lives in the agent account's own
 // CODEX_HOME (`~agent/.codex/auth.json`), so no credential crosses the
-// launcher.
+// launcher. An OpenAI API key gets a server of its own
+// that keeps its login in memory only (`cli_auth_credentials_store`
+// `ephemeral`: it neither reads nor writes auth.json) and is signed in with
+// the key over stdin, never in its environment or on its command line.
+
+/** The server's arguments: an API-key server never touches auth.json. */
+export function codexServerArgs(apiKey: boolean): string[] {
+  return apiKey ? ["app-server", "-c", 'cli_auth_credentials_store="ephemeral"'] : ["app-server"];
+}
 
 /** What one App Server notification means to the Console. Only executed
  * items count as evidence; Codex's reply text is display only. */
@@ -158,10 +166,14 @@ export class CodexServer extends RpcProcess {
   // Its notifications carry `threadId`; its requests are approvals and
   // elicitations.
   private redactor: Redactor;
-  constructor(launcher: Launcher, home: string, binary: string, redactor: Redactor = new Redactor()) {
-    // No credential crosses: the login is in the agent's own CODEX_HOME.
-    super(launcher.spawn(home, binary, ["app-server"], {}), home, "The Codex server");
+  /** The API key it signs in with; none for the ChatGPT login. */
+  private apiKey: string | null;
+  constructor(launcher: Launcher, home: string, binary: string, redactor: Redactor = new Redactor(), apiKey: string | null = null) {
+    // No credential crosses the launcher: the ChatGPT login is in the
+    // agent's own CODEX_HOME, and an API key is sent in `initialize`.
+    super(launcher.spawn(home, binary, codexServerArgs(!!apiKey), {}), home, "The Codex server");
     this.redactor = redactor;
+    this.apiKey = apiKey;
     // One line this long is not the protocol: the server is ended.
     this.onOversize = () => this.child.kill("SIGTERM");
   }
@@ -215,12 +227,18 @@ export class CodexServer extends RpcProcess {
     for (const [id, fn] of this.late) if (fn === late) this.late.delete(id);
   }
 
-  /** Initialize and check the login: ChatGPT only, never an API key. */
+  /** Initialize and check the login, with no switch either way: a
+   * ChatGPT server must report ChatGPT, never an API key; an API-key server
+   * is signed in with its key and must report exactly that. */
   async initialize() {
     await this.call("initialize", { clientInfo: { name: "agent_console", version: "1" }, capabilities: { experimentalApi: true } });
     this.notify("initialized");
+    if (this.apiKey) await this.call("account/login/start", { type: "apiKey", apiKey: this.apiKey });
     const account = await this.call("account/read", { refreshToken: false });
-    if ((account.account as { type?: unknown } | undefined)?.type !== "chatgpt")
+    const type = (account.account as { type?: unknown } | undefined)?.type;
+    if (this.apiKey) {
+      if (type !== "apiKey") throw new CodexError("Codex did not sign in with the OpenAI API key. The turn was not started.");
+    } else if (type !== "chatgpt")
       throw new CodexError("Codex is not signed in with ChatGPT for the agent account. API keys are not used. Sign it in as the agent user (docs/setup.md, step 4).");
   }
 }

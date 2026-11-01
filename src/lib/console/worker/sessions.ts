@@ -7,6 +7,7 @@ import { mapTaskText, type TaskOp } from "../tasks.ts";
 import type { ConsoleAgent, TurnStatus } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import { SYSTEM, type ActiveTurn, type Runtime } from "./shared.ts";
+import { currentStepFiles } from "../templates.ts";
 
 // Agents' folders and their client sessions: GitHub projects prepared,
 // folders made where no sandbox would miss them, sessions opened, replaced
@@ -192,6 +193,7 @@ export const sessions = {
       newToken: () => this.newToken(agent.id, rt),
       storedSession: () => this.store.session(agent.id),
       documentsOnly: !!this.store.tabSteps(agent.tabId),
+      stepFiles: () => currentStepFiles(this.store.tabSteps(agent.tabId)),
       system: () => {
         // Where the agent's branch started, for its instructions.
         const project = this.store.project(agent.projectId);

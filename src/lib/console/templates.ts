@@ -1,4 +1,3 @@
-import { agentModel, type AgentKind } from "./agents.ts";
 import type { ConsoleAgent } from "./types.ts";
 import type { TeamSetup } from "./team-setup.ts";
 
@@ -124,7 +123,7 @@ const LEAD_PROMPT = [
   "When a draft or a revision is ready for review, end your final message with the words READY FOR REVIEW and a short summary of what changed. When the reviewer returns findings, address each one or say why not, then hand it back the same way.",
 ].join("\n");
 const REVIEWER_PROMPT = [
-  "You review this project's documents, Look only: you never change files. The lead hands you each draft; its commits reach your folder before your turn.",
+  "You review this project's documents at Code analysis: you never change files. The lead hands you each draft; its commits reach your folder before your turn.",
   "Review the current step's document independently: against the owner's decisions, the approved earlier documents and the evidence. Make a broad first pass, then give concrete, source-located findings with their consequence, a proportionate correction and how to verify it. On a re-review, check the revised passages, your earlier findings and anything they affect.",
   "Preferences, legitimate trade-offs and parked decisions are not findings. No material findings is an acceptable result.",
   "End your final message with FINDINGS FOR THE LEAD when there is something to change, or with READY FOR APPROVAL when there is nothing material left; the owner then approves the commit you reviewed.",
@@ -154,13 +153,7 @@ export const DOCUMENT_REVIEW: TabTemplate = {
   ],
 };
 
-/** Who may work in a tab with steps: an editing agent is Claude Code (its
- * permission check is where a step's files are enforced), and every agent
- * runs on a subscription login (paid API-key models are not supported in
- * such a tab yet). Problems as plain sentences. */
-export function stepTabProblems(agents: { name: string; kind: AgentKind; model: string; permission: string }[]): string[] {
-  return agents.flatMap((a) => [
-    ...(a.permission === "edit" && a.kind !== "claude-code" ? [`${a.name}: in a tab with steps, only Claude Code agents edit (that is where a step's files are enforced).`] : []),
-    ...(agentModel(a.kind, a.model)?.paid ? [`${a.name}: a tab with steps runs on subscription logins only for now.`] : []),
-  ]);
-}
+/** The files the current step may change; null for a tab without steps.
+ * Any agent kind, on any login, works in a tab with steps. */
+export const currentStepFiles = (stepped: { steps: TemplateStep[]; index: number } | null): string[] | null =>
+  stepped ? (stepped.steps[stepped.index]?.files ?? []) : null;

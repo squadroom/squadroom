@@ -10,6 +10,7 @@ import { DESIGN_DIR, IMAGE_EXTENSIONS, IMAGE_KEY, ImageError, listPrice, parseIm
 import { keyFor } from "../keys.ts";
 import { decide, realInside } from "../permissions.ts";
 import type { ConsoleAgent, ConsoleProject } from "../types.ts";
+import { currentStepFiles } from "../templates.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import type { Runtime } from "./shared.ts";
 
@@ -106,7 +107,7 @@ export const images = {
    * clone: the checks a Write there would get. */
   checkDesignPath(this: ConsoleWorker, agent: ConsoleAgent, name: string): void {
     const stepped = this.store.tabSteps(agent.tabId);
-    const rules = { ...agent, askFirst: false, stepFiles: stepped ? (stepped.steps[stepped.index]?.files ?? []) : null };
+    const rules = { ...agent, askFirst: false, stepFiles: currentStepFiles(stepped) };
     for (const ext of Object.values(IMAGE_EXTENSIONS)) {
       const input = { file_path: join(agent.folder, DESIGN_DIR, `${name}.${ext}`) };
       const decision = this.claimed(agent, "Write", input) ?? decide("Write", input, rules, this.options.realInside ?? realInside);

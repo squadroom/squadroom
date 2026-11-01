@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { BUILT_IN_ROLES, ROLE_PROMPT_MAX, type RoleDef } from "@/lib/console/roles";
 import { checkTeamSetup, defaultTeamSetup, pairTeamSetup, NOTE_MAX, TEAM_MAX_MEMBERS, TURNS_PER_LOGIN, type TeamMemberSetup, type TeamSetup } from "@/lib/console/team-setup";
-import { NAME_MAX } from "@/lib/console/types";
-import { firstModel, lookOnly, roleKind } from "@/lib/console/ui";
+import { NAME_MAX, PERMISSION_LABELS } from "@/lib/console/types";
+import { firstModel, roleKind } from "@/lib/console/ui";
 import AiPicker from "./AiPicker";
 import Dialog from "./Dialog";
 import styles from "./console.module.css";
@@ -59,7 +59,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
       </p>
       {orchestrated && (
         <>
-          <h3 className={styles.subhead}>Orchestrator (Look only)</h3>
+          <h3 className={styles.subhead}>Orchestrator ({PERMISSION_LABELS.look})</h3>
           <div className={styles.teamRow}>
             <AiPicker value={setup.orchestrator} codexOff={codexOff} who="Orchestrator" onChange={(v) => setSetup((s) => ({ ...s, orchestrator: { ...s.orchestrator, ...v } }))} />
           </div>
@@ -81,14 +81,10 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
                   </option>
                 ))}
               </select>
-              {/* A kind qualified at Look only so far is set to
-                  Look only, and Edit is not offered for it. */}
-              <AiPicker value={m} codexOff={codexOff} who={who} onChange={(v) => member(i, { ...v, ...(lookOnly(v.kind) ? { permission: "look" as const } : {}) })} />
+              <AiPicker value={m} codexOff={codexOff} who={who} onChange={(v) => member(i, v)} />
               <select aria-label={`${who}: access`} value={m.permission} onChange={(e) => member(i, { permission: e.target.value as "edit" | "look" })}>
-                <option value="edit" disabled={lookOnly(m.kind)}>
-                  Edit in its folder{lookOnly(m.kind) ? " (not qualified yet)" : ""}
-                </option>
-                <option value="look">Look only</option>
+                <option value="edit">{PERMISSION_LABELS.edit}</option>
+                <option value="look">{PERMISSION_LABELS.look}</option>
               </select>
               <input aria-label={`${who}: note`} value={m.note} maxLength={NOTE_MAX} placeholder="Strengths (frontend, tests…)" onChange={(e) => member(i, { note: e.target.value })} />
               <button aria-label={`Remove ${who}`} onClick={() => setSetup((s) => ({ ...s, members: s.members.filter((_, j) => j !== i) }))}>

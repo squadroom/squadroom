@@ -1,12 +1,14 @@
 import { join } from "node:path";
+import { agentModel } from "./agents.ts";
+import { fingerprint } from "./spend.ts";
 import { CodexError, CodexServer, readCodexNotification, type CodexEvent, type LateReply } from "./codex.ts";
 import { CLONE_TMP } from "./git.ts";
 import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand, decideCodexFiles } from "./permissions.ts";
 import { CODEX_DISABLED, type ConsoleAgent } from "./types.ts";
 import { Ending, endProcesses, errorMessage as message, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 
-// The Codex driver behind the session seam: one App Server per ChatGPT
-// login, a thread per window. That the server is shared is this driver's
+// The Codex driver behind the session seam: one App Server per login (the
+// ChatGPT one, and one per OpenAI API key), a thread per window. That the server is shared is this driver's
 // business: ending it for one window ends every Codex window's turn, which
 // it names, and a turn/start whose answer timed out is reported `unknown`
 // and settled from the thread's own notifications. A server is owned from
@@ -14,7 +16,7 @@ import { Ending, endProcesses, errorMessage as message, type AgentDriver, type A
 
 class CodexSession implements AgentSession {
   readonly ctx: SessionContext;
-  private driver: CodexDriver;
+  private driver: CodexLoginDriver;
   /** Its thread on the current server, the config it has, and its last
    * turn's id (a late event of that turn is not the next one's). */
   thread: { id: string; key: string; lastTurnId?: string | null } | null = null;
@@ -40,7 +42,7 @@ class CodexSession implements AgentSession {
   /** Each item's file paths (the file-change approval checks them). */
   items = new Map<string, string[]>();
 
-  constructor(driver: CodexDriver, ctx: SessionContext) {
+  constructor(driver: CodexLoginDriver, ctx: SessionContext) {
     this.driver = driver;
     this.ctx = ctx;
   }
@@ -172,7 +174,7 @@ class CodexSession implements AgentSession {
     if (this.thread && this.thread.key === key) return this.thread.id;
     await host.launcher.mkdir(agent.folder, CLONE_TMP);
     const token = this.ctx.newToken();
-    const config = codexThreadConfig(agent, others, host.paths, { url: host.mcpUrl(), token }, tmp);
+    const config = codexThreadConfig(agent, others, host.paths, { url: host.mcpUrl(), token }, tmp, !!model.paid);
     const params = {
       model: model.model,
       modelProvider: "openai",
@@ -301,7 +303,7 @@ class CodexSession implements AgentSession {
       case "item/fileChange/requestApproval": {
         if (!this.turn) return server.respond(id, { decision: "decline" });
         const paths = this.items.get(String(params.itemId ?? "")) ?? [];
-        const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, ctx.agent, this.driver.host.realInside));
+        const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, { ...ctx.agent, stepFiles: ctx.stepFiles?.() }, this.driver.host.realInside));
         return server.respond(id, { decision: answer.allow ? "accept" : "decline" });
       }
       case "item/tool/requestUserInput": {
@@ -333,7 +335,8 @@ class CodexSession implements AgentSession {
   }
 }
 
-export class CodexDriver implements AgentDriver {
+/** One App Server's driver: the ChatGPT login's, or one API key's. */
+class CodexLoginDriver implements AgentDriver {
   readonly label = "Codex";
   readonly ownProcess = false;
   readonly permissionTool = false;
@@ -360,10 +363,14 @@ export class CodexDriver implements AgentDriver {
   /** Each thread's highest cumulative token total seen. */
   readonly totals = new Map<string, number>();
 
-  constructor(host: DriverHost, options: { stopGraceMs: number; callMs?: number }) {
+  /** The API key this server signs in with; null for the ChatGPT login. */
+  private apiKey: string | null;
+
+  constructor(host: DriverHost, options: { stopGraceMs: number; callMs?: number }, apiKey: string | null = null) {
     this.host = host;
     this.stopGraceMs = options.stopGraceMs;
     this.callMs = options.callMs ?? 60_000;
+    this.apiKey = apiKey;
   }
   /** An interrupt gets longer here before the shared server is ended, since
    * that stops every Codex window; a Force stop ends it 2 s later. */
@@ -402,7 +409,7 @@ export class CodexDriver implements AgentDriver {
     }
     if (this.serverRetiring()) throw new CodexError("The previous Codex server has not exited yet.");
     this.starting ??= (async () => {
-      const server = new CodexServer(this.host.launcher, this.host.paths.agentHome, this.host.binary("codex"), this.host.redactor);
+      const server = new CodexServer(this.host.launcher, this.host.paths.agentHome, this.host.binary("codex"), this.host.redactor, this.apiKey);
       this.spawning = server;
       server.onNotification = (method, params) => this.threads.get(String(params.threadId ?? ""))?.onNotification(method, params);
       server.onRequest = (id, method, params) => void this.request(server, id, method, params);
@@ -487,3 +494,63 @@ export class CodexDriver implements AgentDriver {
   }
 }
 
+/**
+ * The Codex kind's driver: the ChatGPT login's App Server for subscription
+ * models, and one App Server per OpenAI API key (by fingerprint) for the
+ * API-key models, so a key never reaches the ChatGPT
+ * server and the ChatGPT login never serves an API-key window. Ending one
+ * server ends only the windows on it.
+ */
+export class CodexDriver implements AgentDriver {
+  readonly label = "Codex";
+  readonly ownProcess = false;
+  readonly permissionTool = false;
+  readonly folderScope = "project";
+  private host: DriverHost;
+  private options: { stopGraceMs: number; callMs?: number };
+  private chatgpt: CodexLoginDriver;
+  private keyed = new Map<string, CodexLoginDriver>();
+
+  constructor(host: DriverHost, options: { stopGraceMs: number; callMs?: number }) {
+    this.host = host;
+    this.options = options;
+    this.chatgpt = new CodexLoginDriver(host, options);
+  }
+  private get all() {
+    return [this.chatgpt, ...this.keyed.values()];
+  }
+  get stopMs() {
+    return this.chatgpt.stopMs;
+  }
+  open(ctx: SessionContext): AgentSession {
+    const paid = ctx.model.paid;
+    if (!paid) return this.chatgpt.open(ctx);
+    const key = ctx.credentials[paid.credential];
+    if (!key) throw new CodexError(`${ctx.model.label} needs ${paid.credential}.`);
+    const print = fingerprint(key);
+    let driver = this.keyed.get(print);
+    if (!driver) this.keyed.set(print, (driver = new CodexLoginDriver(this.host, this.options, key)));
+    return driver.open(ctx);
+  }
+  refusal() {
+    return this.chatgpt.refusal();
+  }
+  /** Turns wait while their own login's server is in the way: the ChatGPT
+   * one for a subscription model, any API-key one for an API-key model. */
+  waiting(agent: ConsoleAgent) {
+    const paid = !!agentModel(agent.kind, agent.model)?.paid;
+    return (paid ? [...this.keyed.values()] : [this.chatgpt]).some((d) => d.waiting(agent)) || this.host.creatingFolders(agent.projectId);
+  }
+  retiring() {
+    return 0;
+  }
+  usesFolder() {
+    return false;
+  }
+  tick() {
+    for (const d of this.all) d.tick();
+  }
+  async shutdown() {
+    await Promise.all(this.all.map((d) => d.shutdown()));
+  }
+}

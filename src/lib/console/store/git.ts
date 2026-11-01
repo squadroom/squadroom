@@ -11,6 +11,18 @@ export const git = {
   setTurnCommit(this: ConsoleStore, epoch: number, turnId: number, which: "before" | "after", sha: string | null) {
     this.write(epoch, `UPDATE console_turns SET commit_${which} = ? WHERE id = ?`, sha, turnId);
   },
+  /** Where an agent's folder was last known to keep to its tab's step: the commit after the turn of it that ran last (by when it
+   * started, since Send next reorders turns) and began in the folder, or,
+   * when that turn was never committed (stopped or crashed mid-turn, or
+   * its commit failed), the commit it began from. Never `turnId` itself. */
+  stepBaseline(this: ConsoleStore, agentId: string, turnId: number): string | null {
+    const r = this.get(
+      "SELECT COALESCE(commit_after, commit_before) AS sha FROM console_turns WHERE agent_id = ? AND id <> ? AND commit_before IS NOT NULL ORDER BY started_seq IS NULL, started_seq DESC, id DESC LIMIT 1",
+      agentId,
+      turnId,
+    );
+    return (r?.sha as string | null | undefined) ?? null;
+  },
   /** Ended turns since the detector's baseline that were never checked for
    * progress (the worker stopped or crashed, or Git failed, before the
    * check), with where their agent's next turn began, if it has.
@@ -211,7 +223,7 @@ export const git = {
       if (reviewerId) {
         const reviewer = this.agent(reviewerId);
         if (!reviewer || reviewer.tabId !== agent.tabId || reviewer.permission !== "look" || reviewer.state === "closed")
-          throw new Error("The reviewer must be a Look only agent open in the same tab.");
+          throw new Error("The reviewer must be a Code analysis agent open in the same tab.");
         reviewedAt = this.reviewedAt(reviewerId, agentId, sha);
         if (reviewedAt === null) throw new Error(`${reviewer.name} has not reviewed this commit yet: it reaches its folder before its next turn.`);
       }

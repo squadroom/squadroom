@@ -53,23 +53,27 @@ sign-in's state. Events are redacted before they are written.
   own group, not in `staff`), which cannot read your home folder.
 - **One clone each.** Each agent works in
   `/Users/agent/work/<project>/<agent>`, a Git clone on its own
-  `console/<id>-<name>` branch (a Look only agent sees the base branch). The
+  `console/<id>-<name>` branch (a Code analysis agent sees the base branch). The
   worker commits each turn as `agent` with hooks off.
 - **Clients.** Claude Code (one process per window, `--setting-sources ""`
   and the Console's own settings: its sandbox on, reads outside the folder
-  blocked), Codex (one App Server per ChatGPT login, one thread per window,
-  each with a permission profile that denies every other agent's folder),
+  blocked), Codex (one App Server per ChatGPT login and one per OpenAI API key,
+  one thread per window, each with a permission profile that denies every other agent's folder),
   and ACP clients (one program per window inside the launcher's sandbox
   profile: writes only in its clone and temporary folder, no network except
   the Console's loopback port unless the project allows it).
 - **Permissions.** The Console answers each permission request itself
-  (writes only inside the agent's own folder, never at Look only; reads
-  outside it refused) or files it in Needs you (network per host, unknown
-  tools, pushes). "Always" rules are the Console's own, never the client's.
+  (writes only inside the agent's own folder, never at Code analysis; reads
+  outside it refused; in a tab with steps, only the current step's files)
+  or files it in Needs you (network per host, unknown tools, pushes).
+  "Always" rules are the Console's own, never the client's. In a tab with
+  steps the worker also puts back, before each commit, anything the turn
+  changed outside the step's files, whichever way it was written.
 - **Only what ran counts.** Changes and commits come from the folder on
   disk; executed commands are shown from the client's own items, never from
   the agent's reply. A client that reports a different model, or an API-key
-  login where a subscription was selected, has its turn discarded.
+  login where a subscription was selected (or the other way round), has
+  its turn discarded.
 
 ## Mailboxes and team tools
 

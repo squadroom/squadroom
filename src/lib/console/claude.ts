@@ -80,6 +80,9 @@ export type ClaudeEvent =
       usage: TurnUsage;
       /** Each model's context window as the client reports it. */
       windows: { model: string; contextWindow: number; inputTokens: number }[];
+      /** Each model's usage this turn, helpers included (`modelUsage`):
+       * what an API-key turn is charged from. */
+      models: { model: string; usage: TurnUsage; webSearches: number | undefined }[];
     };
 
 function resultText(content: unknown): string {
@@ -198,6 +201,20 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
           const contextWindow = count(u?.contextWindow);
           const used = [u?.inputTokens, u?.cacheReadInputTokens ?? 0, u?.cacheCreationInputTokens ?? 0].map(count);
           return contextWindow ? [{ model, contextWindow, inputTokens: used.every((v) => v !== undefined) ? used.reduce((a, b) => a! + b!, 0)! : 0 }] : [];
+        }),
+        models: Object.entries((line.modelUsage ?? {}) as Record<string, Record<string, unknown>>).map(([model, u]) => {
+          const used = [u?.inputTokens, u?.cacheReadInputTokens ?? 0, u?.cacheCreationInputTokens ?? 0].map(count);
+          const whole = used.every((v) => v !== undefined);
+          return {
+            model,
+            usage: {
+              inputTokens: whole ? used.reduce((a, b) => a! + b!, 0) : undefined,
+              cacheReadTokens: whole ? used[1] : undefined,
+              cacheWriteTokens: whole ? used[2] : undefined,
+              outputTokens: count(u?.outputTokens),
+            },
+            webSearches: count(u?.webSearchRequests ?? 0),
+          };
         }),
         usage: {
           inputTokens: exact ? input.reduce((a, b) => a! + b!, 0) : undefined,

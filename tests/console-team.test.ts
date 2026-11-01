@@ -130,7 +130,7 @@ test("an ask is answered once by the turn's final message, and the answer comes 
   await h.ended(h.send(lead.id, "team_list"));
   assert.match(
     h.said(lead.id).at(-1)!,
-    new RegExp(`- Lead \\(id ${lead.id}\\) \\(you\\): Claude Code Haiku, edits its folder, working\\n- Reviewer \\(id ${reviewer.id}\\): Claude Code Haiku, Look only, idle`),
+    new RegExp(`- Lead \\(id ${lead.id}\\) \\(you\\): Claude Code Haiku, Code edit, working\\n- Reviewer \\(id ${reviewer.id}\\): Claude Code Haiku, Code analysis, idle`),
   );
   await h.ended(h.send(lead.id, "team_ask Reviewer please review"));
   assert.match(

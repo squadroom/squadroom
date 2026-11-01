@@ -130,8 +130,6 @@ export function checkTeamSetup(
   };
   const o = (s.orchestrator ?? {}) as Partial<TeamSetup["orchestrator"]>;
   const orchestrator = orchestrated ? pick("Orchestrator", o.kind, o.model, o.effort) : null;
-  // The Orchestrator is Look only.
-  if (orchestrator && !agentKind(orchestrator.kind)?.levels.includes("look")) errors.push(`Orchestrator: ${agentKind(orchestrator.kind)?.label} cannot be Look only.`);
   const members = Array.isArray(s.members) ? s.members : [];
   if (!members.length) errors.push("Add at least one team member.");
   if (members.length > TEAM_MAX_MEMBERS) errors.push(`A team has at most ${TEAM_MAX_MEMBERS} members besides the Orchestrator.`);
@@ -147,7 +145,7 @@ export function checkTeamSetup(
     else if (names.has(name.toLowerCase())) errors.push(`${who}: two members share that name.`);
     else if (taken.has(name.toLowerCase())) errors.push(`${who}: an agent in this tab already has that name.`);
     names.add(name.toLowerCase());
-    if (m.permission !== "edit" && m.permission !== "look") errors.push(`${who}: choose Edit in its folder or Look only.`);
+    if (m.permission !== "edit" && m.permission !== "look") errors.push(`${who}: choose Code edit or Code analysis.`);
     const note = typeof m.note === "string" ? m.note.trim() : "";
     if (note.length > NOTE_MAX) errors.push(`${who}: the role note is at most ${NOTE_MAX} characters.`);
     // A role from the library, or none (then the usual one for its access).
@@ -156,15 +154,11 @@ export function checkTeamSetup(
     const base = role ?? BUILT_IN_ROLES.find((r) => r.id === (m.permission === "look" ? "reviewer" : "lead"))!;
     const prompt = promptOf(who, m.prompt, base.prompt);
     const ai = pick(who, m.kind, m.model, m.effort);
-    // An access level its kind is qualified for, as New agent checks it.
-    const kind = ai ? agentKind(ai.kind) : undefined;
-    if (kind && (m.permission === "edit" || m.permission === "look") && !kind.levels.includes(m.permission))
-      return void errors.push(`${who}: ${kind.label} is qualified for ${kind.levels.map((l) => (l === "look" ? "Look only" : "Edit in its folder")).join(" and ")} so far.`);
     if (ai && name && (m.permission === "edit" || m.permission === "look"))
       out.push({ name, role: roleText(role ?? null, prompt, note), ...ai, permission: m.permission });
   });
   if (members.length && !members.some((m) => (m as Partial<TeamMemberSetup>)?.permission === "edit"))
-    errors.push("At least one member must edit its folder (Look only members cannot write code).");
+    errors.push("At least one member must have Code edit (Code analysis members cannot write code).");
   // A goal that is not text is refused, never silently dropped.
   if (s.goal !== undefined && s.goal !== null && typeof s.goal !== "string") errors.push("The goal must be text.");
   const goal = typeof s.goal === "string" ? s.goal.trim() : "";
@@ -184,7 +178,7 @@ export function checkTeamSetup(
   // changes, so it must edit its folder.
   if (!orchestrated || !orchestrator) {
     if ((members[0] as Partial<TeamMemberSetup> | undefined)?.permission !== "edit")
-      return { ok: false, errors: ["In a pair, the first member is the Lead you talk to, and it must edit its folder."] };
+      return { ok: false, errors: ["In a pair, the first member is the Lead you talk to, and it must have Code edit."] };
     return { ok: true, agents: out, goal, goalTo: 0, warnings: warn(out) };
   }
   // A second team in one tab gets "Orchestrator 2".

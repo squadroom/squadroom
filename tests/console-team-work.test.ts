@@ -267,7 +267,7 @@ test("a pair: a Pair Lead and a Reviewer, no Orchestrator; the first message goe
     { ...swapped.members[1], permission: "edit" },
   ];
   const refused = checkTeamSetup(swapped, { takenNames: [], codexOff: true });
-  assert.ok(!refused.ok && /first member is the Lead you talk to, and it must edit its folder/.test(refused.errors.join(" ")));
+  assert.ok(!refused.ok && /first member is the Lead you talk to, and it must have Code edit/.test(refused.errors.join(" ")));
 
   const h = await harness(t);
   await h.worker.start();

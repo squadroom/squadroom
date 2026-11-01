@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { reportsExpectedModel } from "./agents.ts";
+import { agentKind, reportsExpectedModel, type AgentModel } from "./agents.ts";
 import { claudeArgs, ClaudeProcess, PERMISSION_TOOL, toolSummary, type ClaudeEvent } from "./claude.ts";
 import { claudeSettings, decideControl } from "./permissions.ts";
 import { errorMessage, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 import { claudeTaskOp, unfollowable } from "./tasks.ts";
-import type { ConsoleAgent } from "./types.ts";
+import type { ConsoleAgent, TurnUsage } from "./types.ts";
 
 // The Claude Code driver behind the session seam: one long-lived `claude`
 // process per window, stream-json in and out. Its settings are fixed at
@@ -18,6 +18,41 @@ import type { ConsoleAgent } from "./types.ts";
  * folder, which the sandbox hides from every agent. */
 export function mcpConfigPath(shared: string, agentId: string) {
   return join(shared, `${agentId}.json`);
+}
+
+/** The credential Claude Code must report for a turn (`apiKeySource`): its
+ * API key's name for an API-key model, "none" (the login token) otherwise.
+ * Either way, no silent switch to the other. */
+export function expectedKeySource(model: AgentModel): string {
+  return model.paid ? model.paid.credential : "none";
+}
+
+/**
+ * What an API-key turn is charged from: every model's usage this turn
+ * (`modelUsage`, so helpers and Claude Code's own small requests count),
+ * summed and priced at the window's model. A model priced above it, one
+ * the Console does not know, or a web search (which has its own price)
+ * makes the usage untrusted: the turn is then charged its full allowance.
+ */
+export function apiKeyUsage(model: AgentModel, parts: { model: string; usage: TurnUsage; webSearches: number | undefined }[]): TurnUsage | null {
+  const paid = model.paid;
+  if (!paid || !parts.length) return null;
+  const known = agentKind("claude-code")?.models.filter((m) => m.paid) ?? [];
+  const rate = (p: NonNullable<AgentModel["paid"]>["prices"]) => [p.inputPerMtok, p.outputPerMtok, p.cachedInputPerMtok ?? p.inputPerMtok, p.cacheWritePerMtok ?? p.inputPerMtok];
+  const own = rate(paid.prices);
+  const sum: Required<Pick<TurnUsage, "inputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "outputTokens">> = { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
+  for (const part of parts) {
+    if (part.webSearches !== 0) return null;
+    const other = known.find((m) => reportsExpectedModel(m, part.model));
+    if (!other || rate(other.paid!.prices).some((r, i) => r > own[i])) return null;
+    const u = part.usage;
+    if (u.inputTokens === undefined || u.outputTokens === undefined) return null;
+    sum.inputTokens += u.inputTokens;
+    sum.cacheReadTokens += u.cacheReadTokens ?? 0;
+    sum.cacheWriteTokens += u.cacheWriteTokens ?? 0;
+    sum.outputTokens += u.outputTokens;
+  }
+  return sum;
 }
 
 class ClaudeSession implements AgentSession {
@@ -46,7 +81,7 @@ class ClaudeSession implements AgentSession {
     const args = claudeArgs({
       model,
       effort: agent.effort,
-      settings: claudeSettings(agent.folder, agent.permission, host.paths, !!agent.askFirst, !!ctx.documentsOnly),
+      settings: claudeSettings(agent.folder, agent.permission, host.paths, !!agent.askFirst, !!ctx.documentsOnly, !!model.paid),
       mcpConfig: config,
       system: ctx.system(),
       resume: ctx.storedSession(),
@@ -116,9 +151,16 @@ class ClaudeSession implements AgentSession {
     };
     if (ev.type === "init") {
       this.initSeen = true;
-      // No silent paid fallback: a subscription window never runs
-      // on API credentials, and runs only the model the registry expects.
-      if (ev.apiKeySource !== "none") return fail("Claude Code selected API credentials. The turn was stopped; no API fallback is allowed.");
+      // No silent switch: a subscription window never runs on API
+      // credentials, an API-key window runs only on its own key, and each
+      // runs only the model the registry expects.
+      const source = expectedKeySource(ctx.model);
+      if (ev.apiKeySource !== source)
+        return fail(
+          source === "none"
+            ? "Claude Code selected API credentials. The turn was stopped; no API fallback is allowed."
+            : `Claude Code did not run on ${source}. The turn was stopped.`,
+        );
       if (!reportsExpectedModel(ctx.model, ev.model)) return fail(`Claude Code reported ${String(ev.model).slice(0, 80)}, not ${ctx.model.runs}. The turn was stopped.`);
       // Kept only once both checks pass, so a rejected session is never resumed.
       return emit({ kind: "validated", sessionId: ev.sessionId });
@@ -192,7 +234,8 @@ class ClaudeSession implements AgentSession {
           outcome: ev.ok ? "done" : "failed",
           error: ev.ok ? null : `Claude Code reported ${ev.subtype}${ev.text ? `: ${ev.text}` : ""}`,
           text: ev.ok ? ev.text : undefined,
-          usage: ev.usage,
+          // An API-key turn is charged from every model's usage this turn.
+          usage: ctx.model.paid ? apiKeyUsage(ctx.model, ev.models) : ev.usage,
         });
       }
     }

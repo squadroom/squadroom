@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { agentKind } from "./agents.ts";
-import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "./acp.ts";
+import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "./acp.ts";
 import type { SandboxSpec } from "./launcher.ts";
-import { inside, realInside, type Decision } from "./permissions.ts";
+import { inside, outsideStep, realInside, type Decision } from "./permissions.ts";
 import { TEAM_TOOL_NAMES } from "./team.ts";
 import { acpToolLabel } from "./transcript.ts";
 import { errorMessage as message, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
@@ -35,7 +35,7 @@ function profileKey(spec: SandboxSpec) {
  * anything else, go to the owner. Ask me first sends every one that is not
  * refused to the owner.
  */
-export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst">, check = realInside): Decision {
+export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst"> & { stepFiles?: string[] | null }, check = realInside): Decision {
   const kind = typeof toolCall.kind === "string" ? toolCall.kind : "other";
   const title = typeof toolCall.title === "string" ? toolCall.title : kind;
   const summary = `${title}${toolCall.rawInput === undefined ? "" : `: ${JSON.stringify(toolCall.rawInput)}`}`;
@@ -65,13 +65,16 @@ export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<Console
     case "edit":
     case "delete":
     case "move":
-      if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+      if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
       if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
       if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p))) return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
+      // A tab with steps: only the current step's files.
+      const step = outsideStep(agent.folder, paths, agent.stepFiles);
+      if (step) return step;
       decision = { behavior: "allow", reason: "Files in this agent's own folder." };
       break;
     case "execute":
-      decision = agent.permission === "look" ? ask("A command needs the owner's approval in a Look only window.") : { behavior: "allow", reason: "Commands run in the sandbox." };
+      decision = agent.permission === "look" ? ask("A command needs the owner's approval in a Code analysis window.") : { behavior: "allow", reason: "Commands run in the sandbox." };
       break;
     case "fetch":
       return ask("Network access needs the owner's approval.");
@@ -80,6 +83,9 @@ export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<Console
   }
   return agent.askFirst && decision.behavior === "allow" ? ask("Ask me first: the owner decides.") : decision;
 }
+
+/** The usage of a request no model ran. */
+const NO_TOKENS = { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
 
 class AcpSession implements AgentSession {
   private driver: AcpDriver;
@@ -102,6 +108,9 @@ class AcpSession implements AgentSession {
   private sent = false;
   /** session/prompt has answered: the turn is over for its updates. */
   private answered = false;
+  /** The agent has sent an update about this turn (text, a tool, its
+   * context): it got past the provider's front door. */
+  private heard = false;
   private text = "";
   /** Permission requests waiting on the Console: answered `cancelled` at
    * cancellation, as the protocol asks. */
@@ -246,6 +255,7 @@ class AcpSession implements AgentSession {
     const reached = new Promise<"written" | "gone" | "unknown">((resolve) => (written = resolve));
     const prompt = [...(this.instruct ? [{ type: "text", text: `Your instructions for this conversation:\n\n${this.ctx.system()}\n\n---\n\n` }] : []), { type: "text", text: turn.text }];
     this.sent = true;
+    this.heard = false;
     turn.sending();
     // The answer ends the turn at once: updates read after it are dropped.
     const answer = this.proc.call("session/prompt", { sessionId: id, prompt }, 0, written, () => {
@@ -281,9 +291,10 @@ class AcpSession implements AgentSession {
     this.deliver();
     this.flushText();
     const reason = String(result.stopReason ?? "");
-    // Where the client reports its usage: ACP's `usage`, or Grok Build's
-    // own `_meta.usage`.
-    const usage = agentKind(this.ctx.agent.kind)?.acpUsage === "xai-meta" ? readXaiUsage(result._meta) : readAcpUsage(result.usage);
+    // Where the client reports its usage: ACP's `usage`, Grok Build's own
+    // `_meta.usage`, or ACP's `usage` with Gemini's meaning.
+    const reader = agentKind(this.ctx.agent.kind)?.acpUsage;
+    const usage = reader === "xai-meta" ? readXaiUsage(result._meta) : reader === "gemini" ? readGeminiUsage(result.usage) : readAcpUsage(result.usage);
     const emit = this.ctx.emit;
     if (reason === "end_turn") return emit({ kind: "completed", outcome: "done", error: null, usage });
     if (reason === "cancelled") return emit({ kind: "completed", outcome: "stopped", error: `${this.driver.label} stopped the turn.`, usage });
@@ -293,7 +304,12 @@ class AcpSession implements AgentSession {
     if (this.turn !== turn || this.proc.exited) return;
     this.deliver();
     this.flushText();
-    this.ctx.emit({ kind: "completed", outcome: "failed", error: message(error), usage: null });
+    // A request the provider turned away as unauthorized (HTTP 401 or 403
+    // as the error's code, Gemini CLI's way) before the agent said or did
+    // anything ran no model, so it costs nothing (owner, 2026-11-01). Any
+    // other failure without usage is still charged its full allowance.
+    const turnedAway = !this.heard && error instanceof AcpError && (error.code === 401 || error.code === 403);
+    this.ctx.emit({ kind: "completed", outcome: "failed", error: message(error), usage: turnedAway ? NO_TOKENS : null });
   }
   /** The agent's text since its last tool call, as one whole message (the
    * turn's final answer is the last one). */
@@ -328,6 +344,7 @@ class AcpSession implements AgentSession {
     // An update about this turn proves the agent has its prompt, whatever
     // the write's callback has said so far.
     if (this.sent) this.deliver();
+    this.heard = true;
     const emit = this.ctx.emit;
     const redactor = this.driver.host.redactor;
     for (const u of readAcpUpdate(params.update)) {
@@ -366,7 +383,7 @@ class AcpSession implements AgentSession {
     const answer = await this.ctx.permit(
       typeof toolCall.kind === "string" ? toolCall.kind : "other",
       toolCall.rawInput ?? toolCall.title ?? {},
-      decideAcp(toolCall, this.ctx.agent, this.driver.host.realInside),
+      decideAcp(toolCall, { ...this.ctx.agent, stepFiles: this.ctx.stepFiles?.() }, this.driver.host.realInside),
     );
     // Cancelled meanwhile: already answered.
     if (!this.asking.delete(id)) return;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ROLE_DESCRIPTION_MAX, ROLE_NAME_MAX, ROLE_PROMPT_MAX, type RoleDef } from "@/lib/console/roles";
+import { PERMISSION_LABELS } from "@/lib/console/types";
 import type { Run } from "./api";
 import { Panel } from "./Dialog";
 import styles from "./console.module.css";
@@ -20,7 +21,7 @@ export default function RolesDialog({ roles, run }: { roles: RoleDef[]; run: Run
           <ul className={styles.cleanupList}>
             {roles.map((r) => (
               <li key={r.id}>
-                <b>{r.name}</b> · {r.access === "edit" ? "Edit" : "Look only"} · {r.ai === "codex" ? "Codex" : "Claude Code"}
+                <b>{r.name}</b> · {PERMISSION_LABELS[r.access]} · {r.ai === "codex" ? "Codex" : "Claude Code"}
                 {r.builtIn ? (r.edited ? " · built-in, prompt changed" : " · built-in") : " · yours"}
                 <div className={styles.hint}>{r.description}</div>
                 <div className={styles.dialogButtons}>
@@ -59,8 +60,8 @@ export default function RolesDialog({ roles, run }: { roles: RoleDef[]; run: Run
           <label>
             Access
             <select value={editing.access} disabled={editing.builtIn} onChange={(e) => setEditing({ ...editing, access: e.target.value as RoleDef["access"] })}>
-              <option value="edit">Edit in its folder</option>
-              <option value="look">Look only</option>
+              <option value="edit">{PERMISSION_LABELS.edit}</option>
+              <option value="look">{PERMISSION_LABELS.look}</option>
             </select>
           </label>
           <label>

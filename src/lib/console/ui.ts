@@ -103,8 +103,6 @@ export const offeredKinds = (codexOff: string | null) => AGENT_KINDS.filter((k) 
 export const roleKind = (ai: AgentKind, codexOff: string | null): AgentKind => (ai === "codex" && codexOff ? "claude-code" : ai);
 /** A kind's first model, chosen when the kind changes. */
 export const firstModel = (kind: string) => AGENT_KINDS.find((k) => k.kind === kind)!.models[0].id;
-/** A kind qualified at Look only so far. */
-export const lookOnly = (kind: string) => !AGENT_KINDS.find((k) => k.kind === kind)?.levels.includes("edit");
 
 /** A team timeline entry's heading. */
 export const timelineLine = (e: Pick<TimelineEntry, "from" | "to" | "kind">) =>

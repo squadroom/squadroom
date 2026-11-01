@@ -27,9 +27,9 @@ Squadroom is **macOS only** for now.
 
 You need:
 
-- macOS with **at least 40 GB free** (`df -h /System/Volumes/Data`); the
-  setup script refuses to run with less, and the worker makes no new clone
-  when free disk would fall below 20 GB.
+- macOS with **about 10 GB free**, which is plenty
+  (`df -h /System/Volumes/Data`); the setup script warns you with less.
+  The worker makes no new agent copy when free disk would fall below 5 GB.
 - **Node.js** at the version in `.nvmrc` (24), from Homebrew
   (`brew install node@24`) or the official installer. The setup script looks
   for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
@@ -38,8 +38,9 @@ You need:
   verified there, for e-mailed codes (step 6). Without it Squadroom signs
   in, but refuses weighty actions, adding keys among them.
 - **A GitHub account** (for signing in) and the provider accounts you want
-  agents to use: a Claude subscription for Claude Code, a ChatGPT login for
-  Codex, API keys for the others.
+  agents to use: a Claude subscription or an Anthropic API key for Claude
+  Code, a ChatGPT login or an OpenAI API key for Codex, API keys for the
+  others.
 
 ## 2. Install the code
 
@@ -107,8 +108,17 @@ do not paste it anywhere else.
 sudo -u agent /usr/local/libexec/console-agent spawn /Users/agent /opt/console-clients/bin/codex login --device-auth
 ```
 
-It shows a code to enter at the address it prints. Squadroom refuses to
-run Codex on an API key.
+It shows a code to enter at the address it prints.
+
+Both can also run on an API key instead. Each Claude Code and Codex model
+has a second entry marked "(API key)": Claude Code's use
+`ANTHROPIC_API_KEY` and Codex's use `OPENAI_API_KEY`, from the Keys page
+(step 8). Those models are paid like any other API-key model and count
+toward the tab's spend limit. You can skip the logins above if you only
+want the API-key models. A window never switches between its login and
+a key: if the client reports the other one, the turn stops. Web search is
+off for the API-key models, because it is billed per search and Squadroom
+can't work out its cost from the usage the client reports.
 
 ## 5. An https address
 
@@ -255,16 +265,16 @@ without any model request.
   the ruleset first.
 - **A new empty folder** for each agent (a local repository on the Mac
   stands in for GitHub, so agents share one history).
-- **No project files**: agents that only talk (Look only).
+- **No project files**: agents that only talk (Code analysis).
 
 Inside a project, each tab is a separate piece of work with its own
 agents; **+** beside the tab names opens a new one. To add agents to the
 current tab, use **Add**:
 
 - **Agent** adds one agent: a name, the AI and model, the thinking level,
-  the access (**Edit in its folder** or **Look only**) and a role, whose
+  the access (**Code edit** or **Code analysis**) and a role, whose
   prompt you can change for this agent.
-- **Team** (projects with files) sets up several at once. Either an Orchestrator (Look only) with
+- **Team** (projects with files) sets up several at once. Either an Orchestrator (Code analysis) with
   up to seven members, which splits your goal among them, or a pair: a Lead
   you talk to and a Reviewer it asks before reporting back.
 - **From a template** starts a new tab from the built-in Document review
@@ -291,6 +301,13 @@ Things to know while using it:
   pull request, for repositories that use Codex's GitHub reviewer.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
+- **Tabs with steps** (from a template such as **Document review**): each
+  step names the files the agents may change during it. Any AI may edit
+  there, on a subscription or an API key. A request to change another file
+  is refused, and anything an agent changes outside the step's files
+  without asking (a tool that writes directly, a command) is put back
+  after its turn and listed in Needs you. Claude Code runs no commands in
+  such a tab; Codex and the ACP agents still can.
 - **Clean up** (or `npm run console:cleanup`) lists folders no open agent
   uses, with commits never pushed marked; nothing is removed until you
   confirm.
@@ -377,7 +394,7 @@ Set the check to a 5-minute period and a 10-minute grace time. The health
 check answers only on the internal Host `127.0.0.1:<port>`, and returns no
 data.
 
-**Image tools.** Claude Code windows at Edit in its folder can generate and
+**Image tools.** Claude Code windows at Code edit can generate and
 edit images through [Krea](https://www.krea.ai) when the project's **Image
 tools** switch is on (project menu; turning it on needs a fresh
 confirmation) and the Keys page has `KREA_API_KEY` with its cap. Each call is
@@ -390,21 +407,30 @@ folder and committed with the turn. Models and prices:
 
 Besides Claude Code and Codex, Squadroom drives agents that speak the
 [Agent Client Protocol](https://agentclientprotocol.com), each inside a
-macOS sandbox profile:
+macOS sandbox profile. All of them, and the login or key each one uses:
 
 | Kind | Login | Access |
 |---|---|---|
-| Grok Build | `XAI_API_KEY` (paid, capped) | Look only |
-| Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Look only |
-| Kimi Code | your Kimi Code membership, logged in as `agent` | Look only |
-| OpenCode | the chosen model's key, each paid and capped (see below) | Look only, with the project's network on |
+| Claude Code | your Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`), or `ANTHROPIC_API_KEY` (paid, capped) for its "(API key)" models | Code edit or Code analysis |
+| Codex | your ChatGPT login, kept in the agent account, or `OPENAI_API_KEY` (paid, capped) for its "(API key)" models | Code edit or Code analysis |
+| Grok Build | `XAI_API_KEY` (paid, capped) | Code edit or Code analysis |
+| Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Code edit or Code analysis |
+| Kimi Code | your Kimi Code membership, logged in as `agent` | Code edit or Code analysis |
+| OpenCode | the chosen model's key, each paid and capped (see below) | Code edit or Code analysis, with the project's network on |
 
-All four are listed under **Add**, **Agent** and in the team setup (Gemini
+All six are listed under **Add**, **Agent** and in the team setup (Gemini
 CLI, Kimi Code and OpenCode since pull request
-[#9](https://github.com/squadroom/squadroom/pull/9)). Look only means the
-agent can read, run commands you approve and message its team, but not
-change files. Edit in its folder needs its own sandbox breakout tests for
-each kind first.
+[#9](https://github.com/squadroom/squadroom/pull/9)), at either access level:
+
+- **Code edit**: the agent changes files in its own folder, and Squadroom
+  commits them after each turn. The sandbox lets it write only in its own
+  clone and its temporary folder, and a request to change a file anywhere
+  else is refused.
+- **Code analysis**: the agent can read, run commands you approve and
+  message its team, but not change files.
+
+The four ACP kinds have been tested at Code edit with a stand-in agent
+program, not yet with the real clients, so expect rough edges.
 
 OpenCode's models and the key each one uses:
 
@@ -425,7 +451,7 @@ turn stops and its reason tells you to turn Network on.
 
 OpenCode 1.19.5 was tried on a real Mac on 2026-11-01 with DeepSeek V4.1
 Flash, DeepSeek V4 Pro, Kimi K3, GLM-5.3, GLM-5.3-Flash and Qwen 3.8 Max,
-each at Look only with network on. Each one answered, named its model and
+each at Code analysis (then called Look only) with network on. Each one answered, named its model and
 reported its usage. A short turn cost from $0.0013 (GLM-5.3-Flash) to
 $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.

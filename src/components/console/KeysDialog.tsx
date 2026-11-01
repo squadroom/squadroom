@@ -221,7 +221,6 @@ function ConnectionRow({ panel, onCheck }: { panel: ConnectionPanel; onCheck: ()
     <li>
       <b>{panel.label}</b> · {pinned ? `verified with ${panel.pinned}` : "no verified version yet"}
       {!panel.offered && " · not offered yet"}
-      {panel.levels.length === 1 && panel.levels[0] === "look" && " · Look only"}
       <div className={styles.hint}>
         Installed: {busy ? "checking…" : (version ?? "not checked yet")}
         {version && c?.installed && pinned && (matches ? " (matches)" : " (differs from the verified version)")}

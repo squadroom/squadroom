@@ -19,8 +19,8 @@ test("every paid model records its prices, context window and maximum output; su
   for (const kind of AGENT_KINDS)
     for (const m of kind.models) {
       // Subscriptions: Claude Code's and Codex's logins, Kimi Code's
-      // membership.
-      if (kind.kind === "claude-code" || kind.kind === "codex" || kind.kind === "kimi-code") assert.equal(m.paid, undefined, m.id);
+      // membership; their API-key twins (`@api-key`) are paid.
+      if ((kind.kind === "claude-code" || kind.kind === "codex" || kind.kind === "kimi-code") && !m.id.endsWith("@api-key")) assert.equal(m.paid, undefined, m.id);
       else {
         assert.ok(m.paid, m.id);
         assert.ok(m.paid!.prices.inputPerMtok > 0 && m.paid!.prices.outputPerMtok > 0, m.id);

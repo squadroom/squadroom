@@ -211,7 +211,7 @@ test("store: projects with tabs, agents, queued turns, stops and the fenced work
   );
   assert.throws(
     () => runCommand(store, { action: "createAgent", tabId: tabs[0].id, name: "X", kind: "claude-code", model: "haiku", permission: "full" }),
-    /Look only or Edit/,
+    /Code edit or Code analysis/,
   );
   // The owner's message is a queued turn with its transcript row; key
   // shapes are masked before it is stored.
@@ -316,13 +316,13 @@ test("the stream reader: deltas, tools, results, control requests; a subagent's 
   assert.ok(claudeArgs({ model: agentModel("claude-code", "claude-opus-5-5")!, effort: "high", settings: {}, mcpConfig: "/x.json", system: "s", resume: "abc" }).join(" ").includes("--effort high"));
 });
 
-test("a project without files has Look only agents; account pauses only grow", () => {
+test("a project without files has Code analysis agents only; account pauses only grow", () => {
   const store = new ConsoleStore(":memory:");
   const p = runCommand(store, { action: "createProject", name: "Talk", source: "none" }).project as { id: string };
   const tabId = store.tabs(p.id)[0].id;
   assert.throws(
     () => runCommand(store, { action: "createAgent", tabId, name: "A", kind: "claude-code", model: "haiku", permission: "edit" }),
-    /Look only/,
+    /Code analysis/,
   );
   assert.equal((runCommand(store, { action: "createAgent", tabId, name: "A", kind: "claude-code", model: "haiku", permission: "look" }).agent as { permission: string }).permission, "look");
   const epoch = store.takeLease("w", Date.now())!;

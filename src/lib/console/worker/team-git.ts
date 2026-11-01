@@ -111,7 +111,7 @@ export const teamGit = {
   async teamPr(this: ConsoleWorker, { me, args }: TeamCall): Promise<string> {
     const project = this.store.project(me.projectId);
     if (project?.source !== "github") throw new TeamError("Only a GitHub project's agents have pull requests.");
-    if (me.permission !== "edit") throw new TeamError("A Look only agent has no branch, so no pull request of its own.");
+    if (me.permission !== "edit") throw new TeamError("A Code analysis agent has no branch, so no pull request of its own.");
     if (args.comment !== undefined && !(Number.isSafeInteger(args.comment) && (args.comment as number) >= 1))
       throw new TeamError("comment must be a comment's number from team_pr.");
     if (args.thread !== undefined && (typeof args.thread !== "string" || !THREAD.test(args.thread)))
@@ -131,7 +131,7 @@ export const teamGit = {
     const { me, t, args, epoch, key } = c;
     const project = this.store.project(me.projectId);
     if (project?.source !== "github") throw new TeamError("Only a GitHub project's agents have pull requests.");
-    if (me.permission !== "edit") throw new TeamError("A Look only agent has no pull request of its own.");
+    if (me.permission !== "edit") throw new TeamError("A Code analysis agent has no pull request of its own.");
     const thread = typeof args.thread === "string" ? args.thread.trim() : "";
     if (!THREAD.test(thread)) throw new TeamError("thread must be a thread id from team_pr.");
     if (args.resolve !== undefined && typeof args.resolve !== "boolean") throw new TeamError("resolve must be true or false.");
@@ -198,7 +198,7 @@ export const teamGit = {
     const { me, t, args } = c;
     const project = this.store.project(me.projectId);
     if (project?.source !== "github") throw new TeamError("Only a GitHub project's agents push branches; this project's work stays on the Mac.");
-    if (me.permission !== "edit") throw new TeamError("A Look only agent has no branch to push.");
+    if (me.permission !== "edit") throw new TeamError("A Code analysis agent has no branch to push.");
     // One approval at a time per agent: a repeated call waits, then
     // returns the first one's recorded result.
     return once(this, c, async () => {

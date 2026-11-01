@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { agentModel } from "../src/lib/console/agents.ts";
+import { apiKeyUsage, expectedKeySource } from "../src/lib/console/claude-session.ts";
+import { codexServerArgs } from "../src/lib/console/codex.ts";
+import { chargeTurn } from "../src/lib/console/spend.ts";
+import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
+
+// Claude Code on an Anthropic API key and Codex on an OpenAI API key, as
+// explicit model choices: each runs on its key and is charged from its
+// reported usage; a subscription window still refuses API credentials, and an API-key window never runs on the subscription login.
+// Against the fake clients: no sudo, no network, no model call.
+
+const ANTHROPIC = "sk-ant-api03-FAKE-anthropic-key-0000000000WXYZ";
+const OPENAI = "sk-proj-FAKE-openai-key-for-codex-000000000ABCD";
+const CAP = { usd: 10, url: "https://example.test/limits", checkedAt: "2026-11-01" };
+const SONNET_KEY = agentModel("claude-code", "claude-sonnet-5@api-key")!;
+const SOL_KEY = agentModel("codex", "gpt-5.6-sol@api-key")!;
+
+function keys(path: string) {
+  writeFileSync(
+    path,
+    JSON.stringify({
+      keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, ANTHROPIC_API_KEY: { value: ANTHROPIC, cap: CAP }, OPENAI_API_KEY: { value: OPENAI, cap: CAP } },
+      projects: {},
+    }),
+    { mode: 0o600 },
+  );
+}
+
+test("the API-key models: twins of the subscription ones, on the existing key names, at catalog prices", () => {
+  for (const [kind, credential] of [["claude-code", "ANTHROPIC_API_KEY"], ["codex", "OPENAI_API_KEY"]] as const)
+    for (const id of ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "haiku", "gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-luna"]) {
+      const base = agentModel(kind, id);
+      if (!base) continue;
+      const twin = agentModel(kind, `${id}@api-key`)!;
+      assert.equal(base.paid, undefined, id);
+      assert.equal(twin.paid?.credential, credential, id);
+      assert.equal(twin.model, base.model);
+      assert.equal(twin.runs, base.runs);
+      assert.match(twin.label, /\(API key\)$/);
+    }
+  // Claude's cache writes at the one-hour rate, the higher.
+  assert.equal(SONNET_KEY.paid!.prices.cacheWritePerMtok, 4);
+  assert.equal(expectedKeySource(SONNET_KEY), "ANTHROPIC_API_KEY");
+  assert.equal(expectedKeySource(agentModel("claude-code", "claude-sonnet-5")!), "none");
+  assert.deepEqual(codexServerArgs(false), ["app-server"]);
+  assert.deepEqual(codexServerArgs(true), ["app-server", "-c", 'cli_auth_credentials_store="ephemeral"']);
+});
+
+test("an API-key Claude turn is charged from every model's usage; a pricier or unknown model or a web search is not trusted", () => {
+  const part = (model: string, input: number, output: number, webSearches = 0) => ({ model, usage: { inputTokens: input, cacheReadTokens: 1, cacheWriteTokens: 0, outputTokens: output }, webSearches });
+  // The window's model and a cheaper Haiku request are summed.
+  assert.deepEqual(apiKeyUsage(SONNET_KEY, [part("claude-sonnet-5", 10, 5), part("claude-haiku-4-5-20251001", 20, 2)]), {
+    inputTokens: 30,
+    cacheReadTokens: 2,
+    cacheWriteTokens: 0,
+    outputTokens: 7,
+  });
+  assert.equal(apiKeyUsage(SONNET_KEY, [part("claude-sonnet-5", 10, 5), part("claude-opus-5-5", 1, 1)]), null);
+  assert.equal(apiKeyUsage(SONNET_KEY, [part("claude-sonnet-5", 10, 5), part("claude-mystery-9", 1, 1)]), null);
+  assert.equal(apiKeyUsage(SONNET_KEY, [part("claude-sonnet-5", 10, 5, 1)]), null);
+  assert.equal(apiKeyUsage(SONNET_KEY, []), null);
+  assert.equal(apiKeyUsage(SONNET_KEY, [{ model: "claude-sonnet-5", usage: { outputTokens: 5 }, webSearches: 0 }]), null);
+});
+
+test("Claude Code on an API key: only its key crosses, it must report that key, web search is off, and the turn is charged", async (t) => {
+  const h = await harness(t);
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "claude-sonnet-5@api-key");
+  const sub = h.agent("Sub");
+  await h.ready(paid.id, sub.id);
+  const turn = h.send(paid.id, "hello");
+  await h.ended(turn);
+  const row = h.store.turn(turn)!;
+  assert.equal(row.status, "done", row.reason ?? "");
+  const folder = h.store.agent(paid.id)!.folder;
+  const env = JSON.parse(readFileSync(join(folder, "env.json"), "utf8")) as string[];
+  assert.ok(env.includes("ANTHROPIC_API_KEY"));
+  assert.ok(!env.includes("CLAUDE_CODE_OAUTH_TOKEN"), "the login token crossed to an API-key window");
+  const args = JSON.parse(readFileSync(join(folder, "args.jsonl"), "utf8").trim().split("\n")[0]) as string[];
+  assert.equal(args[args.indexOf("--model") + 1], "claude-sonnet-5");
+  assert.ok((JSON.parse(args[args.indexOf("--settings") + 1]).permissions.deny as string[]).includes("WebSearch"));
+  // Every model's usage (the window's and the client's own Haiku request).
+  const usage = { inputTokens: 31, cacheReadTokens: 1, cacheWriteTokens: 0, outputTokens: 7 };
+  assert.equal(row.costBasis, "reported");
+  assert.equal(row.costUsd, chargeTurn(SONNET_KEY, usage)!.usd);
+  assert.ok(row.costUsd! > 0);
+
+  // A subscription window still gets only the login token and refuses API credentials.
+  const free = h.send(sub.id, "hello");
+  await h.ended(free);
+  assert.equal(h.store.turn(free)!.costUsd, null);
+  const subEnv = JSON.parse(readFileSync(join(h.store.agent(sub.id)!.folder, "env.json"), "utf8")) as string[];
+  assert.ok(subEnv.includes("CLAUDE_CODE_OAUTH_TOKEN") && !subEnv.includes("ANTHROPIC_API_KEY"));
+  const api = h.send(sub.id, "apikey");
+  await h.ended(api);
+  assert.match(h.store.turn(api)!.reason!, /API credentials/);
+
+  // An API-key window whose client ran on the login is stopped. Its prompt
+  // was already sent, so it is charged its full allowance and the tab waits.
+  const login = h.send(paid.id, "nokey");
+  await h.ended(login);
+  assert.equal(h.store.turn(login)!.status, "failed");
+  assert.match(h.store.turn(login)!.reason!, /did not run on ANTHROPIC_API_KEY/);
+  assert.equal(h.store.turn(login)!.costBasis, "allowance");
+});
+
+test("Codex on an API key: its own App Server, signed in with the key over stdin and in memory only; the ChatGPT server never sees it", async (t) => {
+  const h = await harness(t, {}, false, { codex: {} });
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "gpt-5.6-sol@api-key", "codex");
+  const sub = h.codexAgent("Sub");
+  await h.ready(paid.id, sub.id);
+  const turn = h.send(paid.id, "hello");
+  await h.ended(turn);
+  const row = h.store.turn(turn)!;
+  assert.equal(row.status, "done", row.reason ?? "");
+  // Two requests' usage, charged at the catalog's rates.
+  assert.equal(row.costBasis, "reported");
+  assert.equal(row.costUsd, chargeTurn(SOL_KEY, { inputTokens: 20, cacheReadTokens: 15, cacheWriteTokens: 2, outputTokens: 7 })!.usd);
+  const free = h.send(sub.id, "hello");
+  await h.ended(free);
+  assert.equal(h.store.turn(free)!.status, "done", h.store.turn(free)!.reason ?? "");
+  assert.equal(h.store.turn(free)!.costUsd, null);
+
+  const starts = readFileSync(join(h.agentHome, "codex-starts.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { pid: number; argv: string[]; keys: string[] });
+  assert.equal(starts.length, 2);
+  // No key in any server's environment or on its command line.
+  for (const s of starts) {
+    assert.deepEqual(s.keys, []);
+    assert.ok(!s.argv.join(" ").includes(OPENAI));
+  }
+  const keyed = starts.find((s) => s.argv.includes('cli_auth_credentials_store="ephemeral"'))!;
+  const chatgpt = starts.find((s) => s !== keyed)!;
+  assert.deepEqual(chatgpt.argv, ["app-server"]);
+  const calls = readFileSync(join(h.agentHome, "codex-calls.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { pid: number; method: string; params: Record<string, unknown> });
+  const of = (pid: number) => calls.filter((c) => c.pid === pid);
+  assert.deepEqual(of(keyed.pid).map((c) => c.method).slice(0, 4), ["initialize", "initialized", "account/login/start", "account/read"]);
+  assert.deepEqual(of(keyed.pid)[2].params, { type: "apiKey", apiKey: OPENAI });
+  assert.ok(!of(chatgpt.pid).some((c) => c.method === "account/login/start"));
+  // Each window's thread is on its own login's server; web search is off on the key.
+  const thread = (pid: number) => of(pid).find((c) => c.method === "thread/start")!.params as { cwd: string; config: Record<string, unknown> };
+  assert.equal(thread(keyed.pid).cwd, h.store.agent(paid.id)!.folder);
+  assert.equal(thread(keyed.pid).config.web_search, "disabled");
+  assert.equal(thread(chatgpt.pid).cwd, h.store.agent(sub.id)!.folder);
+  assert.equal(thread(chatgpt.pid).config.web_search, undefined);
+});
+
+test("an API-key Codex server that does not report the API key runs no turn", async (t) => {
+  const h = await harness(t, {}, false, { codex: { loginAs: "chatgpt" } });
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "gpt-5.6-sol@api-key", "codex");
+  await h.ready(paid.id);
+  const turn = h.send(paid.id, "hello");
+  await h.ended(turn);
+  assert.equal(h.store.turn(turn)!.status, "failed");
+  assert.match(h.store.turn(turn)!.reason!, /did not sign in with the OpenAI API key/);
+  assert.ok(!h.codexCalls().some((c) => c.method === "thread/start"));
+});

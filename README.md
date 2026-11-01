@@ -159,7 +159,7 @@ The pictures use invented demo data; they follow your light or dark setting.
 
 ## Requirements
 
-- **macOS** (Apple silicon or Intel) with at least 40 GB free disk.
+- **A Mac** with about 10 GB of free disk.
 - **Node.js** at the version in [`.nvmrc`](.nvmrc) (24), installed from
   Homebrew or the official installer (the setup script looks for it in
   `/opt/homebrew/bin` or `/usr/local/bin`).
@@ -170,8 +170,9 @@ The pictures use invented demo data; they follow your light or dark setting.
   is the simplest; any equivalent works.
 - **A GitHub OAuth app of your own** for sign-in.
 - **Accounts with the agent providers you want to use**: a Claude
-  subscription or API key for Claude Code, a ChatGPT login for Codex, a
-  Kimi Code membership for Kimi Code, and API keys for the others.
+  subscription or an Anthropic API key for Claude Code, a ChatGPT login or
+  an OpenAI API key for Codex, a Kimi Code membership for Kimi Code, and API
+  keys for the others.
 - **A [Resend](https://resend.com) account** for e-mailed codes and
   notifications. Squadroom signs in without it, but refuses weighty actions
   (including adding keys) until mail is configured.

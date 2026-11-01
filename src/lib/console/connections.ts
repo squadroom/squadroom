@@ -36,7 +36,6 @@ export interface ConnectionPanel {
   /** The version the Console is verified with ("unpinned" until it is). */
   pinned: string;
   offered: boolean;
-  levels: AgentKindInfo["levels"];
   /** Where the login lives when it is not in the key file. */
   accountLogin: boolean;
   credentials: CredentialPresence[];
@@ -58,7 +57,6 @@ export function connectionPanels(keys: KeysView, checks: Map<AgentKind, Connecti
     label: kind.label,
     pinned: kind.version,
     offered: kind.offered,
-    levels: kind.levels,
     accountLogin: !!kind.accountLogin,
     credentials: kindCredentials(kind).map((name) => {
       const global = keys.global.find((r) => r.name === name);

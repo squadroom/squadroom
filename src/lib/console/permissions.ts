@@ -46,7 +46,7 @@ function packageCacheEnv(dir: string): Record<string, string> {
 const DOCUMENTS_ONLY_DENY = ["Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"];
 
 /** `--settings` for one window: flags only, with `--setting-sources ""`. */
-export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false) {
+export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false, apiKey = false) {
   // Unreadable: the shared folder and each client's login, Kimi Code's
   // membership login too (only its own client reads it).
   const hidden = [paths.shared, `${paths.agentHome}/.codex`, `${paths.agentHome}/.claude`, `${paths.agentHome}/.kimi-code`];
@@ -69,6 +69,9 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
         ...hidden.map((p) => `Read(/${p}/**)`),
         ...(permission === "look" ? ["Edit", "Write", "NotebookEdit"] : []),
         ...(documentsOnly ? DOCUMENTS_ONLY_DENY : []),
+        // On an API key a web search is billed per search, which the
+        // Console cannot price from usage: not offered.
+        ...(apiKey && !documentsOnly ? ["WebSearch"] : []),
       ],
     },
     // The launcher passes no other variables, so the client's own switches
@@ -169,6 +172,13 @@ export function inStep(folder: string, path: string, files: string[]): boolean {
   }
 }
 
+/** A tab with steps: a write to any path outside the
+ * current step's files is refused, the same for every agent kind. */
+export function outsideStep(folder: string, paths: string[], stepFiles: string[] | null | undefined): Decision | null {
+  if (!stepFiles || paths.every((p) => inStep(folder, p, stepFiles))) return null;
+  return { behavior: "deny", reason: `This step may change only: ${stepFiles.join(", ")}.` };
+}
+
 /**
  * Decide one permission prompt. `realInside` confirms, on disk, that the
  * path's nearest existing folder (or the file itself) resolves inside the
@@ -260,14 +270,14 @@ function boundaries(
   const input = (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>;
   if (OWN_TOOL.test(tool)) return { behavior: "allow", reason: "A Console tool." };
   if (FILE_WRITE.has(tool)) {
-    if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+    if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
     const path = targetPath(tool, input);
     if (!path) return { behavior: "deny", reason: "The Console could not tell which file this changes." };
     if (!inside(agent.folder, path) || !realInside(agent.folder, path))
       return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
     // A tab with steps: only the current step's files.
-    if (agent.stepFiles && !inStep(agent.folder, path, agent.stepFiles))
-      return { behavior: "deny", reason: `This step may change only: ${agent.stepFiles.join(", ")}.` };
+    const step = outsideStep(agent.folder, [path], agent.stepFiles);
+    if (step) return step;
     return { behavior: "allow", reason: "A file in this agent's own folder." };
   }
   if (FILE_READ.has(tool)) {
@@ -344,6 +354,7 @@ export function codexThreadConfig(
   paths: ConsolePaths,
   mcp: { url: string; token: string },
   tmp: string,
+  apiKey = false,
 ) {
   const denied = [
     ...otherFolders.filter((f) => f && f !== agent.folder),
@@ -366,6 +377,9 @@ export function codexThreadConfig(
     // Console's own server gets a day instead of Codex's 60-second default.
     mcp_servers: { console: { url: mcp.url, http_headers: { Authorization: `Bearer ${mcp.token}` }, tool_timeout_sec: 86_400 } },
     shell_environment_policy: { set: { TMPDIR: `${tmp}/`, ...(agent.permission === "edit" ? packageCacheEnv(`${tmp}/cache`) : {}) } },
+    // On an API key a web search is billed per search, which the Console
+    // cannot price from usage: off.
+    ...(apiKey ? { web_search: "disabled" } : {}),
   };
 }
 
@@ -384,12 +398,12 @@ export function decideCodexCommand(params: Record<string, unknown>): Decision {
  * allowed only for an editing window and only inside its own folder. */
 export function decideCodexFiles(
   paths: string[],
-  agent: { folder: string; permission: Permission },
+  agent: { folder: string; permission: Permission; stepFiles?: string[] | null },
   check: (folder: string, path: string) => boolean = realInside,
 ): Decision {
-  if (agent.permission === "look") return { behavior: "deny", reason: "This window is Look only: it cannot change files." };
+  if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
   if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
   if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p)))
     return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
-  return { behavior: "allow", reason: "Files in this agent's own folder." };
+  return outsideStep(agent.folder, paths, agent.stepFiles) ?? { behavior: "allow", reason: "Files in this agent's own folder." };
 }
