@@ -11,11 +11,16 @@ export const git = {
   setTurnCommit(this: ConsoleStore, epoch: number, turnId: number, which: "before" | "after", sha: string | null) {
     this.write(epoch, `UPDATE console_turns SET commit_${which} = ? WHERE id = ?`, sha, turnId);
   },
-  /** Where an agent's folder was last known to keep to its tab's step: the commit after its latest earlier turn that began in the
-   * folder, or, when that turn was never committed (stopped or crashed
-   * mid-turn, or its commit failed), the commit it began from. */
+  /** Where an agent's folder was last known to keep to its tab's step: the commit after the turn of it that ran last (by when it
+   * started, since Send next reorders turns) and began in the folder, or,
+   * when that turn was never committed (stopped or crashed mid-turn, or
+   * its commit failed), the commit it began from. Never `turnId` itself. */
   stepBaseline(this: ConsoleStore, agentId: string, turnId: number): string | null {
-    const r = this.get("SELECT COALESCE(commit_after, commit_before) AS sha FROM console_turns WHERE agent_id = ? AND id < ? AND commit_before IS NOT NULL ORDER BY id DESC LIMIT 1", agentId, turnId);
+    const r = this.get(
+      "SELECT COALESCE(commit_after, commit_before) AS sha FROM console_turns WHERE agent_id = ? AND id <> ? AND commit_before IS NOT NULL ORDER BY started_seq IS NULL, started_seq DESC, id DESC LIMIT 1",
+      agentId,
+      turnId,
+    );
     return (r?.sha as string | null | undefined) ?? null;
   },
   /** Ended turns since the detector's baseline that were never checked for

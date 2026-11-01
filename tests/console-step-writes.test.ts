@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
+import { ConsoleStore } from "../src/lib/console/store.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // A tab with steps: any agent kind may edit, on any login, and
@@ -177,4 +178,70 @@ test("a tracked outside file deleted (and the deletion committed) is put back, a
   await h.ended(next);
   await h.until(() => !!h.store.turn(next)!.commitAfter, "next turn committed");
   assert.ok(!h.events(lead.id).some((e) => e.kind === "error"), JSON.stringify(h.events(lead.id).filter((e) => e.kind === "error")));
+});
+
+test("Send next reorders turns: leftovers are checked from the turn that ran last, never an older one by id", () => {
+  let clock = 1_000;
+  const store = new ConsoleStore(":memory:", () => clock++);
+  const epoch = store.takeLease("w1", clock)!;
+  const project = runCommand(store, { action: "createProject", name: "Docs", source: "folder" }).project as { id: string };
+  const tab = store.tabs(project.id)[0];
+  const lead = runCommand(store, { action: "createAgent", tabId: tab.id, name: "Lead", kind: "claude-code", model: "haiku", permission: "edit" }).agent as { id: string };
+  const ran = (id: number, before: string, after: string | null) => {
+    store.startTurn(epoch, id);
+    store.setTurnCommit(epoch, id, "before", before);
+    if (after) store.setTurnCommit(epoch, id, "after", after);
+    store.finishTurn(epoch, id, "done", null, null, "ok");
+  };
+  const first = store.queueTurn(lead.id, "one").id;
+  ran(first, "a".repeat(40), "b".repeat(40));
+  const later = store.queueTurn(lead.id, "two").id;
+  const sooner = store.queueTurn(lead.id, "three").id;
+  store.sendNext(sooner);
+  ran(sooner, "b".repeat(40), "c".repeat(40));
+  store.startTurn(epoch, later);
+  assert.equal(store.stepBaseline(lead.id, later), "c".repeat(40));
+  // Cut off before its commit: where it began.
+  const cut = store.queueTurn(lead.id, "four").id;
+  store.startTurn(epoch, cut);
+  store.setTurnCommit(epoch, cut, "before", "d".repeat(40));
+  store.finishTurn(epoch, cut, "interrupted", "Worker stopped.", null, null);
+  const next = store.queueTurn(lead.id, "five").id;
+  assert.equal(store.stepBaseline(lead.id, next), "d".repeat(40));
+});
+
+test("a new outside file staged and then changed again is still put back, and later turns commit", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await midTurn(h, lead, (folder) => {
+    writeFileSync(join(folder, "new.md"), "one\n");
+    git(folder, "add", "new.md");
+    writeFileSync(join(folder, "new.md"), "two\n");
+  });
+  const folder = h.store.agent(lead.id)!.folder;
+  assert.equal(existsSync(join(folder, "new.md")), false);
+  assert.equal(committed(folder, "new.md"), false);
+  assert.ok(!h.events(lead.id).some((e) => e.kind === "error"), JSON.stringify(h.events(lead.id).filter((e) => e.kind === "error")));
+});
+
+test("a merge left open (--no-commit) does not make an outside commit a parent of the Console's commit", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const branch = h.store.agentBase(lead.id).branch!;
+  await midTurn(h, lead, (folder) => {
+    git(folder, "checkout", "-q", "-b", "side");
+    writeFileSync(join(folder, "brief.md"), "forbidden\n");
+    git(folder, "add", "-A");
+    git(folder, "commit", "-q", "-m", "outside");
+    git(folder, "checkout", "-q", branch);
+    writeFileSync(join(folder, "notes.md"), "allowed\n");
+    git(folder, "merge", "-q", "--no-commit", "--no-ff", "side");
+  });
+  const folder = h.store.agent(lead.id)!.folder;
+  const parents = git(folder, "rev-list", "--parents", "-n", "1", `refs/heads/${branch}`).split(" ");
+  assert.equal(parents.length, 2, "one parent");
+  assert.equal(onBranch(folder, branch, "brief.md"), false);
+  assert.equal(onBranch(folder, branch, "notes.md"), true);
 });

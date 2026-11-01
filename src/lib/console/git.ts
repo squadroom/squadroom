@@ -731,6 +731,10 @@ export class Clone {
    * the changes are read again until none is outside. Returns the paths
    * put back; commitTurn with `only` then stages allowed paths alone. */
   async keepOnly(since: string, branch: string | null, allowed: (path: string) => boolean): Promise<string[]> {
+    // A merge, cherry-pick or revert the agent left open would make the
+    // Console's commit carry its commit as a parent: forgotten, its files
+    // kept as changes (a tab with steps has no team_pull merge to finish).
+    for (const op of ["merge", "cherry-pick", "revert"]) await this.git([op, "--quit"], "Clearing an unfinished Git operation");
     if (branch) {
       await this.git(["update-ref", `refs/heads/${branch}`, since], "Undoing the agent's own commits");
       await this.git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], "Returning to the agent's branch");
@@ -753,7 +757,7 @@ export class Clone {
     const added = paths.filter((p) => !known.has(p));
     if (there.length) await this.git(["restore", `--source=${since}`, "--staged", "--worktree", "--", ...literal(there)], "Putting back files outside the step");
     if (added.length) {
-      await this.git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ...literal(added)], "Putting back files outside the step");
+      await this.git(["rm", "-r", "-q", "-f", "--cached", "--ignore-unmatch", "--", ...literal(added)], "Putting back files outside the step");
       await this.git(["clean", "-f", "-q", "-x", "--", ...literal(added)], "Putting back files outside the step");
     }
   }
