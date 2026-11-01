@@ -27,9 +27,9 @@ Squadroom is **macOS only** for now.
 
 You need:
 
-- macOS with **at least 40 GB free** (`df -h /System/Volumes/Data`); the
-  setup script refuses to run with less, and the worker makes no new clone
-  when free disk would fall below 20 GB.
+- macOS with **about 10 GB free**, which is plenty
+  (`df -h /System/Volumes/Data`); the setup script warns you with less.
+  The worker makes no new agent copy when free disk would fall below 5 GB.
 - **Node.js** at the version in `.nvmrc` (24), from Homebrew
   (`brew install node@24`) or the official installer. The setup script looks
   for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
@@ -222,7 +222,8 @@ Open `https://<your address>/console` and sign in.
 
 ## 8. Keys
 
-Open **Keys** in the top bar. The page writes `~/.squadroom/console-keys.json`
+Open **Settings** (at the right of the top bar), then **Keys and
+connections**. The page writes `~/.squadroom/console-keys.json`
 (mode 0600, in a 0700 folder, never backed up, unreadable to `agent`).
 Every change needs an e-mailed code from the last 8 hours (step 6), so
 mail must be configured.
@@ -254,7 +255,7 @@ without any model request.
 
 ## 9. Your first project
 
-**+ New project** offers three kinds:
+**New project** (in the sidebar) offers three kinds:
 
 - **A GitHub repository** (`https://github.com/owner/name`) with a base
   branch (default `main`). Before anything is cloned, the worker checks
@@ -266,14 +267,30 @@ without any model request.
   stands in for GitHub, so agents share one history).
 - **No project files**: agents that only talk (Code analysis).
 
-Then **+ New agent**: a name, the AI and model, the thinking level, the
-access (**Code edit** or **Code analysis**) and role instructions. Or
-**+ Coding team** for an Orchestrator with Leads and a Reviewer.
+Inside a project, each tab is a separate piece of work with its own
+agents; **+** beside the tab names opens a new one. To add agents to the
+current tab, use **Add**:
+
+- **Agent** adds one agent: a name, the AI and model, the thinking level,
+  the access (**Code edit** or **Code analysis**) and a role, whose
+  prompt you can change for this agent.
+- **Team** (projects with files) sets up several at once. Either an Orchestrator (Code analysis) with
+  up to seven members, which splits your goal among them, or a pair: a Lead
+  you talk to and a Reviewer it asks before reporting back.
+- **From a template** starts a new tab from the built-in Document review
+  template or a tab you saved.
+
+Roles live under **Settings**, **Roles**. **New role** makes your own (a
+name, a description, the access, a suggested AI and a prompt), and a
+built-in role's prompt can be rewritten and reset.
 
 Things to know while using it:
 
-- **Needs you** (top bar) collects every permission request, question,
-  interrupted turn and pause across projects. For `npm install` and the
+- Agents message each other through team tools, and you see every message
+  in the tab's **Team** panel. You talk to the Orchestrator (or the pair's
+  Lead), or to any agent in its window.
+- **Needs you** (top bar) collects every permission request, question, note
+  from an agent, interrupted turn and pause across projects. For `npm install` and the
   like, allow `registry.npmjs.org` with **Always for this project**.
 - **Changes** (a window's ⋯ menu) shows each turn's commit. In a GitHub
   project, **Push branch** pushes the agent's `console/…` branch through
@@ -394,7 +411,7 @@ macOS sandbox profile. All of them, and the login or key each one uses:
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Code edit or Code analysis |
 | OpenCode | the chosen model's key, each paid and capped (see below) | Code edit or Code analysis, with the project's network on |
 
-All four are listed under **Add**, **Agent** and in the team setup (Gemini
+All six are listed under **Add**, **Agent** and in the team setup (Gemini
 CLI, Kimi Code and OpenCode since pull request
 [#9](https://github.com/squadroom/squadroom/pull/9)), at either access level:
 

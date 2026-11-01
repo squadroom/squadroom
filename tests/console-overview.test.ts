@@ -76,7 +76,7 @@ test("health warnings: worker down, backups missing, failed or stale, e-mails no
     leaseRenewedAt: now,
     backup: { succeededAt: now - HOUR, failedAt: 0 },
     mailFailed: 0,
-    disk: { freeBytes: 50 * 1024 ** 3, floorBytes: 20 * 1024 ** 3 },
+    disk: { freeBytes: 50 * 1024 ** 3, floorBytes: 5 * 1024 ** 3 },
     clients: [{ kind: "codex", label: "Codex", pinned: "0.155.1", installed: "0.155.1", checkedAt: now }],
   };
   assert.deepEqual(healthWarnings(healthy, now), []);
@@ -84,12 +84,12 @@ test("health warnings: worker down, backups missing, failed or stale, e-mails no
     ...healthy,
     worker: { ...healthy.worker, online: false },
     backup: { succeededAt: now - 30 * HOUR, failedAt: 0 },
-    disk: { freeBytes: 5 * 1024 ** 3, floorBytes: 20 * 1024 ** 3 },
+    disk: { freeBytes: 1024 ** 3, floorBytes: 5 * 1024 ** 3 },
     clients: [{ ...healthy.clients[0], installed: "0.156.0" }],
   };
   const warnings = healthWarnings(sick, now);
   assert.equal(warnings.length, 4);
-  assert.match(warnings.join(" "), /worker is not running.*30h old.*5\.0 GB.*0\.156\.0/);
+  assert.match(warnings.join(" "), /worker is not running.*30h old.*1\.0 GB.*0\.156\.0/);
   assert.match(healthWarnings({ ...healthy, backup: { succeededAt: now - HOUR, failedAt: now } }, now)[0], /last backup failed/);
   assert.match(healthWarnings({ ...healthy, backup: { succeededAt: 0, failedAt: 0 } }, now)[0], /No backup/);
   assert.deepEqual(healthWarnings({ ...healthy, mailFailed: 2 }, now), ["2 e-mails not sent."]);

@@ -1,7 +1,6 @@
 # Contributing
 
-Thanks for your interest. Squadroom is small; issues and pull requests are
-welcome.
+Squadroom is a small project. Issues and pull requests are welcome.
 
 ## Contributing workflow
 

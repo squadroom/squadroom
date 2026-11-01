@@ -132,28 +132,48 @@ export function readAcpUsage(usage: unknown): TurnUsage | null {
 }
 
 /**
+ * Usage where input already includes the cached tokens, thinking is billed
+ * as output but is not in it, and the total is input plus output: xAI's
+ * meaning and Gemini's. Usage that does not add up is contradictory ({}),
+ * and none at all is null.
+ */
+function readInclusiveUsage(usage: unknown, fields: { read: string; write?: string; thought: string }): TurnUsage | null {
+  if (!isObject(usage)) return null;
+  for (const field of [fields.read, fields.write, fields.thought, "totalTokens"])
+    if (field && usage[field] !== undefined && count(usage[field]) === undefined) return {};
+  const input = count(usage.inputTokens);
+  const output = count(usage.outputTokens);
+  const read = count(usage[fields.read]) ?? 0;
+  const write = (fields.write && count(usage[fields.write])) || 0;
+  const thought = count(usage[fields.thought]) ?? 0;
+  const total = count(usage.totalTokens);
+  if (input === undefined || output === undefined || read + write > input) return {};
+  if (total !== undefined && total !== input + output) return {};
+  return { inputTokens: input, cacheReadTokens: read, cacheWriteTokens: write, outputTokens: output + thought };
+}
+
+/**
  * Grok Build's usage (live check 2026-10-22, 1.0.62): not in session/prompt's
  * `usage` but in its `_meta.usage`, with xAI's own meaning. `inputTokens`
  * already includes the cached tokens (`cachedReadTokens`,
  * `cacheCreationTokens`); `reasoningTokens` are billed as output but are not
  * in `outputTokens`; `totalTokens` is input plus output. So priced at
- * catalog rates, it matched the client's own `costUsdTicks` exactly. Usage
- * that does not add up is contradictory ({}), and none at all is null.
+ * catalog rates, it matched the client's own `costUsdTicks` exactly.
  */
 export function readXaiUsage(meta: unknown): TurnUsage | null {
-  const usage = isObject(meta) ? meta.usage : undefined;
-  if (!isObject(usage)) return null;
-  for (const field of ["cachedReadTokens", "cacheCreationTokens", "reasoningTokens", "totalTokens"])
-    if (usage[field] !== undefined && count(usage[field]) === undefined) return {};
-  const input = count(usage.inputTokens);
-  const output = count(usage.outputTokens);
-  const read = count(usage.cachedReadTokens) ?? 0;
-  const write = count(usage.cacheCreationTokens) ?? 0;
-  const reasoning = count(usage.reasoningTokens) ?? 0;
-  const total = count(usage.totalTokens);
-  if (input === undefined || output === undefined || read + write > input) return {};
-  if (total !== undefined && total !== input + output) return {};
-  return { inputTokens: input, cacheReadTokens: read, cacheWriteTokens: write, outputTokens: output + reasoning };
+  return readInclusiveUsage(isObject(meta) ? meta.usage : undefined, { read: "cachedReadTokens", write: "cacheCreationTokens", thought: "reasoningTokens" });
+}
+
+/**
+ * Gemini CLI's usage (live check 2026-11-01, 0.65.0): in session/prompt's
+ * `usage` under ACP's names, but with Gemini's meaning. `inputTokens` is the
+ * prompt count, cached tokens included; `thoughtTokens` are billed as output
+ * but are not in `outputTokens`; `totalTokens` is input plus output. Read
+ * as plain ACP usage it never adds up once the model thinks, and every turn
+ * was charged its whole allowance.
+ */
+export function readGeminiUsage(usage: unknown): TurnUsage | null {
+  return readInclusiveUsage(usage, { read: "cachedReadTokens", thought: "thoughtTokens" });
 }
 
 export class AcpError extends Error {
