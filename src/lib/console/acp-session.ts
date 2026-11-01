@@ -13,7 +13,7 @@ import type { ConsoleAgent, ConsoleProject } from "./types.ts";
 // writes only in its clone and temporary folder, network off unless the
 // project's switch is on). The
 // first kind is OpenCode (`opencode acp`); every ACP kind goes through the
-// same conformance matrix (tests/console-acp.test.ts) before it is offered.
+// same conformance matrix (tests/console-acp.test.ts).
 //
 // The Console checks what it can before any paid request: protocol v1, team
 // tools over HTTP, no interactive login (an agent that asks to authenticate

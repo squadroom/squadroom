@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
+import { ACP_CLIENTS } from "../src/lib/console/clients.ts";
 import { readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { acpToolLabel, teamToolLabel, transcript } from "../src/lib/console/transcript.ts";
@@ -94,12 +95,13 @@ test("an ACP agent's permission requests: reads allowed; edits never at Look onl
     assert.equal(decideAcp({ kind: "other", title }, look).behavior, "ask", title);
 });
 
-test("OpenCode is qualified at Look only first, and not offered in the dialogs yet", async (t) => {
+test("OpenCode is offered at Look only, and Edit is refused", async (t) => {
   const h = await harness(t);
-  // The owner's commands refuse a kind that is not offered, at any level.
-  assert.throws(() => h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode"), /Choose an agent/);
-  assert.throws(() => h.agent("Scout", "edit", "openai/gpt-5.6-luna", "opencode"), /Choose an agent/);
-  assert.equal(agentKind("opencode")!.offered, false);
+  // The owner's commands make it at Look only and refuse Edit.
+  h.agent("Scout", "look", "openai/gpt-5.6-luna", "opencode");
+  assert.throws(() => h.agent("Scout2", "edit", "openai/gpt-5.6-luna", "opencode"), /qualified for Look only so far/);
+  assert.equal(agentKind("opencode")!.offered, true);
+  assert.equal(agentKind("opencode")!.version, ACP_CLIENTS.opencode.version);
   assert.deepEqual(agentKind("opencode")!.levels, ["look"]);
   // An agent at a level its kind is not qualified for never runs.
   keys(h.keysFile);

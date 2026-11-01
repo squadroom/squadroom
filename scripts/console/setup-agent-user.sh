@@ -44,7 +44,7 @@ readonly CLAUDE_VERSION=${versions[1]} CODEX_VERSION=${versions[2]}
 acp_clients=("${(@f)$($node --no-warnings --input-type=module -e 'const { ACP_CLIENTS: a } = await import(process.argv[1]); for (const [name, c] of Object.entries(a)) console.log(`${c.package} ${c.version} ${name}`);' "file://${HERE:h:h}/src/lib/console/clients.ts")}") ||
   fail "could not read the ACP clients from src/lib/console/clients.ts"
 for line in $acp_clients; do
-  [[ $line =~ '^@[a-z0-9-]+/[a-z0-9-]+ [0-9]+\.[0-9]+\.[0-9]+ [a-z]+$' ]] || fail "src/lib/console/clients.ts gave an ACP client this script does not understand: $line"
+  [[ $line =~ '^(@[a-z0-9-]+/)?[a-z0-9-]+ [0-9]+\.[0-9]+\.[0-9]+ [a-z]+$' ]] || fail "src/lib/console/clients.ts gave an ACP client this script does not understand: $line"
 done
 
 step "Checking free disk space"

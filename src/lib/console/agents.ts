@@ -2,8 +2,9 @@
 // New agent dialog reads it, and the worker validates against it.
 //
 // The kinds: Claude Code, Codex and the ACP agents (OpenCode, Gemini CLI,
-// Grok Build, Kimi Code). An ACP kind is tested offline and qualified live
-// at Look only before it is offered.
+// Grok Build, Kimi Code). Every kind is offered in the New agent and team
+// dialogs. An ACP kind runs at Look only: Edit in its folder needs its own
+// sandbox qualification first.
 
 import { MODELS, type Provider, type TokenPrices } from "../../config/models.ts";
 import { ACP_CLIENTS, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
@@ -72,9 +73,8 @@ export interface AgentKindInfo {
    * only; Edit in its folder follows the tests that try to break out of
    * its sandbox. */
   levels: ("look" | "edit")[];
-  /** Offered in the New agent dialog. An ACP kind is offered only once it
-   * has been qualified live and its usage shown trustworthy; until then
-   * only the worker and the tests use it. */
+  /** Offered in the New agent and team dialogs. Every kind is; false
+   * would leave a kind to the worker and the tests only. */
   offered: boolean;
   models: AgentModel[];
   /** Dated sources for the facts above. */
@@ -154,12 +154,12 @@ AGENT_KINDS.push({
   kind: "opencode",
   label: "OpenCode",
   binary: consoleClientPath("opencode"),
-  // Pinned when it is qualified live; the setup script does not
-  // install it yet.
-  version: "unpinned",
+  version: ACP_CLIENTS.opencode.version,
+  // Each model names its own API key (`paid.credential`): only the chosen
+  // model's key crosses.
   credential: null,
   levels: ["look"],
-  offered: false,
+  offered: true,
   models: [
     // The model OpenCode is asked to run is the one its session must
     // confirm (`provider/model`). Prices: src/config/models.ts.
@@ -184,16 +184,52 @@ AGENT_KINDS.push({
       // for Claude, the higher bound.
       paid: catalog("claude-haiku-4-5", "ANTHROPIC_API_KEY", 128_000, { cachedInputPerMtok: 0.1, cacheWritePerMtok: 2 }),
     },
+    // DeepSeek through OpenCode's own `deepseek` provider, which reads
+    // DEEPSEEK_API_KEY. Charged at the catalog's peak rates always (the
+    // off-peak half price is never assumed). The full allowance: the
+    // 1,048,576-token window and 393,216 maximum output DeepSeek's
+    // GET /models reports (models.dev, 2026-10-19), above the catalog's
+    // 1,000,000, so a turn without usage is never undercharged.
+    {
+      id: "deepseek/deepseek-v4-pro",
+      label: "DeepSeek V4 Pro (API key)",
+      model: "deepseek/deepseek-v4-pro",
+      runs: "deepseek/deepseek-v4-pro",
+      efforts: [],
+      paid: { ...catalog("deepseek-v4-pro", "DEEPSEEK_API_KEY", 393_216), contextWindow: 1_048_576 },
+    },
+    {
+      id: "deepseek/deepseek-flash",
+      label: "DeepSeek V4.1 Flash (API key)",
+      model: "deepseek/deepseek-flash",
+      runs: "deepseek/deepseek-flash",
+      efforts: [],
+      paid: { ...catalog("deepseek-flash", "DEEPSEEK_API_KEY", 393_216), contextWindow: 1_048_576 },
+    },
+    // Kimi K3 through OpenCode's `moonshotai` provider, which reads
+    // MOONSHOT_API_KEY. Cache writes at the one-hour rate ($6, twice the
+    // five-minute one), the higher, since the client chooses; the full
+    // allowance's output is the 1,048,576 maximum Moonshot documents.
+    {
+      id: "moonshotai/kimi-k3",
+      label: "Kimi K3 (API key)",
+      model: "moonshotai/kimi-k3",
+      runs: "moonshotai/kimi-k3",
+      efforts: [],
+      paid: catalog("kimi-k3", "MOONSHOT_API_KEY", 1_048_576, { cacheWritePerMtok: 6 }),
+    },
   ],
   sources: [
     "src/config/models.ts: prices, context windows",
+    "src/lib/console/clients.ts: opencode-ai pinned",
+    "https://github.com/sst/models.dev (2026-10-19 entries): OpenCode's provider ids `deepseek` (DEEPSEEK_API_KEY) and `moonshotai` (MOONSHOT_API_KEY), model ids, limits, cache prices",
   ],
 });
 
 // Gemini CLI, Grok Build and Kimi Code: each runs through the ACP driver
 // and OpenCode's conformance matrix (tests/console-acp-{gemini,grok,kimi}
-// .test.ts), is qualified at Look only, and is not offered until it passes
-// live. ACP modes from each client's documentation, 2026-10-21.
+// .test.ts) and is offered at Look only. ACP modes from each client's
+// documentation, 2026-10-21.
 AGENT_KINDS.push(
   {
     kind: "gemini-cli",
@@ -203,7 +239,11 @@ AGENT_KINDS.push(
     acpArgs: ["--acp"],
     credential: null,
     levels: ["look"],
-    offered: false,
+    // Offered at Look only. Its reported usage is checked offline but not
+    // yet against Google's bill, so the key's provider-side monthly cap
+    // (required before any agent gets it) is the backstop; a turn whose
+    // usage is missing or does not add up is charged its full allowance.
+    offered: true,
     models: [
       {
         id: "gemini-3.8-flash",
@@ -237,8 +277,8 @@ AGENT_KINDS.push(
     credential: null,
     levels: ["look"],
     // Qualified live at Look only on 2026-10-22/23: model, usage, and the
-    // sandbox breakout tests with the real client. Offered at that level;
-    // Edit in its folder needs its own qualification.
+    // sandbox breakout tests with the real client. Edit in its folder needs
+    // its own qualification.
     offered: true,
     models: [
       {
@@ -270,7 +310,8 @@ AGENT_KINDS.push(
     credential: null,
     accountLogin: true,
     levels: ["look"],
-    offered: false,
+    // Offered at Look only, on the owner's membership: nothing is metered.
+    offered: true,
     models: [
       // The membership's coding model, as Kimi Code names it; not metered.
       { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding (membership)", model: "kimi-code/kimi-for-coding", runs: "kimi-code/kimi-for-coding", efforts: [] },

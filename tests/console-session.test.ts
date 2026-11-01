@@ -222,9 +222,8 @@ test("a prompt whose durable 'prompted' mark cannot be written is never handed t
 test("team setup refuses an access level the chosen kind is not qualified for", async () => {
   const { checkTeamSetup } = await import("../src/lib/console/team-setup.ts");
   const { agentKind } = await import("../src/lib/console/agents.ts");
-  const kind = agentKind("opencode")!;
-  kind.offered = true;
-  try {
+  assert.equal(agentKind("opencode")!.offered, true);
+  {
     const result = checkTeamSetup(
       {
         orchestrated: false,
@@ -234,7 +233,5 @@ test("team setup refuses an access level the chosen kind is not qualified for", 
     );
     assert.equal(result.ok, false);
     assert.match(JSON.stringify(result), /OpenCode is qualified for Look only so far/);
-  } finally {
-    kind.offered = false;
   }
 });
