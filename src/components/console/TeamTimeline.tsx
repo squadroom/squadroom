@@ -43,7 +43,7 @@ export default function TeamTimeline({ tab, members, run }: { tab: Tab; members:
       <ol>
         {entries.map((e) => (
           <li key={e.id} className={e.state === "interrupted" ? styles.denied : undefined}>
-            <b>{timelineLine(e)}</b>
+            <b>{timelineLine(e)}</b>{" "}
             {e.state !== "done" && e.state !== "answered" && <span className={styles.chip}>{STATE_LABELS[e.state] ?? e.state}</span>}
             <div className={styles.timelineText}>{e.text}</div>
           </li>

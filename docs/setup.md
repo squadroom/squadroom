@@ -334,8 +334,8 @@ back to the previous commit.
 **E-mail** (the three `CONSOLE_` mail settings in step 6). Besides sign-in
 codes, the worker sends fixed-wording e-mails with no model-written text:
 sign-in paused after five wrong codes, a failed nightly backup (at most one
-a day), and, if you switch it on in **Settings › Notifications**, "the
-Console needs you" once something has waited 15 minutes (counts only, at
+a day), and, if you switch it on in **Settings › Notifications**, "Squadroom
+needs you" once something has waited 15 minutes (counts only, at
 most one an hour). Failed sends are retried for 24 hours.
 
 **Backups.** With `CONSOLE_BACKUP_DIR` set in `.env.local`, the worker writes

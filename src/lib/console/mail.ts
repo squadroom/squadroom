@@ -87,21 +87,21 @@ export function renderConsoleMail(mail: ConsoleMail, origin: string | null): Ren
         ]
       : mail.kind === "backup_failed"
         ? [
-            "Console backup failed",
+            "Squadroom backup failed",
             "Tonight's copy of the Console's database did not reach the backup folder. Check the backup folder on the server; the Console worker tries again every hour.",
           ]
         : [
-            `The Console needs you: ${needsCountsText(mail.counts)}`,
+            `Squadroom needs you: ${needsCountsText(mail.counts)}`,
             "Agents have waited at least 15 minutes for you. At most one of these e-mails is sent an hour; switch them off in Settings › Notifications.",
           ];
   const link = origin ? `${origin}/console` : null;
-  const action = link ? `Open the Console: ${link}` : "Open the Console to see what it needs.";
-  const footer = "Sent by Squadroom. Its e-mails never contain model-written text; the details are in the Console.";
+  const action = link ? `Open Squadroom: ${link}` : "Open Squadroom to see what it needs.";
+  const footer = "Sent by Squadroom. Its e-mails never contain model-written text; the details are in Squadroom.";
   return {
     subject,
     text: `${subject}\n\n${detail}\n\n${action}\n\n${footer}\n`,
     html: `<p>${escapeHtml(subject)}</p><p>${escapeHtml(detail)}</p><p>${
-      link ? `<a href="${escapeHtml(link)}">Open the Console</a>` : escapeHtml(action)
+      link ? `<a href="${escapeHtml(link)}">Open Squadroom</a>` : escapeHtml(action)
     }</p><p style="color:#666;font-size:12px">${escapeHtml(footer)}</p>`,
   };
 }

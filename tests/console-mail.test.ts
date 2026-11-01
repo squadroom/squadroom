@@ -60,10 +60,10 @@ test("the templates: fixed wording and a link to the Console", () => {
   const locked = renderConsoleMail({ kind: "signin_locked", minutes: 15 }, "https://console.example");
   assert.equal(locked.subject, "Sign-in paused for 15 minutes after 5 wrong codes");
   assert.match(locked.text, /emergency sign-in on the server still works/);
-  assert.match(locked.text, /Open the Console: https:\/\/console\.example\/console/);
+  assert.match(locked.text, /Open Squadroom: https:\/\/console\.example\/console/);
   assert.match(locked.html, /<a href="https:\/\/console\.example\/console">/);
   const backup = renderConsoleMail({ kind: "backup_failed" }, null);
-  assert.equal(backup.subject, "Console backup failed");
+  assert.equal(backup.subject, "Squadroom backup failed");
   assert.doesNotMatch(backup.text, /https?:/);
 });
 
@@ -151,7 +151,7 @@ test("a failed Console backup queues one e-mail for the day and the worker sends
   await h.until(() => h.store.mailRows().some((r) => r.status === "sent"), "the backup e-mail is sent");
   assert.deepEqual(h.store.mailRows().map((r) => r.key), [backupFailedKey(now())]);
   assert.equal(h.store.backupState().failedAt > 0, true);
-  assert.deepEqual(h.resend.sent.map((s) => s.subject), ["Console backup failed"]);
+  assert.deepEqual(h.resend.sent.map((s) => s.subject), ["Squadroom backup failed"]);
 });
 
 test("e-mail is off without its three settings; nothing is queued for a failed backup", async (t) => {

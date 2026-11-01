@@ -287,7 +287,7 @@ export default function ConsoleApp() {
       <span aria-hidden="true">
         <Icon name="console" size={12} />
       </span>
-      Console
+      Squadroom
     </strong>
   );
   // The sidebar's contents, also shown in the phone's drawer.

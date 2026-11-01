@@ -87,7 +87,7 @@ export default function TopBar({
           <Icon name="chevron" size={14} />
         </MenuButton>
       ) : (
-        <strong className={styles.projectButton}>Console</strong>
+        <strong className={styles.projectButton}>Squadroom</strong>
       )}
       <form
         role="search"
