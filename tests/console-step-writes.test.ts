@@ -245,3 +245,29 @@ test("a merge left open (--no-commit) does not make an outside commit a parent o
   assert.equal(onBranch(folder, branch, "brief.md"), false);
   assert.equal(onBranch(folder, branch, "notes.md"), true);
 });
+
+test("a merge left open with a conflict in an allowed file: its markers are not committed", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const branch = h.store.agentBase(lead.id).branch!;
+  const folder = h.store.agent(lead.id)!.folder;
+  writeFileSync(join(folder, "notes.md"), "base\n");
+  git(folder, "add", "-A");
+  git(folder, "commit", "-q", "-m", "earlier");
+  const turn = await midTurn(h, lead, (f) => {
+    git(f, "checkout", "-q", "-b", "side");
+    writeFileSync(join(f, "notes.md"), "theirs\n");
+    git(f, "commit", "-q", "-am", "side");
+    git(f, "checkout", "-q", branch);
+    writeFileSync(join(f, "notes.md"), "ours\n");
+    git(f, "commit", "-q", "-am", "ours");
+    try {
+      git(f, "merge", "-q", "side");
+    } catch {
+      // Stopped with a conflict, as wanted.
+    }
+  });
+  assert.doesNotMatch(git(folder, "show", `refs/heads/${branch}:notes.md`), /<<<<<<<|>>>>>>>/);
+  assert.ok(h.events(lead.id).some((e) => e.turnId === turn && e.kind === "error" && /Conflict markers remain in notes\.md/.test(JSON.stringify(e.body))));
+});

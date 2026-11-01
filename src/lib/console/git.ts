@@ -702,8 +702,16 @@ export class Clone {
     // and files the repository already tracks there are kept, never deleted.
     await this.git(["reset", "--quiet", "--", CLONE_TMP, ".console-uploads"], "Clearing the index");
     if (options.only && !merging) {
-      // A tab with steps: the index goes back to HEAD and only the paths
-      // the step allows are staged, so nothing else is ever committed.
+      // A tab with steps: a merge the step check forgot (`merge --quit`)
+      // leaves its conflicted paths unmerged in the index; an allowed one
+      // still holding conflict markers is refused as an unfinished merge is.
+      const marked = await this.markers((await this.unmerged()).filter(options.only));
+      if (marked.length) {
+        if (options.unresolved === "skip") return null;
+        throw new GitError(`Conflict markers remain in ${marked.slice(0, 10).join(", ")}. Resolve them, and the Console commits the turn's changes.`);
+      }
+      // The index goes back to HEAD and only the paths the step allows are
+      // staged, so nothing else is ever committed.
       await this.git(["reset", "--quiet"], "Clearing the index");
       const paths = (await this.changes()).map((c) => c.path).filter(options.only);
       if (!paths.length && !merging) return null;
