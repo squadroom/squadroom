@@ -8,6 +8,7 @@ acpConformance({
   label: "Kimi Code",
   model: "kimi-code/kimi-for-coding",
   other: "kimi-code/kimi-k3-preview",
+  offered: true,
   args: ["acp"],
   configOptions: true,
   key: null,

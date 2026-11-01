@@ -119,8 +119,8 @@ export function checkTeamSetup(
   const orchestrated = s.orchestrated !== false;
   const pick = (who: string, kind: unknown, model: unknown, effort: unknown): { kind: AgentKind; model: string; effort: ConsoleEffort | null } | null => {
     const k = agentKind(kind);
-    // Only kinds offered in the dialogs (an ACP kind not yet qualified is not).
-    if (!k || !k.offered) return errors.push(`${who}: choose Claude Code or Codex.`), null;
+    // Only kinds offered in the dialogs.
+    if (!k || !k.offered) return errors.push(`${who}: choose an agent.`), null;
     if (k.kind === "codex" && ctx.codexOff) return errors.push(`${who}: Codex is off right now; choose Claude Code.`), null;
     const m = agentModel(k.kind, model);
     if (!m) return errors.push(`${who}: ${k.label} does not offer that model.`), null;
