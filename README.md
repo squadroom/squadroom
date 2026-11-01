@@ -1,13 +1,10 @@
 # Squadroom
 
-Squadroom is a browser console for running a squad of coding agents —
-Claude Code, Codex and Grok Build today, with Gemini CLI, Kimi Code and
-OpenCode built in but not yet switched on — side by side. You
-open projects, add tabs, and put named agent windows in each tab. Every
-agent runs as a dedicated, sandboxed macOS user in its own Git clone, and
-agents in a tab talk to each other through mailboxes (team tools), so a
-Lead can ask a Reviewer for a review without you copying text between
-windows.
+Squadroom lets you put several coding agents on a job as a team. They
+message each other on their own, each in a role you pick from the built-in
+ones or write yourself as a prompt, and they only come to you when they
+need a decision. It's a web page you run on your own Mac, and you can have
+several repos open with a different squad on each piece of work.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-desktop-dark.png">
@@ -16,41 +13,124 @@ windows.
 
 Website: [squadroom.github.io](https://squadroom.github.io)
 
-It runs on your own Mac, uses your own provider accounts and keys, and is
-reached from any browser (including a phone) at one private https address
-that only your GitHub account can sign in to.
+It uses your own accounts and keys, and you open it in a browser (a phone
+works too) at a private https address that only your GitHub account can
+sign in to.
 
-**Status: early, and macOS only.** It works, but it has not been packaged:
-setup takes an afternoon and needs `sudo` once. Linux and Windows are not
+**Status: early, and macOS only.** It works, but it isn't packaged yet.
+Setup takes an afternoon and needs `sudo` once. Linux and Windows aren't
 supported.
 
-## What it does
+## How a squad works together
 
-- **Projects, tabs and agent windows.** A project is a GitHub repository, a
-  new empty folder per agent, or no files at all (agents that only talk).
-  Each agent window streams its replies, folds its thinking, and shows each
-  tool call or command as one line you can open.
-- **One clone per agent, one commit per turn.** Every agent works in its own
-  Git clone on its own `console/…` branch. When a turn ends, Squadroom
-  commits what changed, so every turn is a checkpoint you can review in the
-  window's **Changes** view.
-- **Teams.** Agents in a tab call team tools: `team_send`, `team_ask` and
-  `team_reply` (messages that arrive when the recipient is free),
-  `team_pull` (merge a teammate's work), `team_claim` / `team_hold`
-  (who edits what), `team_push` (ask you to push its branch and open a
-  pull request) and `team_pr` (read the review). Routes can pass a finished
-  turn's reply to a teammate automatically.
-- **Needs you.** Anything the Console does not decide by itself — network
-  access for `npm install`, an unknown tool, a push, a question from an
-  agent — waits in one tray across every project, on desktop or phone.
-- **Guard rails.** Per-turn time and output limits, a per-tab spend limit for
-  API-key models, a circle detector that pauses two agents that keep
-  messaging each other without progress, and pause/resume for a tab, a
-  project or everything.
-- **Odds and ends.** Templates for tabs, a role library, an approve gate,
-  a run report as Markdown, full-text search over conversations, an
-  Overview page, browser and e-mail notifications, nightly backups, and
-  optional image tools (Krea) for Claude Code windows.
+A squad is the group of agents on one piece of work. Each of them has team
+tools, and with them an agent can send a teammate a message (`team_send`),
+ask a question and get the answer back (`team_ask`, `team_reply`), merge in
+a teammate's work (`team_pull`), claim the files it's about to edit
+(`team_claim`), ask a teammate to hold off (`team_hold`), ask you to push
+its branch and open a pull request (`team_push`), and read the review on it
+(`team_pr`). A message waits until the other agent
+finishes its current turn, then arrives as its next prompt. Routes pass one
+agent's finished reply straight to another, for example when the Lead ends
+with "ready for review".
+
+With a team you give the goal to the Orchestrator, and it reports back to
+you in its window. With a pair you talk to the Lead. You can type into any
+agent's window at any time. Everything else that needs you goes into one
+tray, **Needs you**, which covers every project: network requests,
+questions, pushes, notes agents leave for you (`team_report`) and paused
+tabs. The **Team** panel shows every message between a tab's agents.
+
+Every agent works in its own Git clone on its own `console/…` branch.
+Squadroom commits what changed at the end of each turn, so you can check the
+work one turn at a time in the window's **Changes** view. Nothing is pushed
+until you approve it.
+
+## Roles
+
+A role is a prompt with a name. It tells the agent what its job is and how
+to work with the others. There are eight built in: Orchestrator, Planner,
+Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
+you add an agent, and you can change the prompt for that one agent.
+
+To make your own, open **Settings**, then **Roles**, then **New role**: a
+name, a one-line description, edit or look only, a suggested tool (Claude
+Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
+a built-in role's prompt and reset it later. A tab can be saved as a
+template with its agents, roles and routes.
+
+## Projects, tabs and squads
+
+- **Projects.** A project is usually a GitHub repo. It can also be a new
+  local folder, or no files at all for agents that only talk. You can have
+  several projects going.
+- **Tabs.** A tab is one piece of work inside a project, such as a feature,
+  a security review or the docs. Tabs run at the same time, and each has
+  its own agents.
+- **Squads.** The agents in a tab work as a squad. It can be one agent, a
+  pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
+  seven members, and you can add more agents by hand. Each agent has its own
+  name, model and thinking level, and either edits in its own folder or only
+  looks. You can mix tools in one squad.
+
+Up to six agent turns run at once across everything, and three per account
+or API key. Anything over that waits in a queue.
+
+## Agent tools
+
+You can pick any of these when you add an agent or set up a team, and you
+can mix them in one squad. Gemini CLI, Kimi Code and OpenCode become
+selectable once pull request
+[#9](https://github.com/squadroom/squadroom/pull/9) is merged.
+
+- **Claude Code**, on your Claude subscription or an API key. It can edit
+  in its own folder or only look.
+- **Codex**, on your ChatGPT login. It can edit or only look.
+- **Grok Build**, with an xAI API key. It can only look for now.
+- **Gemini CLI**, with a Gemini API key. It can only look for now.
+- **Kimi Code**, on your Kimi Code membership. It can only look for now.
+- **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
+  Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash, Kimi K3, GLM-5.3,
+  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It can only look for
+  now, and it needs the project's network switch on: with network off it
+  can't start.
+
+An agent that only looks can read the code, run commands you approve and
+message its teammates, but it can't change files.
+
+OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
+real Mac on 2026-11-01: each answered, named its model and reported what it
+used. A short turn cost between $0.0013 and $0.026. Gemini CLI and Kimi
+Code haven't had a live turn yet. See
+[docs/setup.md](docs/setup.md#12-other-agent-kinds-acp) for the keys each
+model needs.
+
+Claude Code agents that can edit can also make and edit images with
+[Krea](https://www.krea.ai), which helps when you're prototyping a design.
+You switch this on per project. Each image costs between $0.015 and $0.065
+and is charged to the tab, and one turn can make at most 8 images and spend
+at most $1. The images go in the agent's `design/` folder and are committed
+with its turn.
+
+## Limits
+
+- **Spend, per tab.** Each tab has a spend limit for API-key models: $5
+  unless you change it, anywhere from $0.01 to $1,000. When a tab reaches
+  it, the tab pauses until you press **Reset spend**. Subscription logins
+  (a Claude plan, a ChatGPT login) aren't counted. There are no separate
+  project or per-agent spend limits.
+- **Spend, per key.** Each paid API key needs a monthly cap that you set on
+  the provider's own site first and then enter in Squadroom. No agent gets
+  the key until you do. The provider's cap is the real ceiling.
+- **Runaway squads.** A tab pauses when one message from you has led to 40
+  agent turns or two hours of work, or when two agents have sent each other
+  12 messages with no new commit.
+- **Turns.** A turn stops after 30 minutes, or 10 minutes with no output.
+- You can pause a tab, a project or everything at any time.
+
+Other things it has: a run report as Markdown, full-text search over
+conversations, an Overview page, browser and e-mail notifications and
+nightly backups.
 
 ## Screenshots
 
@@ -90,8 +170,8 @@ The pictures use invented demo data; they follow your light or dark setting.
   is the simplest; any equivalent works.
 - **A GitHub OAuth app of your own** for sign-in.
 - **Accounts with the agent providers you want to use**: a Claude
-  subscription or API key for Claude Code, a ChatGPT login for Codex, API
-  keys for the others.
+  subscription or API key for Claude Code, a ChatGPT login for Codex, a
+  Kimi Code membership for Kimi Code, and API keys for the others.
 - **A [Resend](https://resend.com) account** for e-mailed codes and
   notifications. Squadroom signs in without it, but refuses weighty actions
   (including adding keys) until mail is configured.
@@ -113,8 +193,8 @@ npm run console:worker            # in a second terminal: the worker that runs a
 
 Then point your https proxy at port 3011 (for example
 `tailscale serve --bg 3011`), open `https://<your address>/console`, sign in
-with GitHub, and add your keys on the **Keys** page. For daily use, install
-both processes as LaunchAgents (`scripts/install-web-launch-agent.sh` and
+with GitHub, and add your keys under **Settings**, **Keys and
+connections**. For daily use, install both processes as LaunchAgents (`scripts/install-web-launch-agent.sh` and
 `scripts/console/install-launch-agent.sh`) and update with `npm run update`.
 
 ## Configuration
@@ -134,7 +214,8 @@ Everything is in one file, [`.env.example`](.env.example); copy it to
 
 Agent credentials (Claude login token, API keys, the GitHub token for
 pushes) never go in `.env.local`. They live in
-`~/.squadroom/console-keys.json` (mode 0600), which the **Keys** page writes.
+`~/.squadroom/console-keys.json` (mode 0600), which the **Keys and
+connections** page writes.
 Each paid API key must have a monthly cap that you first set on the
 provider's own limits page; Squadroom refuses to hand out a paid key
 without one.
@@ -153,7 +234,7 @@ The longer version, with the threat model, is in
   spend limits, every key change) need a code from the last 8 hours.
   Without mail, GitHub is the only step and those actions are refused until
   mail is configured.
-- **Nothing is trusted for coming from the Mac itself.** The web server
+- **Requests from the Mac itself aren't trusted either.** The web server
   listens on loopback only, but agents run on the same Mac, so every request
   needs a signed-in session; commands also need a same-origin `Origin`.
   Pages carry a strict Content-Security-Policy.
@@ -183,7 +264,7 @@ Gemini CLI, Grok Build, Kimi Code, OpenCode) with **your own** accounts,
 subscriptions and API keys. You are responsible for using each of them
 under that provider's terms. Squadroom is an independent project and is not
 affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google,
-xAI, Moonshot AI, Krea or any other provider. Product names are their
+xAI, Moonshot AI, DeepSeek, Krea or any other provider. Product names are their
 owners' trademarks.
 
 The model price tables in [`src/config/models.ts`](src/config/models.ts)
