@@ -485,7 +485,7 @@ test("a worker that never spawned an agent refuses to push a branch holding a pr
 });
 
 test("no new clone when free disk would fall below the floor", async (t) => {
-  const h = await harness(t, {}, false, { freeBytes: 5 * 1024 ** 3 });
+  const h = await harness(t, {}, false, { freeBytes: 1024 ** 3 });
   await h.worker.start();
   const lead = h.agent();
   await h.until(() => h.store.agent(lead.id)!.state === "error", "refused");

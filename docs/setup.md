@@ -29,7 +29,7 @@ You need:
 
 - macOS with **about 10 GB free**, which is plenty
   (`df -h /System/Volumes/Data`); the setup script warns you with less.
-  The worker makes no new clone when free disk would fall below 20 GB.
+  The worker makes no new agent copy when free disk would fall below 5 GB.
 - **Node.js** at the version in `.nvmrc` (24), from Homebrew
   (`brew install node@24`) or the official installer. The setup script looks
   for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
@@ -375,7 +375,7 @@ macOS sandbox profile:
 | Kind | Login | Status |
 |---|---|---|
 | Grok Build | `XAI_API_KEY` (paid, capped) | Offered at Look only |
-| Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Built in, not offered yet (its usage reporting is not yet trusted) |
+| Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Built in, not offered yet |
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Built in, not offered yet |
 | OpenCode | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | Built in, not offered yet, not installed by the setup script |
 
