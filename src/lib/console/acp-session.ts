@@ -113,7 +113,8 @@ class AcpSession implements AgentSession {
     const host = driver.host;
     this.spec = driver.sandbox(ctx.agent);
     this.proc = new AcpProcess(host.launcher, ctx.agent.folder, host.binary(ctx.agent.kind), agentKind(ctx.agent.kind)?.acpArgs ?? ["acp"], ctx.credentials, this.spec, host.redactor);
-    driver.track(this.proc, ctx);
+    const kind = agentKind(ctx.agent.kind);
+    driver.track(this.proc, ctx, kind?.needsNetwork && !this.spec.network ? `${kind.label} needs Network on for this project (the project's menu, Network…).` : undefined);
     this.proc.onNotification = (method, params) => {
       try {
         this.onNotification(method, params);

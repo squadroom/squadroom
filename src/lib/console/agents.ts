@@ -11,6 +11,9 @@ import { ACP_CLIENTS, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
 
 export type AgentKind = "claude-code" | "codex" | "opencode" | "gemini-cli" | "grok-build" | "kimi-code";
 export type ConsoleEffort = "low" | "medium" | "high" | "xhigh" | "max";
+/** Who bills an API-key model: a catalog provider, or OpenRouter, which
+ * resells other providers' models through its own key. */
+export type AgentProvider = Provider | "openrouter";
 
 export interface AgentModel {
   /** Stored with the agent; a stable history key, never reused. */
@@ -32,7 +35,7 @@ export interface AgentModel {
    * a turn without trustworthy usage is charged (its whole context window
    * as input, its maximum output as output). */
   paid?: {
-    provider: Provider;
+    provider: AgentProvider;
     credential: string;
     prices: TokenPrices;
     longContext?: { aboveTokens: number; inputMultiplier: number; outputMultiplier: number };
@@ -57,6 +60,10 @@ export interface AgentKindInfo {
   /** An ACP kind's arguments that start its agent mode (`["acp"]` when
    * left out, OpenCode's). */
   acpArgs?: string[];
+  /** An ACP kind that cannot start with its project's network off
+   * (OpenCode's `acp` serves its own API on loopback and calls it): a
+   * failed start says to turn Network on. */
+  needsNetwork?: boolean;
   /** The ACP `authenticate` method that only tells the client to use the
    * API key in its environment (Grok Build's `xai.api_key`), called when
    * the client advertises it, before any session. Never a sign-in: a
@@ -128,10 +135,13 @@ export const AGENT_KINDS: AgentKindInfo[] = [
   },
 ];
 
-/** A price catalog entry's prices and limits for an API-key model. */
-function catalog(id: string, credential: string, maxOutputTokens: number, prices?: Partial<TokenPrices>): NonNullable<AgentModel["paid"]> {
+/** A price catalog entry's prices and limits for an API-key model. The
+ * context window is the catalog's unless the provider documents a larger
+ * one (or the catalog has none), so the full allowance never undercharges. */
+function catalog(id: string, credential: string, maxOutputTokens: number, prices?: Partial<TokenPrices>, contextWindow?: number): NonNullable<AgentModel["paid"]> {
   const m = MODELS.find((x) => x.id === id);
-  if (!m?.contextTokens) throw new Error(`The catalog has no context window for ${id}.`);
+  const window = contextWindow ?? m?.contextTokens;
+  if (!m || !window) throw new Error(`The catalog has no context window for ${id}.`);
   return {
     provider: m.provider,
     credential,
@@ -145,7 +155,7 @@ function catalog(id: string, credential: string, maxOutputTokens: number, prices
     },
     longContext: m.longContext,
     scheduledPrices: m.scheduledPrices,
-    contextWindow: m.contextTokens,
+    contextWindow: window,
     maxOutputTokens,
   };
 }
@@ -155,6 +165,11 @@ AGENT_KINDS.push({
   label: "OpenCode",
   binary: consoleClientPath("opencode"),
   version: ACP_CLIENTS.opencode.version,
+  // `opencode acp` starts its HTTP server and its ACP side calls it over
+  // loopback; a network-off sandbox refuses the listen and it exits 1
+  // ("ServeError", live check 2026-11-01). Its model calls need the
+  // network anyway.
+  needsNetwork: true,
   // Each model names its own API key (`paid.credential`): only the chosen
   // model's key crosses.
   credential: null,
@@ -187,8 +202,8 @@ AGENT_KINDS.push({
     // DeepSeek through OpenCode's own `deepseek` provider, which reads
     // DEEPSEEK_API_KEY. Charged at the catalog's peak rates always (the
     // off-peak half price is never assumed). The full allowance: the
-    // 1,048,576-token window and 393,216 maximum output DeepSeek's
-    // GET /models reports (models.dev, 2026-10-19), above the catalog's
+    // 1,048,576-token window and 393,216 maximum output OpenCode's catalog
+    // gives, above the catalog's
     // 1,000,000, so a turn without usage is never undercharged.
     {
       id: "deepseek/deepseek-v4-pro",
@@ -196,7 +211,7 @@ AGENT_KINDS.push({
       model: "deepseek/deepseek-v4-pro",
       runs: "deepseek/deepseek-v4-pro",
       efforts: [],
-      paid: { ...catalog("deepseek-v4-pro", "DEEPSEEK_API_KEY", 393_216), contextWindow: 1_048_576 },
+      paid: catalog("deepseek-v4-pro", "DEEPSEEK_API_KEY", 393_216, undefined, 1_048_576),
     },
     {
       id: "deepseek/deepseek-flash",
@@ -204,7 +219,7 @@ AGENT_KINDS.push({
       model: "deepseek/deepseek-flash",
       runs: "deepseek/deepseek-flash",
       efforts: [],
-      paid: { ...catalog("deepseek-flash", "DEEPSEEK_API_KEY", 393_216), contextWindow: 1_048_576 },
+      paid: catalog("deepseek-flash", "DEEPSEEK_API_KEY", 393_216, undefined, 1_048_576),
     },
     // Kimi K3 through OpenCode's `moonshotai` provider, which reads
     // MOONSHOT_API_KEY. Cache writes at the one-hour rate ($6, twice the
@@ -218,11 +233,54 @@ AGENT_KINDS.push({
       efforts: [],
       paid: catalog("kimi-k3", "MOONSHOT_API_KEY", 1_048_576, { cacheWritePerMtok: 6 }),
     },
+    // GLM through OpenCode's `zai` provider. It reads ZHIPU_API_KEY, which
+    // the launcher sets from the Console's ZAI_API_KEY (one key on the
+    // Keys page). The full allowance: the 1,000,000-token window and
+    // 131,072 maximum output OpenCode's catalog gives (the price catalog
+    // has no window for the Flash tier).
+    {
+      id: "zai/glm-5.3",
+      label: "GLM-5.3 (API key)",
+      model: "zai/glm-5.3",
+      runs: "zai/glm-5.3",
+      efforts: [],
+      paid: catalog("glm-5.3", "ZAI_API_KEY", 131_072),
+    },
+    {
+      id: "zai/glm-5.3-flash",
+      label: "GLM-5.3-Flash (API key)",
+      model: "zai/glm-5.3-flash",
+      runs: "zai/glm-5.3-flash",
+      efforts: [],
+      paid: catalog("glm-5.3-flash", "ZAI_API_KEY", 131_072, undefined, 1_000_000),
+    },
+    // Qwen 3.8 Max through OpenCode's `openrouter` provider, which reads
+    // OPENROUTER_API_KEY. Not in the price catalog, so priced here from
+    // OpenRouter's own listing (2026-11-01, the same in OpenCode 1.19.5's
+    // catalog): Alibaba is its only provider, so OpenRouter has one price
+    // for it. Open-weight models are served by many providers at different
+    // prices, so none is offered: their bill cannot be pinned.
+    {
+      id: "openrouter/qwen/qwen3.8-max-0902",
+      label: "Qwen 3.8 Max via OpenRouter (API key)",
+      model: "openrouter/qwen/qwen3.8-max-0902",
+      runs: "openrouter/qwen/qwen3.8-max-0902",
+      efforts: [],
+      paid: {
+        provider: "openrouter",
+        credential: "OPENROUTER_API_KEY",
+        prices: { inputPerMtok: 2, outputPerMtok: 6, cachedInputPerMtok: 0.25 },
+        contextWindow: 1_000_000,
+        maxOutputTokens: 131_072,
+      },
+    },
   ],
   sources: [
     "src/config/models.ts: prices, context windows",
     "src/lib/console/clients.ts: opencode-ai pinned",
-    "https://github.com/sst/models.dev (2026-10-19 entries): OpenCode's provider ids `deepseek` (DEEPSEEK_API_KEY) and `moonshotai` (MOONSHOT_API_KEY), model ids, limits, cache prices",
+    "OpenCode 1.19.5's bundled models.dev catalog (checked 2026-11-01): provider ids `deepseek` (DEEPSEEK_API_KEY), `moonshotai` (MOONSHOT_API_KEY), `zai` (ZHIPU_API_KEY) and `openrouter` (OPENROUTER_API_KEY); model ids and limits",
+    "https://openrouter.ai/api/v1/models/qwen/qwen3.8-max-0902/endpoints (2026-11-01): one provider (Alibaba), $2 / $6 / $0.25 cache reads per million",
+    "Live checks 2026-11-01 (OpenCode 1.19.5, network on, Look only): every API-key model answered, named its model and reported usage",
   ],
 });
 

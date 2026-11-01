@@ -166,11 +166,13 @@ for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai
 done
 /usr/sbin/chown -R root:wheel $CLIENTS
 /bin/chmod -R go-w $CLIENTS
-print "  $(sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
-print "  $(sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
+# From /: the agent user cannot read the owner's folder this runs in, and
+# Bun and Node clients fail to start in a folder they cannot read.
+print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
+print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
 for line in $acp_clients; do
   name=${line##* }
-  print "  $name: $(sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
+  print "  $name: $(cd / && sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
 done
 
 step "Installing the launcher at $LAUNCHER"

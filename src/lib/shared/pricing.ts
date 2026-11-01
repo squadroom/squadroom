@@ -1,5 +1,9 @@
 import type { ModelConfig, TokenPrices } from "../../config/models.ts";
 
+/** What a price is worked out from: a catalog model, less who bills it (the
+ * Console also prices OpenRouter models, which are not in the catalog). */
+export type PricedModel = Omit<ModelConfig, "provider">;
+
 /** Input is the TOTAL prompt including cache reads/writes. The request clock
  * fixes the tariff before the provider call; stored costs are never repriced. */
 export interface BillingUsage {
@@ -9,7 +13,7 @@ export interface BillingUsage {
   requestedAt?: string;
 }
 
-export function tokenPrices(model: ModelConfig, at = new Date(), peak = false): TokenPrices {
+export function tokenPrices(model: PricedModel, at = new Date(), peak = false): TokenPrices {
   let prices: TokenPrices = model;
   if (model.scheduledPrices && at.getTime() >= Date.parse(model.scheduledPrices.effectiveFrom)) {
     prices = model.scheduledPrices.prices;
@@ -24,7 +28,7 @@ export function tokenPrices(model: ModelConfig, at = new Date(), peak = false): 
 }
 
 export function costUsd(
-  model: ModelConfig,
+  model: PricedModel,
   inputTokens: number,
   outputTokens: number,
   imageCount = 0,
@@ -53,7 +57,7 @@ export function formatUsd(amount: number): string {
 }
 
 /** Conservative estimate for unreported usage; never a provider invoice. */
-export function reservedCostUsd(model: ModelConfig, inputTokens: number, outputTokens: number): number {
+export function reservedCostUsd(model: PricedModel, inputTokens: number, outputTokens: number): number {
   const rates: TokenPrices[] = [model, ...(model.scheduledPrices ? [model.scheduledPrices.prices] : []), ...(model.offPeakPrices ? [model.offPeakPrices] : [])];
   const inputRate = Math.max(...rates.flatMap((r) => [r.inputPerMtok, r.cachedInputPerMtok ?? 0, r.cacheWritePerMtok ?? 0, r.longCacheWritePerMtok ?? 0]));
   const outputRate = Math.max(...rates.map((r) => r.outputPerMtok));
