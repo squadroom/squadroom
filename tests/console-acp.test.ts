@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { agentKind, agentModel } from "../src/lib/console/agents.ts";
 import { readAcpUpdate, readAcpUsage, readSessionModel, readXaiUsage } from "../src/lib/console/acp.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
-import { acpToolLabel, transcript } from "../src/lib/console/transcript.ts";
+import { acpToolLabel, teamToolLabel, transcript } from "../src/lib/console/transcript.ts";
 import { currentSpendLimit, needsFreshCode, runCommand, spendLimitInput } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
 import { Launcher } from "../src/lib/console/launcher.ts";
@@ -901,4 +901,27 @@ test("ACP tool rows show readable names, never the bare kind 'other'", () => {
   // Rows stored before this change (name "other", summary the tool) read the same.
   const blocks = transcript([{ id: 1, turnId: 1, agentId: "a", kind: "tool", body: { id: "t", name: "other", summary: "list_dir" }, createdAt: 0 }]);
   assert.deepEqual(blocks.map((b) => (b.type === "tool" ? [b.name, b.summary] : null)), [["List dir", ""]]);
+});
+
+test("team tool rows read as what they do, for every client's naming, also when cut short", () => {
+  const send = JSON.stringify({ to: "Backend", message: "Validate hours." });
+  assert.deepEqual(teamToolLabel("mcp__console__team_send", send), { name: "Message to Backend", summary: "Validate hours." });
+  assert.deepEqual(teamToolLabel("console:team_ask", JSON.stringify({ to: "Reviewer", message: "Review 9b41e7c?" })), { name: "Question to Reviewer", summary: "Review 9b41e7c?" });
+  assert.deepEqual(teamToolLabel("console__team_list", "{}"), { name: "List the team", summary: "" });
+  assert.deepEqual(teamToolLabel("mcp__console__team_claim", JSON.stringify({ paths: ["src/a.ts", "src/b/**"], note: "the alert rule" })), { name: "Claim paths", summary: "src/a.ts, src/b/** — the alert rule" });
+  assert.deepEqual(teamToolLabel("mcp__console__team_push", JSON.stringify({ title: "Hourly rainfall", body: "…" })), { name: "Push and open a pull request", summary: "Hourly rainfall" });
+  assert.deepEqual(teamToolLabel("mcp__console__team_pull", JSON.stringify({ from: "Frontend" })), { name: "Pull Frontend's work", summary: "" });
+  // Claude Code summarises team_diff by its path alone.
+  assert.deepEqual(teamToolLabel("mcp__console__team_diff", "src/**"), { name: "Read a teammate's changes", summary: "src/**" });
+  // A summary shortened to 200 characters still reads.
+  assert.deepEqual(teamToolLabel("mcp__console__team_send", '{"to":"Frontend","message":"Your part: a 24 h chart…'), { name: "Message to Frontend", summary: "Your part: a 24 h chart…" });
+  assert.deepEqual(teamToolLabel("mcp__console__team_send", '{"to":"Fro…'), { name: "Message to Fro…", summary: "" });
+  // Not a team tool: left alone.
+  assert.equal(teamToolLabel("mcp__other__team_send", send), null);
+  assert.equal(teamToolLabel("Bash", "npm test"), null);
+  // An ACP client that names the tool in its title.
+  assert.deepEqual(acpToolLabel("other", "mcp__console__team_list"), { name: "List the team", summary: "" });
+  // In a transcript, stored rows are relabelled.
+  const blocks = transcript([{ id: 1, turnId: 1, agentId: "a", kind: "tool", body: { id: "t", name: "mcp__console__team_send", summary: send }, createdAt: 0 }]);
+  assert.deepEqual(blocks.map((b) => (b.type === "tool" ? [b.name, b.summary] : null)), [["Message to Backend", "Validate hours."]]);
 });

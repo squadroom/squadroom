@@ -27,7 +27,7 @@ test("counts by kind, in words, and an e-mail with no model-written text", () =>
   assert.deepEqual(counts, { approvals: 2, questions: 1, interrupted: 0, messages: 0, paused: 0, notes: 1 });
   assert.equal(needsCountsText(counts), "2 approvals, 1 question, 1 note");
   const email = renderConsoleMail({ kind: "needs_you", counts }, "https://console.example");
-  assert.equal(email.subject, "The Console needs you: 2 approvals, 1 question, 1 note");
+  assert.equal(email.subject, "Squadroom needs you: 2 approvals, 1 question, 1 note");
   assert.ok(email.text.includes("https://console.example/console"));
   for (const part of [email.text, email.html]) assert.ok(!part.includes("evil.example") && !part.includes("rm -rf"));
   assert.equal(needsYouKey(Date.parse("2026-10-31T07:59:59Z")), "needs_you:2026-10-31T07");

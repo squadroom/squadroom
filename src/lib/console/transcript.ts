@@ -19,10 +19,90 @@ const ACP_TOOL_LABELS: Record<string, string> = {
   switch_mode: "Switch mode",
 };
 
+// The Console's own team tools, as each client names them: Claude Code
+// "mcp__console__team_send", Codex "console:team_send", some ACP clients
+// "console__team_send". The summary is the call's arguments as JSON,
+// possibly cut short ("…").
+const TEAM_TOOL = /^(?:mcp__console__|console:|console__)(team_[a-z_]+)$/;
+
+/** The call's arguments from a summary, also when it was cut short. */
+function teamArgs(summary: string): Record<string, unknown> | null {
+  const cut = summary.endsWith("…");
+  const text = cut ? summary.slice(0, -1) : summary;
+  if (!text.startsWith("{")) return null;
+  for (const end of cut ? ['"}', '"]}', "]}", "}"] : [""]) {
+    try {
+      const v: unknown = JSON.parse(text + end);
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        if (!cut) return v as Record<string, unknown>;
+        // The last string field read is the one that was cut.
+        const out = { ...(v as Record<string, unknown>) };
+        const last = Object.keys(out).at(-1);
+        if (last && typeof out[last] === "string") out[last] += "…";
+        return out;
+      }
+    } catch {
+      // Try the next way to close it.
+    }
+  }
+  return null;
+}
+
+/** A team tool call's readable row ("Message to Backend" and the message),
+ * or null for any other tool. */
+export function teamToolLabel(name: string, summary: string): { name: string; summary: string } | null {
+  const tool = TEAM_TOOL.exec(name)?.[1];
+  if (!tool) return null;
+  const args = teamArgs(summary);
+  // Claude Code's summary is a plain path for team_diff (it picks `path`).
+  const plain = args ? "" : summary;
+  const str = (key: string) => (args && typeof args[key] === "string" ? (args[key] as string) : "");
+  const who = (key: string, none: string) => str(key) || none;
+  const list = (key: string) => (args && Array.isArray(args[key]) ? (args[key] as unknown[]).map(String).join(", ") : "");
+  switch (tool) {
+    case "team_list":
+      return { name: "List the team", summary: "" };
+    case "team_send":
+      return { name: `Message to ${who("to", "a teammate")}`, summary: str("message") || plain };
+    case "team_ask":
+      return { name: `Question to ${who("to", "a teammate")}`, summary: str("message") || plain };
+    case "team_reply":
+      return { name: "Answer to an ask", summary: str("message") || plain };
+    case "team_report":
+      return { name: "Note for you (Needs you)", summary: str("message") || plain };
+    case "team_pull":
+      return { name: `Pull ${who("from", "a teammate")}'s work`, summary: plain };
+    case "team_pull_abort":
+      return { name: "Abandon the pull", summary: "" };
+    case "team_claim":
+      return { name: "Claim paths", summary: [list("paths"), str("note")].filter(Boolean).join(" — ") || plain };
+    case "team_release":
+      return { name: "Release claims", summary: list("paths") || plain };
+    case "team_hold":
+      return { name: `Hold ${who("to", "a teammate")}`, summary: str("reason") || plain };
+    case "team_resume":
+      return { name: `Resume ${who("to", "a teammate")}`, summary: "" };
+    case "team_push":
+      return { name: "Push and open a pull request", summary: str("title") || plain };
+    case "team_pr":
+      return { name: "Read the pull request", summary: "" };
+    case "team_pr_reply":
+      return { name: "Reply on the pull request", summary: str("message") || plain };
+    case "team_read":
+      return { name: "Read the rest of a message", summary: "" };
+    case "team_diff":
+      return { name: `Read ${args ? who("from", "a teammate") : "a teammate"}'s changes`, summary: str("path") || plain };
+    default:
+      return { name: tool.slice(5).replace(/_/g, " ").replace(/^./, (c) => `Team ${c}`), summary: plain };
+  }
+}
+
 /** An ACP tool call's row title. A known kind keeps the client's title as
  * its summary; an unknown kind or "other" shows the client's own tool name
  * ("list_dir" becomes "List dir") instead of the word "other". */
 export function acpToolLabel(kind: string, title: string): { name: string; summary: string } {
+  const team = teamToolLabel(title, "");
+  if (team) return team;
   const label = ACP_TOOL_LABELS[kind];
   if (label) return { name: label, summary: title === kind ? "" : title };
   if (/^[A-Za-z][A-Za-z0-9_-]*$/.test(title)) {
@@ -89,6 +169,7 @@ export function transcript(events: ConsoleEvent[]): Block[] {
         let summary = String(body.summary ?? "");
         // Rows stored before readable ACP names carry the bare kind "other".
         if (name === "other") ({ name, summary } = acpToolLabel(name, summary));
+        else ({ name, summary } = teamToolLabel(name, summary) ?? { name, summary });
         const block = { type: "tool" as const, key, name, summary, output: null, error: false };
         tools.set(`${e.turnId}:${String(body.id ?? "")}`, block);
         blocks.push(block);
