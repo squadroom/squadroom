@@ -246,11 +246,12 @@ export const projects = {
   },
 
   // ── Templates ───────────────────────────────────────
-  /** Save a template under its name: a template of that name is replaced. */
-  saveTemplate(this: ConsoleStore, name: string, body: TabTemplate): string {
-    const id = (this.get("SELECT id FROM console_templates WHERE name = ?", name)?.id as string | undefined) ?? newId("m");
+  /** Save a template under its name: a template of that name is replaced.
+   * With an id, that template is rewritten and renamed. */
+  saveTemplate(this: ConsoleStore, name: string, body: TabTemplate, templateId?: string): string {
+    const id = templateId ?? (this.get("SELECT id FROM console_templates WHERE name = ?", name)?.id as string | undefined) ?? newId("m");
     this.run(
-      "INSERT INTO console_templates (id, name, body, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at",
+      "INSERT INTO console_templates (id, name, body, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, body = excluded.body, updated_at = excluded.updated_at",
       id, name, JSON.stringify(body), this.now(),
     );
     return id;

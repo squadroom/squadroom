@@ -57,7 +57,10 @@ To make your own, open **Settings**, then **Roles**, then **New role**: a
 name, a one-line description, edit or look only, a suggested tool (Claude
 Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
 a built-in role's prompt and reset it later. A tab can be saved as a
-template with its agents, roles and routes.
+template with its agents, roles and routes, and optionally steps: an
+ordered list of stages, each with the files the agents may change during
+it. Any team can have steps, from a Lead and a Reviewer to an Orchestrator
+with seven members.
 
 ## Projects, tabs and squads
 

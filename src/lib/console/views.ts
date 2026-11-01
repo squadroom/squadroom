@@ -6,7 +6,7 @@ import { connectionPanels, type ConnectionPanel } from "./connections.ts";
 import { keysView, type KeysView } from "./keys-page.ts";
 import { roleLibrary, type RoleDef } from "./roles.ts";
 import { LEASE_TTL_MS, NEEDS_MAIL, PAUSE_ALL, type ConsoleStore, type TurnRow } from "./store.ts";
-import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, type TabTemplate } from "./templates.ts";
+import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, templateNames, type TabTemplate } from "./templates.ts";
 import { buildTree, type TreeProject, type TreeStatus } from "./tree.ts";
 import { CODEX_DISABLED, LIMITS, agentStatus, type AgentStatus, type ConsoleAgent, type ConsoleProject, type ConsoleTab, type ConsoleTurn } from "./types.ts";
 
@@ -50,7 +50,7 @@ export function allTemplates(store: ConsoleStore): { id: string; name: string; b
 
 /** The templates as the page lists them. */
 export function templatesView(store: ConsoleStore) {
-  return allTemplates(store).map((t) => ({ id: t.id, name: t.name, builtIn: !!t.builtIn, agents: t.body.setup.members.map((m) => m.name), steps: t.body.steps }));
+  return allTemplates(store).map((t) => ({ id: t.id, name: t.name, builtIn: !!t.builtIn, agents: templateNames(t.body), steps: t.body.steps }));
 }
 
 export interface WorkerView {

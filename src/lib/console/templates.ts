@@ -3,7 +3,8 @@ import type { TeamSetup } from "./team-setup.ts";
 
 // Templates: a tab saved as a team setup that the setup screen's own
 // checks and creation path accept, its routes by agent name, and steps
-// naming the files each step may edit. Browser-safe and pure.
+// naming the files each step may edit, written in the steps editor and
+// kept for any squad. Browser-safe and pure.
 
 export interface TemplateStep {
   name: string;
@@ -22,21 +23,35 @@ export const STEP_FILES_MAX = 50;
 const STEP_NAME_MAX = 60;
 const FILE_MAX = 200;
 
-/** A tab's open agents and routes as a template. Every agent becomes a
- * member with its own role text (no Orchestrator row: an Orchestrator is a
- * Look only member with its role), and the first editing agent comes
- * first, as a team without an Orchestrator needs. */
+/** Always one of a step's files: what is deliberately left for later. */
+export const PARKING_LOT = "parking-lot.md";
+const ORCHESTRATOR_ROLE = "Role: Orchestrator.";
+
+/** The tab's Orchestrator, as the setup screen makes it: Look only,
+ * with the Orchestrator role. */
+export const isOrchestrator = (a: Pick<ConsoleAgent, "permission" | "role">) =>
+  a.permission === "look" && (a.role === ORCHESTRATOR_ROLE || a.role.startsWith(`${ORCHESTRATOR_ROLE}\n`));
+
+/** A tab's open agents and routes as a template. A tab with an
+ * Orchestrator keeps it as the Orchestrator (its routes under that name)
+ * and its other agents as members in order; a tab without one becomes a
+ * team without an Orchestrator, its first editing agent first.
+ * Each member keeps its own role text. */
 export function templateFromTab(
   agents: Pick<ConsoleAgent, "name" | "kind" | "model" | "effort" | "permission" | "role">[],
   routes: { fromName: string; toName: string; phrase: string }[],
   steps: TemplateStep[] = [],
 ): TabTemplate {
+  const boss = agents.find(isOrchestrator);
   const lead = agents.findIndex((a) => a.permission === "edit");
-  const ordered = lead > 0 ? [agents[lead], ...agents.filter((_, i) => i !== lead)] : agents;
+  const ordered = boss ? agents.filter((a) => a !== boss) : lead > 0 ? [agents[lead], ...agents.filter((_, i) => i !== lead)] : agents;
+  const named = (name: string) => (boss && name === boss.name ? "Orchestrator" : name);
   return {
     setup: {
-      orchestrated: false,
-      orchestrator: { kind: "claude-code", model: "", effort: "default", prompt: "" },
+      orchestrated: !!boss,
+      orchestrator: boss
+        ? { kind: boss.kind, model: boss.model, effort: boss.effort ?? "default", prompt: boss.role.slice(ORCHESTRATOR_ROLE.length).trim() }
+        : { kind: "claude-code", model: "", effort: "default", prompt: "" },
       members: ordered.map((a) => ({
         name: a.name,
         kind: a.kind,
@@ -49,44 +64,53 @@ export function templateFromTab(
       })),
       goal: "",
     },
-    routes: routes.map((r) => ({ from: r.fromName, to: r.toName, phrase: r.phrase })),
+    routes: routes.map((r) => ({ from: named(r.fromName), to: named(r.toName), phrase: r.phrase })),
     steps,
   };
 }
 
-/** Steps as the owner writes them, one per line: `Name: file, pattern`. */
-export function parseSteps(text: string): TemplateStep[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const colon = line.indexOf(":");
-      const name = (colon < 0 ? line : line.slice(0, colon)).trim();
-      const files = colon < 0 ? [] : line.slice(colon + 1).split(",").map((f) => f.trim()).filter(Boolean);
-      return { name, files };
-    });
-}
+/** The names a template's routes may use: its members, and "Orchestrator". */
+export const templateNames = (t: TabTemplate): string[] => [...(t.setup.orchestrated === false ? [] : ["Orchestrator"]), ...t.setup.members.map((m) => m.name)];
 
-/** Steps from a request (untrusted): problems as plain sentences. A file
- * is a relative path inside the agent's folder: no `..`, not absolute. */
+/** The steps editor's rows: files as the owner types them, comma
+ * separated, without the parking lot every step has anyway. */
+export type StepRow = { name: string; files: string };
+export const stepRows = (steps: TemplateStep[]): StepRow[] =>
+  steps.map((s) => ({ name: s.name, files: s.files.filter((f) => f !== PARKING_LOT).join(", ") }));
+export const rowsToSteps = (rows: StepRow[]): TemplateStep[] =>
+  rows.map((r) => ({ name: r.name.trim(), files: r.files.split(",").map((f) => f.trim()).filter(Boolean) }));
+
+/** A file pattern inside the agent's folder: relative, no `.`, `..` or
+ * empty parts, nothing in `.git`, no backslashes or control characters. */
+const safePattern = (f: string) =>
+  !!f &&
+  f.length <= FILE_MAX &&
+  !/[\\\u0000-\u001f]/.test(f) &&
+  !f.startsWith("/") &&
+  !f.startsWith("~") &&
+  f.split("/").every((part) => part && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
+
+/** Steps from a request (untrusted): problems as plain sentences, none
+ * dropped. Each step has a unique name and at least one file pattern;
+ * parking-lot.md is added to each. */
 export function checkSteps(raw: unknown): { ok: true; steps: TemplateStep[] } | { ok: false; errors: string[] } {
   if (raw === undefined || raw === null) return { ok: true, steps: [] };
   if (!Array.isArray(raw)) return { ok: false, errors: ["Steps must be a list."] };
   const errors: string[] = [];
   if (raw.length > STEPS_MAX) errors.push(`A template has at most ${STEPS_MAX} steps.`);
+  const seen = new Set<string>();
   const steps = raw.slice(0, STEPS_MAX).map((s, i) => {
     const step = (s && typeof s === "object" ? s : {}) as Partial<TemplateStep>;
     const name = typeof step.name === "string" ? step.name.trim() : "";
     const who = name || `Step ${i + 1}`;
     if (!name || name.length > STEP_NAME_MAX) errors.push(`${who}: give it a name of at most ${STEP_NAME_MAX} characters.`);
+    else if (seen.has(name.toLowerCase())) errors.push(`${who}: two steps share that name.`);
+    seen.add(name.toLowerCase());
     const files = Array.isArray(step.files) ? step.files : [];
-    if (!files.length || files.length > STEP_FILES_MAX) errors.push(`${who}: name from 1 to ${STEP_FILES_MAX} files it may edit.`);
+    if (!files.length || files.length > STEP_FILES_MAX) errors.push(`${who}: name from 1 to ${STEP_FILES_MAX} files it may change.`);
     const paths = files.map((f) => (typeof f === "string" ? f.trim() : ""));
-    for (const f of paths)
-      if (!f || f.length > FILE_MAX || f.startsWith("/") || f.split("/").includes(".."))
-        errors.push(`${who}: "${f.slice(0, 40)}" is not a path inside the agent's folder.`);
-    return { name, files: paths };
+    for (const f of paths) if (!safePattern(f)) errors.push(`${who}: "${f.slice(0, 40)}" is not a path inside the agent's folder.`);
+    return { name, files: [...new Set([...paths, PARKING_LOT])] };
   });
   return errors.length ? { ok: false, errors } : { ok: true, steps };
 }
@@ -108,7 +132,7 @@ export function stepNote(s: { steps: TemplateStep[]; index: number }, editing: b
   const where = `Step ${s.index + 1} of ${s.steps.length}: ${step.name}.`;
   return editing
     ? `${where} You may change only these files: ${step.files.join(", ")}. Earlier steps' documents are approved: read them, do not change them (the owner reopens an earlier step to change it).\n\n`
-    : `${where} The files of this step: ${step.files.join(", ")}.\n\n`;
+    : `${where} The files of this step, the only ones its editing agents may change: ${step.files.join(", ")}.\n\n`;
 }
 
 /** The Document review template: a lead-and-reviewer document sequence as
@@ -128,7 +152,7 @@ const REVIEWER_PROMPT = [
   "Preferences, legitimate trade-offs and parked decisions are not findings. No material findings is an acceptable result.",
   "End your final message with FINDINGS FOR THE LEAD when there is something to change, or with READY FOR APPROVAL when there is nothing material left; the owner then approves the commit you reviewed.",
 ].join("\n");
-const notes = (files: string[]) => [...files, "parking-lot.md"];
+const notes = (files: string[]) => [...files, PARKING_LOT];
 export const DOCUMENT_REVIEW: TabTemplate = {
   setup: {
     orchestrated: false,

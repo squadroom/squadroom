@@ -3,7 +3,7 @@ import { Redactor } from "./redact.ts";
 import { parseRepo, validBranch } from "./git.ts";
 import { agentFilePath } from "./files.ts";
 import { checkTeamSetup, defaultTeamSetup } from "./team-setup.ts";
-import { TEMPLATE_NAME_MAX, checkRoutes, checkSteps, templateFromTab, type TabTemplate, type TemplateStep } from "./templates.ts";
+import { TEMPLATE_NAME_MAX, checkRoutes, checkSteps, isOrchestrator, templateFromTab, templateNames, type TabTemplate, type TemplateStep } from "./templates.ts";
 import { BUILT_IN_ROLES, checkRole, customRoleId, type RoleDef } from "./roles.ts";
 import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
@@ -86,6 +86,7 @@ export type ConsoleCommand =
   | { action: "rename"; target: "project" | "tab" | "agent"; id: string; name: string }
   | { action: "createTab"; projectId: string; name: string; templateId?: string }
   | { action: "saveTemplate"; tabId: string; name: string; steps?: TemplateStep[] }
+  | { action: "editTemplate"; id: string; name: string; steps: TemplateStep[] }
   | { action: "deleteTemplate"; id: string }
   | { action: "approve"; agentId: string; sha: string; reviewerId?: string | null }
   | { action: "revokeApproval"; agentId: string }
@@ -216,7 +217,7 @@ function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes
 function checkTemplate(store: ConsoleStore, t: TabTemplate) {
   const checked = checkTeamSetup(t.setup, { takenNames: [], codexOff: store.flag(CODEX_DISABLED) !== null, roles: rolesView(store), exactPrompts: true });
   const errors = checked.ok
-    ? checkRoutes(t.routes, t.setup.members.map((m) => m.name))
+    ? checkRoutes(t.routes, templateNames(t))
     : checked.errors;
   if (errors.length) throw new CommandError(errors.join(" "));
 }
@@ -309,14 +310,15 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "saveTemplate": {
       // Templates: the tab's open agents and routes, as a team setup the
-      // setup screen's checks accept, with optional steps.
+      // setup screen's checks accept, with optional steps (none sent: the
+      // tab's own).
       const tab = store.tab(id(input.tabId, "Tab"));
       if (!tab || tab.archivedAt !== null) throw new CommandError("That tab is closed.");
       const agents = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
       if (!agents.length) throw new CommandError("The tab has no agents to save.");
       const steps = checkSteps(input.steps);
       if (!steps.ok) throw new CommandError(steps.errors.join(" "));
-      const template = templateFromTab(agents, store.routes(tab.id), steps.steps.length ? steps.steps : (store.tabSteps(tab.id)?.steps ?? []));
+      const template = templateFromTab(agents, store.routes(tab.id), input.steps === undefined ? (store.tabSteps(tab.id)?.steps ?? []) : steps.steps);
       checkTemplate(store, template);
       return { templateId: store.saveTemplate(text(input.name, "Name", TEMPLATE_NAME_MAX), template) };
     }
@@ -342,22 +344,43 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (!Number.isInteger(step) || step < 0 || step >= stepped.steps.length) throw new CommandError("Choose one of the tab's steps.");
       if (step > stepped.index) {
         const open = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
+        const editors = open.filter((a) => a.permission === "edit");
         // Not while an editor's branch may be changing: its approval is of
         // a head that is about to move.
-        const busy = open.filter((a) => a.permission === "edit").map((a) => store.changing(a.id)).find(Boolean);
+        const busy = editors.map((a) => store.changing(a.id)).find(Boolean);
         if (busy) throw new CommandError(`${busy} Move on once it is done.`);
-        const reviewed = open.some((a) => a.permission === "look");
-        const unapproved = open
-          .filter((a) => a.permission === "edit")
-          .filter((a) => {
-            const approval = store.approval(a.id);
-            return !approval?.current || (reviewed && !approval.reviewerId);
-          });
-        if (unapproved.length)
-          throw new CommandError(`Approve ${unapproved.map((a) => a.name).join(" and ")}'s current commit${reviewed ? ", after the reviewer's review," : ""} first (in Changes).`);
+        // A reviewer is any Code analysis agent but the Orchestrator, which
+        // plans; an editor still at its starting commit has nothing to approve.
+        const reviewed = open.some((a) => a.permission === "look" && !isOrchestrator(a));
+        const unapproved = editors.filter((a) => {
+          const diff = store.diff(a.id);
+          if (diff && diff.head === diff.base) return false;
+          const approval = store.approval(a.id);
+          return !approval?.current || (reviewed && !approval.reviewerId);
+        });
+        const names = unapproved.map((a) => a.name);
+        if (names.length === 1)
+          throw new CommandError(`Approve ${names[0]}'s current commit${reviewed ? ", after the reviewer's review," : ""} first (in Changes).`);
+        if (names.length)
+          throw new CommandError(
+            `Approve the current commits of ${names.slice(0, -1).join(", ")} and ${names.at(-1)}${reviewed ? ", each after a reviewer's review," : ""} first (in Changes).`,
+          );
       }
       store.setStep(tab.id, step);
       return { step };
+    }
+    case "editTemplate": {
+      // The steps editor: a saved template takes new steps
+      // and a new name; a built-in one is copied under a new name.
+      const template = allTemplates(store).find((t) => t.id === input.id);
+      if (!template) throw new CommandError("That template no longer exists.");
+      const name = text(input.name, "Name", TEMPLATE_NAME_MAX);
+      const steps = checkSteps(input.steps);
+      if (!steps.ok) throw new CommandError(steps.errors.join(" "));
+      if (allTemplates(store).some((t) => t.id !== (template.builtIn ? null : template.id) && t.name.toLowerCase() === name.toLowerCase()))
+        throw new CommandError("Another template has that name.");
+      const body = { ...template.body, steps: steps.steps };
+      return { templateId: store.saveTemplate(name, body, template.builtIn ? undefined : template.id) };
     }
     case "deleteTemplate":
       if (!store.deleteTemplate(id(input.id, "Template"))) throw new CommandError("That template is already deleted.");
