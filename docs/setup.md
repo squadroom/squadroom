@@ -212,7 +212,8 @@ Open `https://<your address>/console` and sign in.
 
 ## 8. Keys
 
-Open **Keys** in the top bar. The page writes `~/.squadroom/console-keys.json`
+Open **Settings** (at the right of the top bar), then **Keys and
+connections**. The page writes `~/.squadroom/console-keys.json`
 (mode 0600, in a 0700 folder, never backed up, unreadable to `agent`).
 Every change needs an e-mailed code from the last 8 hours (step 6), so
 mail must be configured.
@@ -241,7 +242,7 @@ without any model request.
 
 ## 9. Your first project
 
-**+ New project** offers three kinds:
+**New project** (in the sidebar) offers three kinds:
 
 - **A GitHub repository** (`https://github.com/owner/name`) with a base
   branch (default `main`). Before anything is cloned, the worker checks
@@ -253,14 +254,30 @@ without any model request.
   stands in for GitHub, so agents share one history).
 - **No project files**: agents that only talk (Look only).
 
-Then **+ New agent**: a name, the AI and model, the thinking level, the
-access (**Edit in its folder** or **Look only**) and role instructions. Or
-**+ Coding team** for an Orchestrator with Leads and a Reviewer.
+Inside a project, each tab is a separate piece of work with its own
+agents; **+** beside the tab names opens a new one. To add agents to the
+current tab, use **Add**:
+
+- **Agent** adds one agent: a name, the AI and model, the thinking level,
+  the access (**Edit in its folder** or **Look only**) and a role, whose
+  prompt you can change for this agent.
+- **Team** (projects with files) sets up several at once. Either an Orchestrator (Look only) with
+  up to seven members, which splits your goal among them, or a pair: a Lead
+  you talk to and a Reviewer it asks before reporting back.
+- **From a template** starts a new tab from the built-in Document review
+  template or a tab you saved.
+
+Roles live under **Settings**, **Roles**. **New role** makes your own (a
+name, a description, the access, a suggested AI and a prompt), and a
+built-in role's prompt can be rewritten and reset.
 
 Things to know while using it:
 
-- **Needs you** (top bar) collects every permission request, question,
-  interrupted turn and pause across projects. For `npm install` and the
+- Agents message each other through team tools, and you see every message
+  in the tab's **Team** panel. You talk to the Orchestrator (or the pair's
+  Lead), or to any agent in its window.
+- **Needs you** (top bar) collects every permission request, question, note
+  from an agent, interrupted turn and pause across projects. For `npm install` and the
   like, allow `registry.npmjs.org` with **Always for this project**.
 - **Changes** (a window's ⋯ menu) shows each turn's commit. In a GitHub
   project, **Push branch** pushes the agent's `console/…` branch through
@@ -379,7 +396,7 @@ macOS sandbox profile:
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Built in, not offered yet |
 | OpenCode | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | Built in, not offered yet, not installed by the setup script |
 
-"Not offered" means **New agent** does not list it. A kind is offered once
+"Not offered" means **Add**, **Agent** does not list it. A kind is offered once
 it has run live and its usage reporting has been shown trustworthy; Edit in
 its folder follows its own sandbox breakout tests.
 
