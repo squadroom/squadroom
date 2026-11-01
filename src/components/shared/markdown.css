@@ -1,0 +1,118 @@
+/* Minimal styling for model output rendered from markdown. */
+.markdown > * + * {
+  margin-top: 0.75em;
+}
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  background: rgba(127, 127, 127, 0.1);
+  padding: 0.9rem;
+  /* Clearance for the copy button overlaying the first line. */
+  padding-right: 4.25rem;
+  border: 1px solid rgba(127, 127, 127, 0.16);
+  border-radius: 0.75rem;
+  font-size: 0.85em;
+}
+.markdown code {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.9em;
+}
+.markdown :not(pre) > code {
+  background: rgba(127, 127, 127, 0.15);
+  padding: 0.1em 0.3em;
+  border-radius: 0.3em;
+}
+.markdown ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.markdown ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.markdown h1 {
+  font-size: 1.15em;
+}
+.markdown h2 {
+  font-size: 1.1em;
+}
+.markdown h3 {
+  font-size: 1.05em;
+}
+.markdown a {
+  text-decoration: underline;
+}
+.markdown table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.markdown p,
+.markdown li {
+  max-width: 75ch;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  padding: 0.25rem 0.5rem;
+}
+.markdown blockquote {
+  border-left: 3px solid rgba(127, 127, 127, 0.35);
+  padding-left: 0.75rem;
+  opacity: 0.85;
+}
+
+/* Token colors for highlighted code (rehype-highlight / highlight.js
+   classes), tuned per colour scheme: light-dark() follows the page's colour
+   scheme, so the Console's Appearance choice reaches them too. */
+.markdown .hljs-comment,
+.markdown .hljs-quote {
+  color: light-dark(#71717a, #a1a1aa);
+  font-style: italic;
+}
+.markdown .hljs-keyword,
+.markdown .hljs-selector-tag,
+.markdown .hljs-type,
+.markdown .hljs-deletion {
+  color: light-dark(#be123c, #fb7185);
+}
+.markdown .hljs-string,
+.markdown .hljs-regexp,
+.markdown .hljs-addition {
+  color: light-dark(#15803d, #4ade80);
+}
+.markdown .hljs-number,
+.markdown .hljs-literal,
+.markdown .hljs-meta {
+  color: light-dark(#b45309, #fbbf24);
+}
+.markdown .hljs-title,
+.markdown .hljs-name,
+.markdown .hljs-section,
+.markdown .hljs-function {
+  color: light-dark(#1d4ed8, #60a5fa);
+}
+.markdown .hljs-attr,
+.markdown .hljs-attribute,
+.markdown .hljs-variable,
+.markdown .hljs-template-variable,
+.markdown .hljs-params {
+  color: light-dark(#7c3aed, #a78bfa);
+}
+.markdown .hljs-built_in,
+.markdown .hljs-symbol,
+.markdown .hljs-selector-class,
+.markdown .hljs-selector-id {
+  color: light-dark(#0e7490, #22d3ee);
+}

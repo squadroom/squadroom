@@ -1,0 +1,49 @@
+{
+  "name": "squadroom",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A browser console for running a squad of coding agents, each as a sandboxed macOS user in its own Git clone.",
+  "license": "MIT",
+  "homepage": "https://squadroom.github.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/squadroom/squadroom.git"
+  },
+  "bugs": "https://github.com/squadroom/squadroom/issues",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/web.ts --dev",
+    "build": "next build && node scripts/check-build-trace.ts && node scripts/build-stamp.ts",
+    "lint": "eslint",
+    "test": "node --test --test-concurrency=4 \"tests/*.test.ts\"",
+    "typecheck": "next typegen && tsc --noEmit",
+    "web": "node scripts/web.ts",
+    "web:dev": "node scripts/web.ts --dev",
+    "update": "zsh scripts/update.sh",
+    "emergency": "node scripts/emergency.ts",
+    "console:worker": "node scripts/console-worker.ts",
+    "console:cleanup": "node scripts/console-cleanup.ts"
+  },
+  "dependencies": {
+    "@next/env": "16.4.2",
+    "next": "16.4.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

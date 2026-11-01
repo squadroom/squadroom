@@ -1,0 +1,1817 @@
+/* The Squadroom Console. Light and dark follow the system setting or the
+   owner's choice (Settings › Appearance); the phone gets one column, the
+   project list as a menu, and 44px controls. */
+.console {
+  --bg: light-dark(#f8fafc, #0f172a);
+  --panel: light-dark(#ffffff, #1e293b);
+  --line: light-dark(#cbd5e1, #334155);
+  --soft: light-dark(#f1f5f9, #273449);
+  --text: light-dark(#1e293b, #e2e8f0);
+  --muted: light-dark(#64748b, #94a3b8);
+  --accent: light-dark(#155e75, #0e7490);
+  --accentHover: light-dark(#164e63, #0891b2);
+  --owner: light-dark(#e0f2fe, #0c4a6e);
+  --danger: light-dark(#b91c1c, #fca5a5);
+  --dangerBg: light-dark(#fef2f2, #3f1d1d);
+  /* Hairlines, status colours (amber needs you, green running) and the
+     raised surfaces of menus. The accent is for the primary action. */
+  --hair: light-dark(#e2e8f0, #243247);
+  --ok: light-dark(#15803d, #86efac);
+  --okBg: light-dark(#dcfce7, #0f3a24);
+  --amber: light-dark(#92400e, #fde68a);
+  --amberBg: light-dark(#fef3c7, #451a03);
+  --amberLine: light-dark(#f59e0b, #b45309);
+  --shadow: 0 10px 30px light-dark(rgb(15 23 42 / 0.14), rgb(0 0 0 / 0.45)), 0 1px 3px light-dark(rgb(15 23 42 / 0.08), rgb(0 0 0 / 0.3));
+  /* Each colour is light-dark(): the system setting, or the owner's
+     choice in Settings › Appearance, picks the half. */
+  color-scheme: light dark;
+  position: fixed;
+  inset: 0;
+  display: flex;
+  height: 100dvh;
+  overflow: clip;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 14px;
+}
+.console[data-appearance="light"] {
+  color-scheme: light;
+}
+.console[data-appearance="dark"] {
+  color-scheme: dark;
+}
+.console button,
+.console input,
+.console select,
+.console textarea {
+  font: inherit;
+  color: var(--text);
+}
+.console button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 12px;
+  background: var(--panel);
+  min-height: 36px;
+}
+.console button:hover {
+  background: var(--soft);
+}
+.console button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.console input,
+.console select,
+.console textarea {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px;
+  min-width: 0;
+  background: var(--panel);
+}
+.console :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A dialog or the Settings page takes focus itself to catch Escape; the
+   box needs no ring. */
+.console .dialog:focus-visible,
+.console .settingsPage:focus-visible {
+  outline: none;
+}
+.console .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.console .primary:hover {
+  background: var(--accentHover);
+}
+
+.sidebar {
+  width: 240px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-right: 1px solid var(--hair);
+  background: var(--panel);
+  overflow-y: auto;
+}
+/* The folded sidebar: the top bar's button brings it back. */
+.sidebar[hidden] {
+  display: none;
+}
+.brandEnd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.console .brandEnd .iconButton {
+  width: 30px;
+  min-height: 30px;
+}
+/* As tall as the top bar, so their hairlines meet. */
+.brand {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-sizing: border-box;
+  height: 52px;
+  margin: -14px -14px 0;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--hair);
+}
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.main {
+  /* The top bar fits its width, which Needs you's panel narrows. */
+  container-type: inline-size;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.warning {
+  color: var(--danger);
+}
+.error {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin: 0 14px 8px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  color: var(--danger);
+  background: var(--dangerBg);
+}
+.empty {
+  margin: auto;
+  max-width: 460px;
+  text-align: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  padding: 24px;
+  line-height: 1.55;
+}
+.empty h2 {
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+}
+.emptyButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* The window grid: 1 fills, 2 side by side, 3 one large plus two stacked,
+   4 a 2×2, more scroll in rows of two. */
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 14px;
+  overflow-y: auto;
+}
+.one {
+  grid-template-columns: 1fr;
+}
+.two {
+  grid-template-columns: 1fr 1fr;
+}
+.three {
+  grid-template-columns: 3fr 2fr;
+  grid-template-rows: 1fr 1fr;
+}
+.three > :first-child {
+  grid-row: span 2;
+}
+.four {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.many {
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: minmax(420px, 48dvh);
+}
+
+.window {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.windowHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hair);
+}
+.windowName {
+  font-size: 15px;
+}
+.chip,
+.badge {
+  font-size: 12px;
+  color: var(--muted);
+}
+/* A chip that is a button (the context gauge) still looks like a chip:
+   the page's button rules would make it full size. */
+.console button.chip {
+  min-height: 0;
+  padding: 1px 8px;
+  border-color: var(--hair);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--muted);
+}
+.console button.chip:hover {
+  color: var(--text);
+}
+.console button.gaugeHigh {
+  color: var(--danger);
+}
+.badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+/* A window's kind badge and its status, a dot as in the tree. */
+.kindBadge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.kindBadgeSmall {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 9.5px;
+}
+.windowStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.headerActions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+/* The transcript scrolls inside its area; ↓ floats over its
+   bottom-right corner when the reader has scrolled up. */
+.transcriptArea {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+.transcriptBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.console .latest {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+}
+.console .latest:hover {
+  background: var(--accentHover);
+}
+.owner {
+  align-self: flex-end;
+  max-width: 85%;
+  white-space: pre-wrap;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--owner);
+}
+.text {
+  overflow-wrap: anywhere;
+}
+.thinking summary,
+.tool summary,
+.toolError summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thinking p {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+.toolError summary {
+  color: var(--danger);
+}
+.tool pre,
+.toolError pre {
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.denied,
+.statusLine {
+  font-size: 13px;
+  color: var(--muted);
+}
+.errorLine {
+  font-size: 13px;
+  color: var(--danger);
+  padding: 0 10px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--hair);
+  align-items: flex-end;
+  /* In a narrow window the buttons move under the box instead of
+     squeezing it. */
+  flex-wrap: wrap;
+}
+.composer textarea {
+  flex: 1 1 180px;
+  resize: none;
+  box-sizing: border-box;
+  /* Two rows to start; it grows with the text up to this cap. */
+  max-height: 30dvh;
+  overflow-y: auto;
+}
+.composerButtons {
+  display: flex;
+  gap: 6px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(15 23 42 / 0.45);
+  backdrop-filter: blur(2px);
+}
+/* The fresh-code dialog: above every other dialog, tray and panel. */
+.codeOverlay {
+  z-index: 40;
+}
+.codeOverlay form {
+  display: grid;
+  gap: 8px;
+}
+.dialog {
+  width: min(480px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+.dialog h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+/* Title and ✕, kept in view while a long dialog scrolls. */
+.dialogHeader {
+  position: sticky;
+  top: -18px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: -18px -18px 0;
+  padding: 10px 10px 10px 18px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+}
+.dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dialog fieldset {
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dialog legend {
+  margin-bottom: 4px;
+}
+/* A checkbox with its words stays on one line (`.dialog label` stacks). */
+.dialog .inlineField {
+  flex-direction: row;
+}
+.dialog .radio {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.dialogButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    display: none;
+  }
+  .console button {
+    min-height: 44px;
+  }
+  .grid,
+  .two,
+  .three,
+  .four,
+  .many {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+    grid-auto-rows: minmax(70dvh, auto);
+  }
+  .three > :first-child {
+    grid-row: auto;
+  }
+  /* Phone layout: the page scrolls as one, so the header (project,
+     Needs you, tabs, a pause) scrolls away and each window gets the
+     screen, instead of every window scrolling inside what the header
+     leaves (about half of a phone's height). */
+  .main {
+    overflow-y: auto;
+  }
+  .main > *,
+  .projectView > * {
+    flex-shrink: 0;
+  }
+  .projectView {
+    flex: none;
+  }
+  /* Each window keeps a fixed height and its transcript scrolls inside it
+     (a row sized to its content would grow with a long transcript). */
+  .grid {
+    flex: none;
+    overflow: visible;
+  }
+  .grid.grid {
+    grid-auto-rows: 70dvh;
+  }
+  .grid.one {
+    grid-auto-rows: 85dvh;
+  }
+}
+
+/* Needs you, project state, changes view. */
+.waiting {
+  font-size: 13px;
+  color: light-dark(#b45309, #fbbf24);
+}
+.errorBanner,
+.repoLine {
+  margin: 8px 16px 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+.repoLine {
+  color: var(--muted);
+}
+/* The project under the top bar; hidden while Settings shows. */
+.projectView {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.projectView[hidden] {
+  display: none;
+}
+/* The team timeline keeps the page's side margin. */
+.projectView > .timeline {
+  margin: 0 16px 8px;
+}
+.need {
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.needText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pushRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.linkButton {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+.subhead {
+  font-size: 14px;
+  font-weight: 600;
+}
+.dialog .tool pre {
+  max-height: 50dvh;
+}
+
+/* Navigation tree. */
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.console .treeToggle {
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  min-height: 32px;
+  color: var(--muted);
+}
+.console .treeProject,
+.console .treeTab,
+.console .treeAgent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 4px 8px;
+  min-height: 32px;
+  border-radius: 7px;
+  color: var(--muted);
+}
+/* A project reads as a heading over its tabs; a tab and an agent as its
+   rows. */
+.console .treeProject {
+  color: var(--text);
+  font-weight: 600;
+}
+.console .treeAgent {
+  width: 100%;
+  padding-left: 30px;
+}
+.console .treeProject:hover,
+.console .treeTab:hover,
+.console .treeAgent:hover {
+  background: var(--soft);
+  color: var(--text);
+}
+/* The way to what is open: its project, its tab and the agent last shown. */
+.console .treeOn {
+  background: var(--soft);
+  color: var(--text);
+}
+.console .treeTab.treeOn,
+.console .treeAgent.treeOn {
+  font-weight: 600;
+}
+.treeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--line);
+}
+.dot_working {
+  background: #16a34a;
+}
+.dot_needs_you {
+  background: #f59e0b;
+}
+.dot_error {
+  background: var(--danger);
+}
+.dot_queued,
+.dot_creating {
+  background: #eab308;
+}
+.dot_paused {
+  background: transparent;
+  border: 2px solid var(--muted);
+  width: 6px;
+  height: 6px;
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.focused {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  transition: outline-color 0.3s;
+}
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  background: rgb(0 0 0 / 0.4);
+}
+.drawer {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: min(320px, 86vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--panel);
+}
+@media (max-width: 760px) {
+  .console .treeToggle,
+  .console .treeProject,
+  .console .treeTab,
+  .console .treeAgent {
+    min-height: 44px;
+  }
+}
+
+/* File panel and uploads. */
+.filePanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  width: min(560px, 46vw);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: -8px 0 24px rgb(0 0 0 / 0.15);
+}
+.filePanelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filePanelHeader strong {
+  flex: 1;
+  min-width: 0;
+}
+.filePanelBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+.fileImage {
+  max-width: 100%;
+  height: auto;
+}
+.uploads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+}
+.uploadFailed {
+  font-size: 12px;
+  color: var(--danger);
+}
+.console .linkish {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  min-height: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: 13px;
+}
+.dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+@media (max-width: 760px) {
+  .filePanel {
+    width: 100vw;
+  }
+}
+
+/* The team timeline and team messages. */
+.timeline {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.timeline summary {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.timeline[open] {
+  /* Open, it never pushes the windows off screen: it scrolls inside. */
+  max-height: 30dvh;
+  overflow-y: auto;
+}
+.timeline[open] summary {
+  position: sticky;
+  top: 0;
+  padding: 2px 0;
+  background: var(--bg);
+}
+.timeline ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.timeline li {
+  margin-bottom: 6px;
+}
+.timelineText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.teamMessage + .teamMessage {
+  margin-top: 8px;
+}
+.teamMessage > div {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Folder cleanup. */
+.cleanupList {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow: auto;
+}
+.cleanupList li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hair);
+  overflow-wrap: anywhere;
+}
+
+/* Routes in the Team panel. */
+.routes {
+  margin: 8px 0;
+}
+.routeForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+.routeForm input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+/* Claims and holds in the Team panel. */
+.claims {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.claims li {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+/* Claims, holds and merges in a window header stay on one line each and
+   shorten to fit, so the header never crowds out the transcript. */
+.headerLine {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.headerHold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.headerHold button {
+  flex: none;
+}
+
+/* Compact desktop, so more fits on screen: smaller text and less padding in
+   the windows, their headers, composers and the Team panel. The phone keeps
+   its own sizes. */
+@media (min-width: 761px) {
+  .transcript {
+    font-size: 13.5px;
+    padding: 8px;
+  }
+  .transcriptBody {
+    gap: 6px;
+  }
+  .text :global(.markdown) {
+    font-size: 13.5px;
+    line-height: 1.5;
+  }
+  .text :global(.markdown) code,
+  .text :global(.markdown) pre {
+    font-size: 12.5px;
+  }
+  .owner {
+    padding: 6px 9px;
+  }
+  .thinking summary,
+  .tool summary,
+  .toolError summary,
+  .thinking p,
+  .denied,
+  .statusLine,
+  .errorLine,
+  .waiting {
+    font-size: 12.5px;
+  }
+  .tool pre,
+  .toolError pre {
+    font-size: 11.5px;
+    padding: 6px;
+  }
+  .windowHeader {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  .windowName {
+    font-size: 14px;
+  }
+  .chip,
+  .badge,
+  .windowStatus {
+    font-size: 11.5px;
+  }
+  .windowHeader button {
+    min-height: 28px;
+    padding: 2px 8px;
+  }
+  .console .windowHeader .iconButton {
+    width: 28px;
+    min-height: 28px;
+    padding: 0;
+  }
+  .composer {
+    padding: 6px;
+    gap: 6px;
+  }
+  .composer textarea {
+    padding: 5px 8px;
+    font-size: 13.5px;
+    line-height: 1.4;
+  }
+  .composerButtons button {
+    min-height: 32px;
+    padding: 4px 10px;
+  }
+  .timeline {
+    font-size: 12.5px;
+    padding: 4px 8px;
+  }
+  .teamMessage {
+    font-size: 13px;
+  }
+}
+
+/* The coding team's setup screen. */
+.teamRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.teamRow input:not([type="radio"]) {
+  flex: 1 1 140px;
+}
+.teamMember {
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.promptBox summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.promptBox textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* The project and tab menus' inline fields and Archived. */
+.inlineField {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inlineField input {
+  flex: 1;
+  min-width: 0;
+}
+/* A tab's spend limit: the field and its buttons wrap at phone width. */
+.spendLimit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+.spendLimit .inlineField {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+.spendLimit .inlineField input {
+  flex: 0 1 7em;
+}
+.console .dangerButton {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.archived {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.archived summary {
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.archived ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.archived li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+/* The owner's queued messages above the composer. */
+.queued {
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  max-height: 30%;
+  overflow-y: auto;
+  font-size: 0.85em;
+}
+.queued li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+}
+.queuedEditing {
+  outline: 1px dashed currentColor;
+}
+.queuedText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queuedButtons {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+/* A second click confirms a destructive action (Delete). */
+.danger {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* The context gauge when the window is nearly full. */
+.gaugeHigh {
+  color: var(--danger);
+}
+
+/* The helpers row under a window header. */
+.helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 0.8em;
+}
+.helper {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.helperDone {
+  opacity: 0.6;
+}
+.tasks {
+  padding: 2px 8px;
+  font-size: 0.8em;
+}
+.tasks summary {
+  cursor: pointer;
+}
+.tasks ol {
+  margin: 4px 0;
+  padding-left: 4px;
+  list-style: none;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.tasks li {
+  overflow-wrap: anywhere;
+}
+.taskDone {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.taskNow {
+  font-weight: 600;
+}
+.taskNone {
+  margin: 0;
+  padding: 2px 8px;
+  font-size: 0.8em;
+  opacity: 0.6;
+}
+
+/* The page shell: a slim top bar, a real tab strip, one primary Add, menus,
+   notices and the Settings page. Spacing steps are 4, 8, 12, 16 and 24px;
+   borders are hairlines; the accent colour is the primary action's alone,
+   and status has its own colours. */
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--panel);
+}
+.topbarEnd {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.console .iconButton {
+  flex: none;
+  box-sizing: border-box;
+  min-height: 36px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.console .iconButton:hover,
+.console .iconButton[aria-current="page"] {
+  background: var(--soft);
+  color: var(--text);
+}
+.console .phoneOnly {
+  display: none;
+}
+.console .projectButton {
+  /* The search box gives way first when the bar is narrow (Needs you open). */
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 34ch;
+  padding: 6px 8px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+}
+.projectButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.projectButton svg {
+  flex: none;
+  color: var(--muted);
+}
+.search {
+  position: relative;
+  flex: 0 1 380px;
+  min-width: 140px;
+  margin-left: 8px;
+  display: flex;
+  align-items: center;
+}
+.search svg {
+  position: absolute;
+  left: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.console .search input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px 0 32px;
+  border-color: transparent;
+  background: var(--soft);
+}
+.console .search input:hover {
+  border-color: var(--hair);
+}
+.console .search input:focus {
+  border-color: var(--line);
+  background: var(--panel);
+}
+.console .needsPill,
+.console .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.console .needsPill {
+  border-color: var(--amberLine);
+  background: var(--amberBg);
+  color: var(--amber);
+  font-weight: 600;
+}
+.console .needsPill:hover {
+  background: var(--amberBg);
+  filter: brightness(0.97);
+}
+.needsDot,
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: currentColor;
+}
+.needsDot {
+  background: var(--amberLine);
+}
+.console .status {
+  padding-right: 8px;
+  font-weight: 500;
+}
+.console .status_ok {
+  border-color: transparent;
+  background: var(--okBg);
+  color: var(--ok);
+}
+.console .status_paused {
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--muted);
+}
+.console .status_off {
+  border-color: transparent;
+  background: var(--dangerBg);
+  color: var(--danger);
+}
+.console .status:hover {
+  filter: brightness(0.97);
+}
+
+.tabBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--hair);
+}
+.tabStrip {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabStrip::-webkit-scrollbar {
+  display: none;
+}
+.tab,
+.tabOn {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.tab:hover {
+  box-shadow: inset 0 -2px 0 var(--line);
+}
+.tabOn {
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+.console .tab > button,
+.console .tabOn > button:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 10px 10px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.console .tab > button:hover {
+  color: var(--text);
+}
+.console .tabOn > button:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+.console .tabStrip button:focus-visible {
+  outline-offset: -3px;
+}
+.tabPaused {
+  display: inline-flex;
+  color: var(--muted);
+}
+.tabStep {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+/* A name edited in place: a tab, the project, an agent. */
+.console .inlineRename {
+  width: 16ch;
+  margin: 6px 2px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+.console .tabMenuButton {
+  width: 24px;
+  min-height: 26px;
+  margin: 0 4px 0 -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+.console .tabMenuButton:hover {
+  color: var(--text);
+}
+.tabBarEnd {
+  flex: none;
+  margin-left: auto;
+  padding: 6px 0;
+}
+.console .addButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Menus: a raised list; each item can say in one line what it does. */
+.popMenu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  max-width: min(340px, calc(100vw - 16px));
+  /* A tall menu on a short screen scrolls inside itself. */
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--hair);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.console .popMenu button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+}
+.console .popMenu button:hover:not(:disabled),
+.console .popMenu button:focus-visible {
+  background: var(--soft);
+  outline: none;
+}
+.popMenu button svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}
+.popMenu button span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.popMenu small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.console .popMenu .popDanger {
+  color: var(--danger);
+}
+.console .popMenu .popSeparated {
+  margin-top: 4px;
+  border-top: 1px solid var(--hair);
+  border-radius: 0 0 6px 6px;
+  padding-top: 10px;
+}
+.folderPath {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.popNote {
+  margin-bottom: 4px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--hair);
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: pre-line;
+}
+
+/* A calm line under the tabs: a pause, the Claude usage limit. */
+.notice {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 13px;
+}
+.topbar + .notice {
+  margin-top: 12px;
+}
+.notice svg {
+  color: var(--muted);
+}
+.console .notice button {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 4px 10px;
+}
+.console .newProject {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+.console .newProject:hover {
+  color: var(--text);
+}
+
+/* The Settings page: sections on the left, the open one on the
+   right, a hairline between them; on the phone, the list, then the section. */
+.settingsPage {
+  outline: none;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1080px;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+.settingsHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 12px 24px;
+}
+.settingsHeader h1 {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.settingsBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  border-top: 1px solid var(--hair);
+}
+.settingsNav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 24px;
+  border-right: 1px solid var(--hair);
+  overflow-y: auto;
+}
+.settingsNav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.settingsNav a:hover {
+  background: var(--soft);
+  color: var(--text);
+}
+.settingsNav a[aria-current="page"] {
+  background: var(--soft);
+  color: var(--text);
+  font-weight: 600;
+}
+.settingsNav svg {
+  flex: none;
+}
+.settingsNav small {
+  display: none;
+}
+.settingsContent {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+.settingsContent > h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+.settingsContent > .hint {
+  margin: 2px 0 16px;
+}
+/* A screen shown in place: the content area is its frame. */
+.console .inPage {
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.inPage .cleanupList {
+  max-height: none;
+}
+.inPage .filePanelBody {
+  max-height: 65dvh;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    gap: 4px;
+    padding: 4px 8px;
+  }
+  .topbarEnd {
+    gap: 4px;
+  }
+  .console .phoneOnly {
+    display: inline-flex;
+  }
+  .console .iconButton {
+    width: 40px;
+  }
+  .console .projectButton {
+    flex: 0 1 auto;
+    padding: 6px 4px;
+  }
+  .search,
+  .wideOnly {
+    display: none;
+  }
+  /* The status is its coloured dot; its name is the accessible label. */
+  .console .status {
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+  .console .status svg {
+    display: none;
+  }
+  .console .needsPill {
+    padding: 4px 10px;
+  }
+  .tabBar {
+    padding: 0 8px;
+  }
+  .console .tabMenuButton {
+    width: 32px;
+    min-height: 44px;
+  }
+  .settingsHeader {
+    padding: 8px 8px 8px 12px;
+  }
+  .settingsBody {
+    display: block;
+    overflow-y: auto;
+  }
+  .settingsNav {
+    border-right: 0;
+    padding: 8px;
+  }
+  .settingsNav a {
+    min-height: 56px;
+    padding: 8px 12px;
+  }
+  .settingsNav span {
+    display: flex;
+    flex-direction: column;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .settingsNav small {
+    display: block;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 400;
+  }
+  .settingsContent {
+    display: none;
+    padding: 12px 12px 24px;
+  }
+  .settingsOpen .settingsNav {
+    display: none;
+  }
+  .settingsOpen .settingsContent {
+    display: block;
+  }
+}
+
+/* The mark and the sidebar's label. */
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.logo > span,
+.emptyIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--panel);
+}
+.navLabel {
+  margin: 4px 6px -4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.emptyIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--muted);
+  border: 1px solid var(--hair);
+}
+
+/* Needs you: a panel beside the windows, which make room for it;
+   on the phone it covers the page. */
+.needsPanel {
+  flex: none;
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 16px;
+  border-left: 1px solid var(--hair);
+  background: var(--panel);
+  overflow-y: auto;
+}
+.needsPanel > .dialogHeader {
+  margin: 0 -14px;
+  padding: 10px 10px 10px 14px;
+  top: 0;
+  min-height: 52px;
+  box-sizing: border-box;
+}
+.needsPanel h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+/* Below 1200px there is no room beside the windows: it floats over their
+   right side instead (still not modal). */
+@media (max-width: 1200px) {
+  .needsPanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    /* Over the windows and the phone's drawer, under every dialog (20). */
+    z-index: 19;
+    width: min(380px, 100vw);
+    box-shadow: var(--shadow);
+  }
+}
+@media (max-width: 760px) {
+  .needsPanel {
+    left: 0;
+    width: auto;
+    border-left: 0;
+    box-shadow: none;
+  }
+}
+/* A narrow page (Needs you open on a small desktop): search is an icon,
+   the pill and status keep their dots and counts, the name may shorten. */
+@container (max-width: 700px) {
+  .search,
+  .wideOnly {
+    display: none;
+  }
+  .console .searchIcon {
+    display: inline-flex;
+  }
+  .console .projectButton {
+    flex: 0 1 auto;
+  }
+}
+@media (max-width: 760px) {
+  /* The phone has the drawer instead of the folded sidebar's button. */
+  .console .wideScreenOnly {
+    display: none;
+  }
+}
+
+/* Settings › Appearance: one choice per row, with its hint. */
+.choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choices label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.choices label:has(input:checked) {
+  border-color: var(--accent);
+}
+.choices input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.choices span {
+  display: flex;
+  flex-direction: column;
+}
+.choices small {
+  color: var(--muted);
+}

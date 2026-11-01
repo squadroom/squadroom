@@ -1,0 +1,77 @@
+.signInPage {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: #1e293b;
+  background: #f8fafc;
+  font-size: 15px;
+}
+.signIn {
+  width: min(100%, 380px);
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: white;
+}
+.signIn h1 {
+  margin: 0;
+  font-size: 20px;
+}
+.signIn form {
+  display: grid;
+  gap: 8px;
+}
+.signIn input,
+.signIn button,
+.signIn a.signInButton {
+  font: inherit;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: white;
+  color: inherit;
+  text-align: center;
+  text-decoration: none;
+}
+.signIn input {
+  letter-spacing: 0.3em;
+  font-size: 20px;
+}
+.signIn a.signInPrimary,
+.signIn button.signInPrimary {
+  background: #1e293b;
+  border-color: #1e293b;
+  color: white;
+}
+.signIn button:disabled {
+  opacity: 0.5;
+}
+.signInError {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #fff1f2;
+  color: #9f1239;
+}
+@media (prefers-color-scheme: dark) {
+  .signInPage {
+    color: #e2e8f0;
+    background: #0f172a;
+  }
+  .signIn,
+  .signIn input,
+  .signIn button,
+  .signIn a.signInButton {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  .signIn a.signInPrimary,
+  .signIn button.signInPrimary {
+    background: #e2e8f0;
+    border-color: #e2e8f0;
+    color: #0f172a;
+  }
+}

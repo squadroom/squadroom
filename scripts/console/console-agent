@@ -1,0 +1,262 @@
+#!/bin/zsh -f
+# console-agent — the Agent Console's launcher.
+#
+# Installed root-owned at /usr/local/libexec/console-agent by
+# setup-agent-user.sh, and run only through sudo as the `agent` user:
+#
+#   sudo -u agent /usr/local/libexec/console-agent spawn [--keep NAME[,NAME…]] [--sandbox look|edit --net on|off --port N [--deny DIR]… [--login kimi]] <cwd> <program> [args…]
+#   sudo -u agent /usr/local/libexec/console-agent git <repo> [git args…]   (git <new folder> init [--bare])
+#   sudo -u agent /usr/local/libexec/console-agent signal <TERM|KILL|INT> <pgid>
+#   sudo -u agent /usr/local/libexec/console-agent sweep
+#
+# sudo's env_reset already drops the owner's environment. The sudoers rule
+# keeps only the named credentials below, and `spawn` passes on only those
+# its `--keep` list names: a listed credential that happens to be in the
+# worker's environment never reaches an agent that was not given it. Every
+# other action passes none. This script sets the rest of the
+# environment itself, so nothing from the owner's worker reaches an agent.
+# Credentials arrive in the environment, never on a command line (ps). The
+# GitHub token never crosses: GitHub traffic is the worker's, as the owner.
+set -eu
+umask 027
+
+readonly AGENT_HOME=/Users/agent
+readonly SHARED=/opt/console-shared
+readonly CLIENTS=/opt/console-clients/bin
+# The only variables that may cross from the worker (also listed in sudoers).
+readonly CREDENTIALS=(CLAUDE_CODE_OAUTH_TOKEN CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY
+  XAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY ZAI_API_KEY MOONSHOT_API_KEY OPENROUTER_API_KEY)
+
+die() { print -u2 -- "console-agent: $*"; exit 64 }
+
+[[ $(/usr/bin/id -un) == agent ]] || die "must run as the agent user"
+
+# Start from nothing but what an agent needs. The credentials that arrived
+# are held unexported; only `spawn --keep` exports any of them again.
+typeset -A arrived
+for name in $CREDENTIALS; do
+  [[ -n ${(P)name-} ]] && arrived[$name]=${(P)name}
+done
+for name in ${(k)parameters[(R)*export*]}; do unset $name 2>/dev/null || true; done
+export HOME=$AGENT_HOME USER=agent LOGNAME=agent LANG=en_US.UTF-8 \
+  PATH=$CLIENTS:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+# Every working folder lives under the agent's home.
+in_agent_home() {
+  local dir=${1:A}
+  [[ -d $dir && ( $dir == $AGENT_HOME || $dir == $AGENT_HOME/* ) ]]
+}
+
+# Each working folder gets its own private temporary folder, so two agents
+# (one user) never share one.
+private_tmp() {
+  local dir=$AGENT_HOME/.tmp/$(print -rn -- ${1:A} | /sbin/md5)
+  [[ ! -L $dir ]] || die "temporary folder is a link"
+  /bin/mkdir -p -m 700 -- $dir
+  export TMPDIR=$dir/
+}
+
+case ${1-} in
+  spawn)
+    if [[ ${2-} == --keep ]]; then
+      (( $# >= 3 )) || die "usage: spawn --keep NAME[,NAME…] <cwd> <program> [args…]"
+      # An empty list keeps nothing. A name must be a listed credential and
+      # must have arrived: a missing login fails here, not inside the agent.
+      for name in ${(s:,:)3}; do
+        (( ${CREDENTIALS[(Ie)$name]} )) || die "--keep: $name is not a credential the launcher passes"
+        [[ -n ${arrived[$name]-} ]] || die "--keep: $name was not given"
+        export "$name=${arrived[$name]}"
+      done
+      set -- spawn "${@[4,-1]}"
+    fi
+    unset arrived
+    # An ACP agent program runs inside a sandbox profile. Reads are allowed,
+    # so the client can load its program, runtime and system files, except
+    # every other project's folder, its teammates' clones (named by the
+    # worker with --deny), the local bare repositories, every other agent's
+    # temporary folder, the Codex and Claude logins and the shared folder.
+    # Writes only in its own clone and temporary folder (Look only: the
+    # temporary folder alone). Network is off unless the owner switched it
+    # on for the project, except the Console's own team tools on the
+    # loopback port the worker names.
+    sandbox="" net="" port="" deny=() login=""
+    if [[ ${2-} == --sandbox ]]; then
+      while [[ ${2-} == --(sandbox|net|port|deny|login) ]]; do
+        (( $# >= 3 )) || die "$2 needs a value"
+        case $2 in
+          --sandbox) [[ $3 == (look|edit) ]] || die "--sandbox must be look or edit"; sandbox=$3 ;;
+          --net) [[ $3 == (on|off) ]] || die "--net must be on or off"; net=$3 ;;
+          --port) [[ $3 == <1024-65535> ]] || die "--port must be a port number"; port=$3 ;;
+          --deny) deny+=($3) ;;
+          # The one account login this program may read: Kimi Code's
+          # membership. Every other sandboxed program is denied it.
+          --login) [[ $3 == kimi ]] || die "--login must be kimi"; login=$3 ;;
+        esac
+        set -- spawn "${@[4,-1]}"
+      done
+      [[ -n $sandbox && -n $net && -n $port ]] || die "usage: spawn --sandbox look|edit --net on|off --port N [--deny DIR]… [--login kimi] <cwd> <program> [args…]"
+    fi
+    (( $# >= 3 )) || die "usage: spawn [--keep NAME[,NAME…]] <cwd> <program> [args…]"
+    in_agent_home $2 || die "cwd must be a folder under $AGENT_HOME"
+    private_tmp $2
+    cd -- $2
+    unset OLDPWD
+    if [[ -n $sandbox ]]; then
+      clone=${2:A}
+      # Only an agent's own clone (work/<project>/<agent>) runs sandboxed,
+      # and only its own project's other clones may be named.
+      rel=${clone#$AGENT_HOME/work/}
+      [[ $clone == "$AGENT_HOME"/work/* && $rel == */* && $rel != */*/* && ${rel%%/*} == [A-Za-z0-9._-]* && ${rel%%/*} != *[^A-Za-z0-9._-]* && ${rel#*/} != *[^A-Za-z0-9._-]* && -n ${rel#*/} ]] ||
+        die "a sandboxed program runs in an agent's clone"
+      project=${clone:h}
+      params=(-D WORK=$AGENT_HOME/work -D PROJECT=$project -D CLONE=$clone -D TMP=${TMPDIR:A}
+        -D PROJECTS=$AGENT_HOME/projects -D TMPS=$AGENT_HOME/.tmp -D CODEX=$AGENT_HOME/.codex
+        -D CLAUDE=$AGENT_HOME/.claude -D SHARED=$SHARED -D PORT=localhost:$port)
+      denied=""
+      # Account logins kept in the agent's home (Kimi Code's) are denied to
+      # every program but their own client, which also writes its data root
+      # there (sessions, settings, the login's refresh).
+      params+=(-D KIMI=$AGENT_HOME/.kimi-code)
+      if [[ $login != kimi ]]; then
+        denied+=" (subpath (param \"KIMI\"))"
+      fi
+      i=0
+      for dir in $deny; do
+        [[ $dir == "$project"/* && ${dir#$project/} != *[^A-Za-z0-9._-]* && -n ${dir#$project/} && $dir != $clone ]] ||
+          die "--deny names a teammate's clone in the same project"
+        params+=(-D DENY$i=$dir)
+        denied+=" (subpath (param \"DENY$i\"))"
+        (( i += 1 ))
+      done
+      # Every read rule names file-read-data: a rule for that operation wins
+      # over a file-read* one whatever their order, so mixing them would let
+      # the project's allow below undo a teammate's deny.
+      network='(deny network*) (allow network-outbound (remote ip (param "PORT")))'
+      [[ $net == on ]] && network=''
+      writes='(subpath (param "CLONE")) (subpath (param "TMP"))'
+      [[ $sandbox == look ]] && writes='(subpath (param "TMP"))'
+      [[ $login == kimi ]] && writes+=' (subpath (param "KIMI"))'
+      # The client keeps its data, settings and caches in its own temporary
+      # folder, the one place besides its clone it may write.
+      xdg=${TMPDIR:A}/xdg
+      /bin/mkdir -p -m 700 -- $xdg/data $xdg/config $xdg/cache $xdg/state
+      export XDG_DATA_HOME=$xdg/data XDG_CONFIG_HOME=$xdg/config XDG_CACHE_HOME=$xdg/cache XDG_STATE_HOME=$xdg/state
+      # Clients that keep their state in a folder of their own in the home
+      # instead (live qualification, 2026-10-22): Gemini CLI (~/.gemini,
+      # moved by GEMINI_CLI_HOME) and Grok Build (~/.grok, moved by
+      # GROK_HOME, which also must not update itself). Each window keeps
+      # them in its own temporary folder; their keys come in the environment.
+      /bin/mkdir -p -m 700 -- ${TMPDIR:A}/gemini ${TMPDIR:A}/grok
+      export GEMINI_CLI_HOME=${TMPDIR:A}/gemini GROK_HOME=${TMPDIR:A}/grok GROK_DISABLE_AUTOUPDATER=1
+      shift 2
+      exec /usr/bin/sandbox-exec -p "
+        (version 1)
+        (allow default)
+        $network
+        (deny file-read-data (subpath (param \"WORK\")))
+        (allow file-read-data (subpath (param \"PROJECT\")))
+        (deny file-read-data${denied}
+          (subpath (param \"PROJECTS\")) (subpath (param \"TMPS\")) (subpath (param \"CODEX\"))
+          (subpath (param \"CLAUDE\")) (subpath (param \"SHARED\")))
+        (allow file-read-data (subpath (param \"CLONE\")) (subpath (param \"TMP\")))
+        (deny file-write*)
+        (allow file-write* $writes (literal \"/dev/null\"))" $params "$@"
+    fi
+    shift 2
+    exec "$@"
+    ;;
+  git)
+    unset arrived
+    (( $# >= 2 )) || die "usage: git <repo> [git args…]"
+    # `git <repo> init [--bare]` creates a new agent clone (work/<project>/
+    # <agent>) or a project's bare repository (projects/<project>.git); the
+    # folder must be new or empty. Every other command needs an existing one.
+    mode=existing
+    if [[ ${3-} == init ]]; then
+      target=${2:a}
+      [[ $target != */../* && ( $target == $AGENT_HOME/work/*/* || $target == $AGENT_HOME/projects/*.git ) ]] ||
+        die "init only in $AGENT_HOME/work/<project>/<agent> or $AGENT_HOME/projects/<project>.git"
+      [[ ! -L $target ]] || die "init target is a link"
+      if [[ -e $target ]]; then
+        [[ -d $target && -z $(/bin/ls -A -- $target) ]] || die "init needs a new or empty folder"
+      else
+        /bin/mkdir -p -m 750 -- $target
+      fi
+      (( ${@[(Ie)--bare]} )) && mode=bare || mode=clone
+    fi
+    in_agent_home $2 || die "repo must be a folder under $AGENT_HOME"
+    repo=${2:A}
+    shift 2
+    private_tmp $repo
+    cd -- $repo
+    unset OLDPWD
+    # The repository's own configuration is written by agents, and Git runs
+    # commands it names (diff.external, filter drivers, hooks, pagers…). So
+    # Git runs in a sandbox that may execute only Git itself and its compiled
+    # pack helpers (never an interpreter or a shell script), may read and
+    # write in the agent's home only inside this repository and its
+    # temporary folder (never a teammate's clone), and has no network.
+    # Git is called directly, not via xcrun. Nothing here talks to GitHub and
+    # no token ever reaches the agent user: the worker pushes and fetches as
+    # the owner in its own mirror, and commits cross by bundle.
+    # Local transports (a push or fetch between two folders) start a shell,
+    # which is forbidden here, so local repositories also exchange bundles.
+    # Git works on exactly this repository: the work tree and Git folder
+    # are pinned, so an agent's core.worktree, a `.git` pointer file or
+    # repository discovery can never lead to another folder.
+    if [[ $mode == clone ]]; then
+      export GIT_DIR=$repo/.git GIT_WORK_TREE=$repo
+    elif [[ $mode == bare ]]; then
+      :  # `git init --bare` creates the repository in this (empty) folder
+    elif [[ -d $repo/.git && ! -L $repo/.git ]]; then
+      export GIT_DIR=$repo/.git GIT_WORK_TREE=$repo
+    elif [[ $repo == $AGENT_HOME/projects/*.git && -f $repo/HEAD ]]; then
+      export GIT_DIR=$repo
+    else
+      die "not a repository with its own .git folder: $repo"
+    fi
+    gitbin=$(/usr/bin/xcrun --find git) || die "git not found"
+    core=$($gitbin --exec-path) || die "git exec path not found"
+    export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+      GIT_PAGER=cat GIT_EDITOR=true GIT_ALLOW_PROTOCOL=file GIT_CONFIG_COUNT=3 \
+      GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
+      GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false \
+      GIT_CONFIG_KEY_2=credential.helper GIT_CONFIG_VALUE_2=
+    exec /usr/bin/sandbox-exec -p '
+      (version 1)
+      (allow default)
+      (deny network*)
+      (deny file-read-data (subpath (param "HOME")))
+      (allow file-read-data (subpath (param "REPO")) (subpath (param "TMP")))
+      (deny process-exec*)
+      (allow process-exec*
+        (literal (param "GIT"))
+        (literal (string-append (param "CORE") "/git-upload-pack"))
+        (literal (string-append (param "CORE") "/git-receive-pack")))
+      (deny file-write*)
+      (allow file-write*
+        (subpath (param "REPO")) (subpath (param "TMP"))
+        (subpath "/private/var/folders") (literal "/dev/null"))' \
+      -D GIT=$gitbin -D CORE=$core -D HOME=$AGENT_HOME -D REPO=$repo \
+      -D TMP=${TMPDIR:A} $gitbin "$@"
+    ;;
+  signal)
+    (( $# == 3 )) || die "usage: signal <TERM|KILL|INT> <pgid>"
+    [[ $2 == (TERM|KILL|INT) ]] || die "signal must be TERM, KILL or INT"
+    [[ $3 == <2-> ]] || die "pgid must be a number"
+    exec /bin/kill -s $2 -- -$3
+    ;;
+  sweep)
+    # Every process the agent user owns, including servers that left their
+    # group. pkill never signals itself. It exits 1 when nothing matched:
+    # already clean, so success. (The variable is `rc`, not `status`: that
+    # is zsh's read-only special for $?.)
+    /usr/bin/pkill -KILL -U agent && exit 0
+    rc=$?
+    (( rc == 1 )) && exit 0
+    exit $rc
+    ;;
+  *)
+    die "unknown action: ${1-}"
+    ;;
+esac

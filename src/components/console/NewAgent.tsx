@@ -1,0 +1,106 @@
+import type { CommandFields } from "@/lib/console/commands";
+import { useState } from "react";
+import { roleText, type RoleDef } from "@/lib/console/roles";
+import { NAME_MAX } from "@/lib/console/types";
+import { firstModel, lookOnly, offeredKinds, roleKind } from "@/lib/console/ui";
+import AiPicker, { type Ai } from "./AiPicker";
+import Dialog from "./Dialog";
+import styles from "./console.module.css";
+
+export default function NewAgent({
+  roles,
+  talkOnly,
+  codexOff,
+  onClose,
+  onCreate,
+}: {
+  roles: RoleDef[];
+  /** A project without files: its agents are Look only. */
+  talkOnly: boolean;
+  /** Why Codex windows are off, when they are. */
+  codexOff: string | null;
+  onClose: () => void;
+  onCreate: (fields: Omit<CommandFields<"createAgent">, "tabId">) => Promise<void>;
+}) {
+  const [ai, setAi] = useState<Ai>(() => {
+    const kind = offeredKinds(codexOff)[0].kind;
+    return { kind, model: firstModel(kind), effort: "default" };
+  });
+  const { kind, model, effort } = ai;
+  const [permission, setPermission] = useState<"edit" | "look">(talkOnly ? "look" : "edit");
+  const [askFirst, setAskFirst] = useState(false);
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const canEdit = !lookOnly(kind);
+  /** A role fills in access, the suggested AI and the instructions. */
+  const pickRole = (id: string) => {
+    setRoleId(id);
+    const r = roles.find((x) => x.id === id);
+    // "None": no role's instructions are kept.
+    if (!r) return setRole("");
+    const k = roleKind(r.ai, codexOff);
+    setAi({ kind: k, model: firstModel(k), effort: "default" });
+    if (!talkOnly) setPermission(r.access);
+    setRole(roleText(r, r.prompt));
+  };
+  return (
+    <Dialog title="New agent" onClose={onClose}>
+      <label>
+        Role
+        <select value={roleId} onChange={(e) => pickRole(e.target.value)}>
+          <option value="">None</option>
+          {roles.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}: {r.description}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Name
+        <input value={name} maxLength={NAME_MAX} placeholder="Lead, Reviewer…" onChange={(e) => setName(e.target.value)} autoFocus />
+      </label>
+      <AiPicker
+        value={ai}
+        codexOff={codexOff}
+        onChange={(next) => {
+          setAi(next);
+          // A kind qualified at Look only so far.
+          if (next.kind !== kind && lookOnly(next.kind)) setPermission("look");
+        }}
+      />
+      <fieldset>
+        <legend>Permission</legend>
+        <label className={styles.radio}>
+          <input type="radio" checked={permission === "edit"} disabled={talkOnly || !canEdit} onChange={() => setPermission("edit")} />
+          Edit in its folder{!canEdit && " (not qualified yet)"}
+        </label>
+        <label className={styles.radio}>
+          <input type="radio" checked={permission === "look"} onChange={() => setPermission("look")} />
+          Look only
+        </label>
+        {kind === "claude-code" && (
+          <label className={styles.radio} title="Its changes, commands and web access wait for you in Needs you">
+            <input type="checkbox" checked={askFirst} onChange={(e) => setAskFirst(e.target.checked)} />
+            Ask me first
+          </label>
+        )}
+      </fieldset>
+      <label>
+        Role instructions
+        <textarea rows={4} value={role} maxLength={4000} placeholder="What this agent is for." onChange={(e) => setRole(e.target.value)} />
+      </label>
+      <div className={styles.dialogButtons}>
+        <button onClick={onClose}>Cancel</button>
+        <button
+          className={styles.primary}
+          disabled={!name.trim()}
+          onClick={() => void onCreate({ name, kind, model, effort, permission, askFirst: askFirst && kind === "claude-code", role })}
+        >
+          Create
+        </button>
+      </div>
+    </Dialog>
+  );
+}

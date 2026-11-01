@@ -1,0 +1,13 @@
+# Weekly update pull requests for npm packages and the workflow's actions.
+# Each one goes through the same checks and maintainer review as any other.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

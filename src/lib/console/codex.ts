@@ -1,0 +1,226 @@
+import type { Launcher } from "./launcher.ts";
+import { Redactor } from "./redact.ts";
+import { count, oneLine as shorten, RpcProcess, str } from "./session.ts";
+import { codexPlanOp, type TaskOp } from "./tasks.ts";
+
+// The Codex driver: one `codex app-server` per ChatGPT login, run as
+// `agent` through the launcher, holding one thread per agent window.
+// JSON-RPC over stdio. The login lives in the agent account's own
+// CODEX_HOME (`~agent/.codex/auth.json`), so no credential crosses the
+// launcher.
+
+/** What one App Server notification means to the Console. Only executed
+ * items count as evidence; Codex's reply text is display only. */
+export type CodexEvent =
+  | { type: "delta"; kind: "text" | "thinking"; text: string }
+  | { type: "message"; itemId: string; text: string }
+  | { type: "tool"; itemId: string; name: string; summary: string; paths: string[] }
+  | { type: "tool_result"; itemId: string; text: string; error: boolean }
+  /** One model request's usage (`last`); the thread's `total` spans every
+   * earlier turn too, so a turn sums its own requests. `inputTokens`
+   * includes `cachedInputTokens` and `cacheWriteInputTokens`, as in
+   * OpenAI's usage. Codex can send the same `last` again (a rate-limit
+   * update) or replay old usage on resume, so `turnId` and the thread's
+   * cumulative `total` come along. */
+  | { type: "usage"; turnId: string; total?: number; inputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; outputTokens?: number; contextWindow?: number }
+  | { type: "rerouted"; model: unknown }
+  /** The thread's whole plan (task list). */
+  | { type: "plan"; turnId: string; op: TaskOp }
+  | { type: "error"; text: string }
+  /** The server began a turn on the thread (its id). */
+  | { type: "started"; turnId: string }
+  | { type: "completed"; turnId: string; status: string; error: string | null };
+
+function itemTool(item: Record<string, unknown>, redactor: Redactor): { name: string; summary: string; paths: string[] } | null {
+  const short = (text: string) => shorten(redactor, text);
+  switch (item.type) {
+    case "commandExecution":
+      return { name: "Shell", summary: short(str(item.command)), paths: [] };
+    case "fileChange": {
+      const paths = (Array.isArray(item.changes) ? item.changes : []).map((c) => str((c as { path?: unknown })?.path)).filter(Boolean);
+      return { name: "Edit", summary: short(paths.join(", ")), paths };
+    }
+    case "mcpToolCall":
+      return { name: `${str(item.server)}:${str(item.tool)}`, summary: short(JSON.stringify(item.arguments ?? {})), paths: [] };
+    case "webSearch":
+      return { name: "Web search", summary: short(str(item.query)), paths: [] };
+    default:
+      return null;
+  }
+}
+function itemResult(item: Record<string, unknown>): { text: string; error: boolean } | null {
+  switch (item.type) {
+    case "commandExecution": {
+      const code = item.exitCode;
+      return {
+        text: `${str(item.aggregatedOutput)}${typeof code === "number" ? `\n(exit ${code})` : ""}`,
+        error: item.status === "failed" || item.status === "declined" || (typeof code === "number" && code !== 0),
+      };
+    }
+    case "fileChange":
+      return { text: `${str(item.status) || "done"}`, error: item.status === "failed" || item.status === "declined" };
+    case "mcpToolCall":
+      return { text: JSON.stringify(item.result ?? item.error ?? {}), error: !!item.error };
+    case "webSearch":
+      return { text: "", error: false };
+    default:
+      return null;
+  }
+}
+
+/** Read one notification for a thread. Summaries and error lines are
+ * redacted before they are shortened. */
+export function readCodexNotification(method: string, params: Record<string, unknown>, redactor: Redactor = new Redactor()): CodexEvent[] {
+  const short = (text: string) => shorten(redactor, text);
+  switch (method) {
+    case "item/agentMessage/delta":
+      return [{ type: "delta", kind: "text", text: str(params.delta) }];
+    case "item/reasoning/textDelta":
+    case "item/reasoning/summaryTextDelta":
+      return [{ type: "delta", kind: "thinking", text: str(params.delta) }];
+    case "item/started": {
+      const item = (params.item ?? {}) as Record<string, unknown>;
+      const tool = itemTool(item, redactor);
+      return tool ? [{ type: "tool", itemId: str(item.id), ...tool }] : [];
+    }
+    case "item/completed": {
+      const item = (params.item ?? {}) as Record<string, unknown>;
+      if (item.type === "agentMessage") return [{ type: "message", itemId: str(item.id), text: str(item.text) }];
+      const result = itemResult(item);
+      return result ? [{ type: "tool_result", itemId: str(item.id), ...result }] : [];
+    }
+    case "thread/tokenUsage/updated": {
+      const usage = (params.tokenUsage ?? {}) as { last?: Record<string, unknown>; total?: Record<string, unknown>; modelContextWindow?: unknown };
+      const last = usage.last ?? {};
+      return [
+        {
+          type: "usage",
+          turnId: str(params.turnId),
+          total: count(usage.total?.totalTokens),
+          inputTokens: count(last.inputTokens),
+          cacheReadTokens: count(last.cachedInputTokens),
+          // Optional in the 0.155.1 schema, where it defaults to 0.
+          cacheWriteTokens: count(last.cacheWriteInputTokens ?? 0),
+          outputTokens: count(last.outputTokens),
+          // The window the App Server reports for the thread's model.
+          ...(count(usage.modelContextWindow) !== undefined ? { contextWindow: count(usage.modelContextWindow) } : {}),
+        },
+      ];
+    }
+    case "turn/plan/updated": {
+      const op = codexPlanOp(params.plan);
+      return op ? [{ type: "plan", turnId: str(params.turnId), op }] : [];
+    }
+    case "turn/started": {
+      const turn = (params.turn ?? {}) as { id?: unknown };
+      return [{ type: "started", turnId: str(turn.id) }];
+    }
+    case "model/rerouted":
+      return [{ type: "rerouted", model: params.toModel ?? params.model }];
+    case "error": {
+      const error = (params.error ?? {}) as { message?: unknown };
+      return [{ type: "error", text: short(str(error.message) || "Codex reported an error.") }];
+    }
+    case "turn/completed": {
+      const turn = (params.turn ?? {}) as { id?: unknown; status?: unknown; error?: { message?: unknown } | null };
+      return [{ type: "completed", turnId: str(turn.id), status: str(turn.status), error: turn.error ? short(str(turn.error.message)) : null }];
+    }
+    default:
+      return [];
+  }
+}
+
+/** How a call ended short of a result: `refused` is a
+ * definitive error reply, `ended` the server's exit, and `unknown` a
+ * timeout, after which the server may well have accepted the request and
+ * be acting on it. */
+export type CodexOutcome = "refused" | "ended" | "unknown";
+/** A reply that came after its call's timeout: the result, or the
+ * refusal (then nothing was accepted after all). */
+export type LateReply = (reply: { result: Record<string, unknown> } | { refused: string }) => void;
+export class CodexError extends Error {
+  readonly outcome: CodexOutcome;
+  constructor(message: string, outcome: CodexOutcome = "refused") {
+    super(message);
+    this.name = "CodexError";
+    this.outcome = outcome;
+  }
+}
+
+/** One App Server process and its JSON-RPC traffic. */
+export class CodexServer extends RpcProcess {
+  private nextId = 1;
+  private calls = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  /** Calls that timed out whose caller still wants the reply, should it
+   * come (an accepted turn/start): the reply is handed on once, a result
+   * or a refusal. */
+  private late = new Map<number, LateReply>();
+  // Its notifications carry `threadId`; its requests are approvals and
+  // elicitations.
+  private redactor: Redactor;
+  constructor(launcher: Launcher, home: string, binary: string, redactor: Redactor = new Redactor()) {
+    // No credential crosses: the login is in the agent's own CODEX_HOME.
+    super(launcher.spawn(home, binary, ["app-server"], {}), home, "The Codex server");
+    this.redactor = redactor;
+    // One line this long is not the protocol: the server is ended.
+    this.onOversize = () => this.child.kill("SIGTERM");
+  }
+  protected ended() {
+    for (const call of this.calls.values()) {
+      clearTimeout(call.timer);
+      call.reject(new CodexError("The Codex server ended.", "ended"));
+    }
+    this.calls.clear();
+    this.late.clear();
+  }
+  protected reply(message: Record<string, unknown>) {
+    const id = message.id;
+    const call = typeof id === "number" ? this.calls.get(id) : undefined;
+    if (!call) {
+      // A reply after its call timed out goes to the caller that asked for
+      // it: an error reply means nothing was accepted after all.
+      const late = typeof id === "number" ? this.late.get(id) : undefined;
+      if (late) {
+        this.late.delete(id as number);
+        if (message.error) late({ refused: `Codex refused: ${shorten(this.redactor, str((message.error as { message?: unknown }).message) || "an error")}` });
+        else late({ result: (message.result ?? {}) as Record<string, unknown> });
+      }
+      return;
+    }
+    this.calls.delete(id as number);
+    clearTimeout(call.timer);
+    if (message.error) {
+      const error = message.error as { message?: unknown };
+      call.reject(new CodexError(`Codex refused: ${shorten(this.redactor, str(error.message) || "an error")}`));
+    } else call.resolve((message.result ?? {}) as Record<string, unknown>);
+  }
+  /** One request. A timeout rejects with outcome `unknown`: the server may
+   * have accepted it. `late` then receives the reply if it still arrives:
+   * the result, or the refusal (nothing was accepted). */
+  call(method: string, params: unknown, timeoutMs = 60_000, late?: LateReply): Promise<Record<string, unknown>> {
+    if (this.exited) return Promise.reject(new CodexError("The Codex server ended.", "ended"));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.calls.delete(id);
+        if (late && !this.exited) this.late.set(id, late);
+        reject(new CodexError(`Codex did not answer ${method} in time.`, "unknown"));
+      }, timeoutMs);
+      this.calls.set(id, { resolve, reject, timer });
+      this.send({ id, method, params });
+    });
+  }
+  /** The caller no longer wants a late reply. */
+  forget(late: LateReply) {
+    for (const [id, fn] of this.late) if (fn === late) this.late.delete(id);
+  }
+
+  /** Initialize and check the login: ChatGPT only, never an API key. */
+  async initialize() {
+    await this.call("initialize", { clientInfo: { name: "agent_console", version: "1" }, capabilities: { experimentalApi: true } });
+    this.notify("initialized");
+    const account = await this.call("account/read", { refreshToken: false });
+    if ((account.account as { type?: unknown } | undefined)?.type !== "chatgpt")
+      throw new CodexError("Codex is not signed in with ChatGPT for the agent account. API keys are not used. Sign it in as the agent user (docs/setup.md, step 4).");
+  }
+}
