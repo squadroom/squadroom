@@ -39,7 +39,7 @@ const COMMIT_PATCH_BYTES = 256 * 1024;
 const REDACTION_MARK = /\[redacted …/;
 const BRANCH_PATCH_BYTES = 512 * 1024;
 /** No new clone when free disk would fall below this. */
-export const MIN_FREE_BYTES = 20 * 1024 ** 3;
+export const MIN_FREE_BYTES = 5 * 1024 ** 3;
 /** Free bytes on the volume holding `path`, as an ordinary user sees them. */
 export function freeBytes(path: string): number {
   const s = statfsSync(path);

@@ -107,7 +107,7 @@ export interface ConsoleWorkerOptions {
   /** GitHub's API and the mirror's remote (tests use fakes). */
   githubFetch?: typeof fetch;
   remoteUrl?: (repo: string) => string;
-  /** Free disk floor for new clones (default 20 GB) and how free space is
+  /** Free disk floor for new clones (default 5 GB) and how free space is
    * read. */
   minFreeBytes?: number;
   freeBytes?: (path: string) => number;

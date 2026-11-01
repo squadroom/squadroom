@@ -1,7 +1,12 @@
 # Architecture
 
-A short tour of how Squadroom is put together and what it defends against.
-For installation, see [setup.md](setup.md).
+How Squadroom is put together and what it defends against. For
+installation, see [setup.md](setup.md).
+
+In the app, a project (a GitHub repo, a local folder or no files) holds
+tabs, and each tab holds the agents that work on one piece of work. The
+agents in a tab share one mailbox. Everything below is what runs
+underneath.
 
 ## Processes
 

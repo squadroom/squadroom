@@ -1,7 +1,7 @@
 # Security policy
 
-Squadroom runs coding agents on your Mac with your credentials, so security
-reports are welcome and taken seriously.
+Squadroom runs coding agents on your Mac with your credentials. If you find
+a security problem, please tell us.
 
 ## Reporting a vulnerability
 
