@@ -5,6 +5,7 @@ import { fileKind, formatSize, resolveFromDocument } from "@/lib/console/files";
 import { fence, fileLinks } from "@/lib/console/ui";
 import { api, awaitJob } from "./api";
 import Icon from "./Icon";
+import { useFocusReturn } from "./useDialogFocus";
 import styles from "./console.module.css";
 
 /** The file panel: a file from an agent's folder, read by the worker as the
@@ -44,8 +45,22 @@ export default function FilePanel(props: { agentId: string; path: string; helper
     };
   }, [agentId, path, helperId]);
   const name = path.split("/").pop() ?? path;
+  // Focus moves in, so a file opened from a dialog (Changes) is reachable
+  // by keyboard, and goes back on close (to the first panel's opener after
+  // following links); Escape closes it.
+  const box = useFocusReturn<HTMLElement>(true);
   return (
-    <aside className={styles.filePanel} aria-label={`File ${path}`}>
+    <aside
+      ref={box}
+      tabIndex={-1}
+      className={styles.filePanel}
+      aria-label={`File ${path}`}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        onClose();
+      }}
+    >
       <header className={styles.filePanelHeader}>
         <strong className={styles.treeName} title={path}>
           {name}

@@ -468,15 +468,44 @@ test("a store with every column but no version is stamped and opens", (t) => {
   fresh.close();
   const version = (db: DatabaseSync) => db.prepare("PRAGMA user_version").get()!.user_version;
   const raw = new DatabaseSync(path);
-  assert.equal(version(raw), 2);
+  assert.equal(version(raw), 3);
   raw.exec("PRAGMA user_version = 0");
   raw.close();
   const store = new ConsoleStore(path);
   assert.equal(store.projects().length, 1);
   store.close();
   const stamped = new DatabaseSync(path);
-  assert.equal(version(stamped), 2);
+  assert.equal(version(stamped), 3);
   stamped.close();
+});
+
+test("a store from the version before is upgraded in place: its turns gain their billing and running usage, and keep their rows", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-schema-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "console.sqlite");
+  const fresh = new ConsoleStore(path);
+  const project = fresh.createProject("Kept", "folder");
+  const agent = fresh.createAgent({ tabId: fresh.tabs(project.id)[0].id, name: "A", role: "", kind: "opencode", model: "openai/gpt-5.6-luna", effort: null, permission: "look" });
+  const turn = fresh.queueTurn(agent.id, "kept");
+  fresh.close();
+  // As version 2 left it: no billing or running columns.
+  const raw = new DatabaseSync(path);
+  raw.exec("ALTER TABLE console_turns DROP COLUMN billing; ALTER TABLE console_turns DROP COLUMN running; PRAGMA user_version = 2");
+  raw.close();
+  for (let i = 0; i < 2; i++) {
+    const store = new ConsoleStore(path);
+    assert.equal(store.turn(turn.id)!.prompt, "kept");
+    const epoch = store.takeLease(`w${i}`, Date.now() + i * 120_000)!;
+    if (i === 0) assert.ok(store.startTurn(epoch, turn.id, { model: { id: "m", label: "M", model: "m" }, key: { scope: "global", print: "abc" } }));
+    store.close();
+    // An older build that opened it since stamps it back: it is upgraded again.
+    const back = new DatabaseSync(path);
+    back.exec("PRAGMA user_version = 2");
+    back.close();
+  }
+  const after = new DatabaseSync(path);
+  assert.match(String(after.prepare("SELECT billing FROM console_turns WHERE id = ?").get(turn.id)!.billing), /"print":"abc"/);
+  after.close();
 });
 
 test("a store missing a column is refused with the reason, and left as it was", (t) => {
@@ -514,4 +543,20 @@ test("backups run once a night after 02:00 UTC, retry hourly, and keep 14 days",
     ),
     ["console-2026-09-10T0200Z.sqlite"],
   );
+});
+
+test("a tab held for untrusted usage starts no turn, even while its pause is lifted", (t) => {
+  const store = new ConsoleStore(":memory:");
+  t.after(() => store.close());
+  const project = store.createProject("P", "folder");
+  const tab = store.tabs(project.id)[0];
+  const agent = store.createAgent({ tabId: tab.id, name: "S", role: "", kind: "opencode", model: "openai/gpt-5.6-luna", effort: null, permission: "look" });
+  const turn = store.queueTurn(agent.id, "hi");
+  const epoch = store.takeLease("w", Date.now())!;
+  // Resume of its project lifted the pause; the hold stays until the tab's own Resume.
+  store.run("UPDATE console_tabs SET usage_hold = 'Usage not reported: x', paused = 0 WHERE id = ?", tab.id);
+  assert.equal(store.startTurn(epoch, turn.id), false);
+  assert.equal(store.turn(turn.id)!.status, "queued");
+  store.run("UPDATE console_tabs SET usage_hold = NULL WHERE id = ?", tab.id);
+  assert.equal(store.startTurn(epoch, turn.id), true);
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { reload } from "@/components/shared/FreshCode";
+import { oneAtATime } from "@/lib/console/busy";
 import { parseSseFrames, type SseFrame } from "@/lib/console/sse";
 import type { ConsoleCommand } from "@/lib/console/commands";
 
@@ -47,15 +48,20 @@ export class CancelledError extends Error {
 export function useCodeConfirm(): { done: (confirmed: boolean) => void } | null {
   const [ask, setAsk] = useState<{ done: (confirmed: boolean) => void } | null>(null);
   useEffect(() => {
-    confirmCode = () =>
-      new Promise<boolean>((resolve) =>
-        setAsk({
-          done: (confirmed: boolean) => {
-            setAsk(null);
-            resolve(confirmed);
-          },
-        }),
-      );
+    // Commands that need a code at the same time share one dialog and its
+    // answer; a second dialog replaced the first, whose command then waited
+    // forever with its button busy.
+    confirmCode = oneAtATime(
+      () =>
+        new Promise<boolean>((resolve) =>
+          setAsk({
+            done: (confirmed: boolean) => {
+              setAsk(null);
+              resolve(confirmed);
+            },
+          }),
+        ),
+    );
     return () => {
       confirmCode = null;
     };

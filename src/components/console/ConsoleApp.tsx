@@ -10,6 +10,8 @@ import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, s
 import { pickProject, pickTab } from "@/lib/console/view-state";
 import type { ProjectView, WorkerView, templatesView } from "@/lib/console/views";
 import AgentWindow from "./AgentWindow";
+import { useRenewHeldUploads } from "./useComposer";
+import { useDialogFocus } from "./useDialogFocus";
 import { api, recall, remember, useCodeConfirm, usePolled, type Run } from "./api";
 import ChangesView from "./ChangesView";
 import CleanupDialog from "./CleanupDialog";
@@ -54,7 +56,9 @@ export default function ConsoleApp() {
   const [view, setView] = useState<ProjectView | null>(null);
   const [tabId, setTabId] = useState<string | null>(null);
   const [maximized, setMaximized] = useState<string | null>(null);
-  /** The one dialog open: at most one at a time. */
+  // Composers outlive their windows; their held files are renewed here.
+  useRenewHeldUploads();
+  /** The one dialog open. */
   const [modal, setModal] = useState<Modal | null>(null);
   /** Needs you's panel: open beside the windows. */
   const [needsOpen, setNeedsOpen] = useState(false);
@@ -339,7 +343,7 @@ export default function ConsoleApp() {
   // Each Settings section's screen, by its address (#settings/keys).
   const settingsSection = {
     "": null,
-    overview: <OverviewDialog onShow={(agentId) => void openAgent(agentId)} />,
+    overview: <OverviewDialog onShow={(agentId) => void openAgent(agentId)} run={run} />,
     keys: <KeysDialog run={run} />,
     roles: <RolesDialog roles={roles} run={runAndList} />,
     templates: (
@@ -384,17 +388,15 @@ export default function ConsoleApp() {
         {navigation}
       </aside>
       {drawer && (
-        <div className={styles.drawerOverlay} onClick={() => setDrawer(false)}>
-          <div className={styles.drawer} role="dialog" aria-modal="true" aria-label="Projects and agents" onClick={(e) => e.stopPropagation()}>
-            <div className={styles.brand}>
-              {logo}
-              <button className={styles.iconButton} onClick={() => setDrawer(false)} aria-label="Close" title="Close">
-                <Icon name="close" />
-              </button>
-            </div>
-            {navigation}
+        <Drawer onClose={() => setDrawer(false)}>
+          <div className={styles.brand}>
+            {logo}
+            <button className={styles.iconButton} onClick={() => setDrawer(false)} aria-label="Close" title="Close (Esc)">
+              <Icon name="close" />
+            </button>
           </div>
-        </div>
+          {navigation}
+        </Drawer>
       )}
 
       <main className={styles.main}>
@@ -626,6 +628,19 @@ export default function ConsoleApp() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** The phone's drawer of projects and agents: a dialog, so focus moves in,
+ * stays inside and comes back, and Escape closes it. */
+function Drawer({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const { box, onKeyDown } = useDialogFocus(onClose);
+  return (
+    <div className={styles.drawerOverlay} onClick={onClose} onKeyDown={onKeyDown}>
+      <div ref={box} tabIndex={-1} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Projects and agents" onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
     </div>
   );
 }

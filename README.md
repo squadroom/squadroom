@@ -54,8 +54,8 @@ Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
 you add an agent, and you can change the prompt for that one agent.
 
 To make your own, open **Settings**, then **Roles**, then **New role**: a
-name, a one-line description, edit or look only, a suggested tool (Claude
-Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
+name, a one-line description, the access (Code edit or Code analysis), a
+suggested tool (Claude Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
 a built-in role's prompt and reset it later. A tab can be saved as a
 template with its agents, roles and routes, and optionally steps: an
 ordered list of stages, each with the files the agents may change during
@@ -73,8 +73,8 @@ with seven members.
 - **Squads.** The agents in a tab work as a squad. It can be one agent, a
   pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
   seven members, and you can add more agents by hand. Each agent has its own
-  name, model and thinking level, and either edits in its own folder or only
-  looks. You can mix tools in one squad.
+  name, model and thinking level, and works at Code edit or Code analysis.
+  You can mix tools in one squad.
 
 Up to six agent turns run at once across everything, and three per account
 or API key. Anything over that waits in a queue.
@@ -82,24 +82,25 @@ or API key. Anything over that waits in a queue.
 ## Agent tools
 
 You can pick any of these when you add an agent or set up a team, and you
-can mix them in one squad. Gemini CLI, Kimi Code and OpenCode become
-selectable once pull request
-[#9](https://github.com/squadroom/squadroom/pull/9) is merged.
+can mix them in one squad.
 
-- **Claude Code**, on your Claude subscription or an API key. It can edit
-  in its own folder or only look.
-- **Codex**, on your ChatGPT login. It can edit or only look.
-- **Grok Build**, with an xAI API key. It can only look for now.
-- **Gemini CLI**, with a Gemini API key. It can only look for now.
-- **Kimi Code**, on your Kimi Code membership. It can only look for now.
+- **Claude Code**, on your Claude subscription or an Anthropic API key.
+- **Codex**, on your ChatGPT login or an OpenAI API key.
+- **Grok Build**, with an xAI API key.
+- **Gemini CLI**, with a Gemini API key.
+- **Kimi Code**, on your Kimi Code membership.
 - **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
   Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash, Kimi K3, GLM-5.3,
-  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It can only look for
-  now, and it needs the project's network switch on: with network off it
-  can't start.
+  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It needs the project's
+  network switch on: with network off it can't start.
 
-An agent that only looks can read the code, run commands you approve and
-message its teammates, but it can't change files.
+Every agent works at one of two access levels, which you pick when you add
+it:
+
+- **Code edit**: it changes files in its own folder, and Squadroom commits
+  them after each turn.
+- **Code analysis**: it can read the code, run commands you approve and
+  message its teammates, but it can't change files.
 
 OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
 real Mac on 2026-11-01: each answered, named its model and reported what it
@@ -122,6 +123,11 @@ with its turn.
   it, the tab pauses until you press **Reset spend**. Subscription logins
   (a Claude plan, a ChatGPT login) aren't counted. There are no separate
   project or per-agent spend limits.
+- **Spend, across Squadroom.** API-key spend across every tab is limited
+  to $25 per calendar month (UTC) unless you change it on the Overview,
+  anywhere from $0.01 to $10,000. When it is reached, every tab with an
+  API-key agent pauses until you raise the limit or press **Reset Console
+  spend**. Making new tabs doesn't get round it.
 - **Spend, per key.** Each paid API key needs a monthly cap that you set on
   the provider's own site first and then enter in Squadroom. No agent gets
   the key until you do. The provider's cap is the real ceiling.
@@ -163,9 +169,11 @@ The pictures use invented demo data; they follow your light or dark setting.
 ## Requirements
 
 - **A Mac** with about 10 GB of free disk.
-- **Node.js** at the version in [`.nvmrc`](.nvmrc) (24), installed from
-  Homebrew or the official installer (the setup script looks for it in
-  `/opt/homebrew/bin` or `/usr/local/bin`).
+- **Node.js** 24 or newer (the version in [`.nvmrc`](.nvmrc)), from
+  Homebrew (`brew install node@24`) or the official installer. The setup
+  script finds it in `/opt/homebrew/bin`, `/usr/local/bin`, Homebrew's
+  `node@24` folder or on your `PATH`, as long as the `agent` user can run
+  it (so not one inside your home folder, such as nvm's).
 - **`sudo`**, once, to create the `agent` user, install the pinned agent
   programs and the launcher.
 - **An https address for the Mac**, through a TLS proxy on the same machine
@@ -235,7 +243,8 @@ The longer version, with the threat model, is in
 - **One owner.** Only the configured GitHub account can sign in. With mail
   configured, sign-in also needs an 8-digit code e-mailed to you, and
   weighty actions (permanent permission rules, deleting folders, raising
-  spend limits, every key change) need a code from the last 8 hours.
+  or resetting spend limits, every key change, and agents without Ask me
+  first in a project that uses it) need a code from the last 8 hours.
   Without mail, GitHub is the only step and those actions are refused until
   mail is configured.
 - **Requests from the Mac itself aren't trusted either.** The web server
@@ -249,9 +258,10 @@ The longer version, with the threat model, is in
   profile. File writes are limited to the agent's own clone.
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,
-  only to repositories whose base branch is protected by a ruleset, and
-  only after every new object is checked for credentials the Console
-  handed out.
+  only to repositories whose base branch is protected by a ruleset the
+  token cannot bypass, only the commit the Console recorded at the end of
+  the agent's last turn, and only after every new object is checked for
+  credentials the Console handed out.
 - **Credentials are redacted** from everything stored, and paid keys are
   bounded by the provider-side caps you set.
 

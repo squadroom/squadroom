@@ -19,6 +19,7 @@ import { realInside, type ConsolePaths } from "./permissions.ts";
 import { Redactor } from "./redact.ts";
 import { Repos } from "./repos.ts";
 import { sweepUploadLeftovers } from "./agent-files.ts";
+import { currentStepFiles } from "./templates.ts";
 import { ConsoleStore, LEASE_LOST, NEEDS_MAIL, type TurnRow } from "./store.ts";
 import { CODEX_DISABLED, LIMITS, type ConsoleAgent } from "./types.ts";
 import type { Credential, OwnerAnswer, Runtime } from "./worker/shared.ts";
@@ -363,13 +364,16 @@ export class ConsoleWorker {
     this.leading(epoch);
     await this.launcher.sweep();
     // Paid turns an earlier worker left running after their prompt reached
-    // the client are charged now. Their usage never came back, so they are
-    // charged their full allowance, and their tab waits for the owner.
-    // The charge is written in the same transaction as the interruption.
+    // the client are charged now. Their end never came back, so they are
+    // charged what their requests reported plus the full allowance for each
+    // request that did not (spend.ts), and their tab waits for the owner.
+    // They are priced as when they started, so a model that has left the
+    // catalog since is charged all the same. The charge is written in the
+    // same transaction as the interruption.
     const charged: { agent: ConsoleAgent; charge: { usd: number; basis: "reported" | "allowance" } }[] = [];
-    const interrupted = this.store.interruptEarlier(epoch, ({ id, agent, usage }) => {
-      const model = agentModel(agent.kind, agent.model);
-      const charge = model ? this.charge(agent, model, id, usage) : null;
+    const interrupted = this.store.interruptEarlier(epoch, ({ id, agent, billing, running }) => {
+      const model = billing?.model ?? agentModel(agent.kind, agent.model);
+      const charge = model ? this.charge(agent, model, id, null, running) : null;
       if (charge) charged.push({ agent, charge });
       return charge;
     });
@@ -377,10 +381,14 @@ export class ConsoleWorker {
     for (const { agent, charge } of charged) this.checkSpend(agent, charge);
     await this.recoverProgress(epoch);
     // A turn an earlier worker ended but did not finish committing:
-    // its diff is read again before approval is possible.
+    // its diff is read again before approval is possible. A tab with steps
+    // keeps the head it last recorded (checked): HEAD may be a commit nobody
+    // checked (a program the agent left running), so it is left for the next
+    // turn's step check and is never pushed meanwhile.
     for (const id of this.store.settlingAgents()) {
       const agent = this.store.agent(id);
-      if (agent?.folder) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
+      const stepped = agent?.permission === "edit" && !!currentStepFiles(this.store.tabSteps(agent.tabId));
+      if (agent?.folder && !stepped) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
       this.safe(() => this.store.setSettling(epoch, id, null));
     }
     // Image calls an earlier worker left open stay charged, never resubmitted.
@@ -640,8 +648,9 @@ export class ConsoleWorker {
       // A process being ended, folders being made: the driver says wait.
       if (driver.waiting(agent)) continue;
       // A tab at its spend limit runs no further turn of any model, Resume
-      // or not, until the owner resets its spend.
-      if (this.overSpend(agent.tabId)) continue;
+      // or not, until the owner resets its spend; at the Console-wide
+      // limit, no further API-key turn anywhere.
+      if (this.overSpend(agent.tabId, !!model.paid)) continue;
       let credential: Credential;
       try {
         credential = this.credentialFor(agent, model);

@@ -6,38 +6,37 @@ import { imageDecision, isInlineImage } from "../src/lib/shared/markdown-image.t
 // Review: an agent's Markdown must not make the owner's browser call
 // out. Pure: the image decision and the page headers.
 
-test("an agent's Markdown image is shown only inline or from the page's own origin; any other URL becomes text", () => {
-  const origin = "https://squadroom.example";
-  assert.deepEqual(imageDecision("https://squadroom.example/api/console/file?x=1", "chart", origin), {
-    show: true,
-    src: "https://squadroom.example/api/console/file?x=1",
-  });
-  assert.deepEqual(imageDecision("/console/sw.js", "", origin), { show: true, src: "https://squadroom.example/console/sw.js" });
-  assert.deepEqual(imageDecision("data:image/png;base64,iVBORw0KGgo=", "icon", origin), { show: true, src: "data:image/png;base64,iVBORw0KGgo=" });
-  // A beacon, a protocol-relative URL, another scheme, a data URL that is
-  // not an image, and a URL on a look-alike host: text, with the URL shown.
+test("an agent's Markdown image is shown only inline; any URL, the Console's own included, becomes text", () => {
+  // The decision no longer looks at the page's origin; called the way the
+  // component once called it (with the origin), it must still refuse it.
+  const withOrigin = imageDecision as unknown as (src: unknown, alt: unknown, origin: string) => ReturnType<typeof imageDecision>;
+  for (const own of ["/api/auth/github?n=1", "https://squadroom.example/api/auth/callback"]) assert.equal(withOrigin(own, "x", "https://squadroom.example").show, false, own);
+  assert.deepEqual(imageDecision("data:image/png;base64,iVBORw0KGgo=", "icon"), { show: true, src: "data:image/png;base64,iVBORw0KGgo=" });
+  assert.equal(imageDecision("data:image/gif;base64,R0lGOD", "x").show, true);
+  // A beacon, the Console's own routes (an image request carries the
+  // owner's cookies: a sign-in start would burn its rate limit and replace
+  // the sign-in state), a protocol-relative URL, another scheme, a data URL
+  // that is not an image: text, with the URL shown.
   for (const src of [
     "https://attacker.example/p?t=sk-ant-oat01-xxx",
+    "/api/auth/github?n=1",
+    "/api/auth/callback",
+    "https://squadroom.example/api/console/file?x=1",
+    "/console/sw.js",
     "//attacker.example/p",
-    "http://squadroom.example.attacker.example/p",
     "ftp://squadroom.example/p",
     "data:text/html;base64,PHNjcmlwdD4=",
     "javascript:alert(1)",
   ]) {
-    const decision = imageDecision(src, "alt text", origin);
+    const decision = imageDecision(src, "alt text");
     assert.equal(decision.show, false, src);
     assert.equal((decision as { text: string }).text, `[Image: alt text (${src})]`);
   }
-  // http on an https page is another origin too.
-  assert.equal(imageDecision("http://squadroom.example/p", "x", origin).show, false);
-  // Without a known origin (server rendering), only inline images show.
-  assert.equal(imageDecision("/x.png", "x", "").show, false);
-  assert.equal(imageDecision("data:image/gif;base64,R0lGOD", "x", "").show, true);
-  assert.deepEqual(imageDecision(undefined, undefined, origin), { show: false, text: "[Image: image]" });
+  assert.deepEqual(imageDecision(undefined, undefined), { show: false, text: "[Image: image]" });
   // What the Markdown URL transform lets through for an image's source.
   assert.equal(isInlineImage("data:image/png;base64,iVBORw0KGgo="), true);
   for (const bad of ["data:text/html;base64,PHNjcmlwdD4=", "data:image/svg+xml,<svg/>", "https://a.example/x.png", 3, ""]) assert.equal(isInlineImage(bad), false, String(bad));
-  assert.match((imageDecision(`https://a.example/${"x".repeat(300)}`, "", origin) as { text: string }).text, /…\)\]$/);
+  assert.match((imageDecision(`https://a.example/${"x".repeat(300)}`, "") as { text: string }).text, /…\)\]$/);
 });
 
 test("the Console and sign-in pages carry a Content-Security-Policy and send no referrer", () => {

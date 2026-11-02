@@ -30,9 +30,13 @@ You need:
 - macOS with **about 10 GB free**, which is plenty
   (`df -h /System/Volumes/Data`); the setup script warns you with less.
   The worker makes no new agent copy when free disk would fall below 5 GB.
-- **Node.js** at the version in `.nvmrc` (24), from Homebrew
-  (`brew install node@24`) or the official installer. The setup script looks
-  for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
+- **Node.js** 24 or newer (the version in `.nvmrc`), from Homebrew
+  (`brew install node@24`) or the official installer. The setup script
+  uses the first Node 24 it finds in `/opt/homebrew/bin`, `/usr/local/bin`,
+  Homebrew's `node@24` folder (`brew install node@24` doesn't link it into
+  `bin`) or on your own `PATH`, and puts that folder on the agents' `PATH`.
+  The `agent` user must be able to run it, so a Node inside your home folder
+  (nvm, for example) won't do.
 - **Git**, and `sudo` rights on the Mac.
 - **A [Resend](https://resend.com) account** with a sender on a domain you
   verified there, for e-mailed codes (step 6). Without it Squadroom signs
@@ -59,16 +63,22 @@ Agents never run as you. They run as a separate, hidden macOS user named
 sudo zsh scripts/console/setup-agent-user.sh
 ```
 
-It asks for your password once and is safe to run again. It:
+It asks for your password once and is safe to run again, with the worker
+stopped: while any `agent` program is running it stops and says so.
+`--force` stops them all instead, ending their turns. It:
 
 1. **Creates the `agent` user and group** (id 600). The account is hidden
-   from the login window, has no login shell and a random password nobody
-   keeps, and is in none of `admin`, `staff` or `wheel`.
+   from the login window, has no login shell and no password at all (it
+   can only be used through `sudo`), and is in none of `admin`, `staff` or
+   `wheel`.
 2. **Adds you to the `agent` group**, so you can read the agents' work.
 3. **Installs the pinned agent programs** (Claude Code, Codex, and the ACP
-   clients) in `/opt/console-clients`, owned by root and read-only for
-   agents. Your own `claude` or `codex`, if you have them, are untouched.
-   The versions come from `src/lib/console/clients.ts`.
+   clients) in `/opt/console-clients`, owned by root and read-only. Each
+   one installs with `npm ci` from its own lockfile in
+   `scripts/console/clients/`, so every dependency is the one in the
+   repository, and npm and the packages' install scripts run as `agent`,
+   never as root. Your own `claude` or `codex`, if you have them, are
+   untouched. The versions come from `src/lib/console/clients.ts`.
 4. **Installs the launcher**, `/usr/local/libexec/console-agent`
    (root-owned), and one `sudoers` rule: your account may run only that
    launcher as `agent`, and only the named credentials cross.
@@ -83,12 +93,18 @@ move one, pass the same name to the script
 (`sudo CONSOLE_SHARED=/path zsh scripts/console/setup-agent-user.sh`), which
 bakes it into the launcher, and set it in the worker's environment too.
 
-When `scripts/console/console-agent` changes in an update, install the
-launcher again (the worker refuses to start with an older one):
+When an update changes the launcher or the pinned agent programs,
+`npm run update` says so. Run the setup script again; it stops the
+worker while it runs (a stopping worker ends every `agent` process, installs
+included) and starts it again when it ends, even on failure. It refuses
+while a Squadroom turn is running (`--force` ends them):
 
 ```bash
-sudo install -o root -g wheel -m 755 scripts/console/console-agent /usr/local/libexec/console-agent
+sudo zsh scripts/console/setup-agent-user.sh
 ```
+
+The launcher has a version number, and the worker refuses to start with
+any launcher but its own version.
 
 ## 4. Sign the agent account in
 
@@ -118,7 +134,10 @@ toward the tab's spend limit. You can skip the logins above if you only
 want the API-key models. A window never switches between its login and
 a key: if the client reports the other one, the turn stops. Web search is
 off for the API-key models, because it is billed per search and Squadroom
-can't work out its cost from the usage the client reports.
+can't work out its cost from the usage the client reports. Each turn is
+charged once for its own usage. After the worker restarts, a Claude Code
+"(API key)" window's first turn can't be measured, so it is charged its
+full allowance and its tab pauses until you Resume.
 
 ## 5. An https address
 
@@ -187,8 +206,12 @@ How sign-in works with and without them:
 
 Weighty actions are: **Always** permission rules, deleting folders in
 Clean up, switching **Ask me first** off, the ACP network switch, turning
-image tools on, raising a spend limit or **Reset spend**, and every change
-on the Keys page. Without mail they are all refused, with a message saying
+image tools on, raising a spend limit (a tab's or the Console-wide one),
+**Reset spend** and **Reset Console spend**, and every change on the Keys
+page. In a project where any agent (open or closed) has Ask me first on,
+making an agent without it, a team or a tab from a template is weighty
+too, so closing a careful agent and making it again cannot drop Ask me
+first. Without mail they are all refused, with a message saying
 to configure mail, so a stolen Squadroom cookie alone can never do them;
 because adding keys is one of them, configure mail before step 8. Either
 way, protect your GitHub account with a passkey or two-factor
@@ -261,8 +284,10 @@ without any model request.
   branch (default `main`). Before anything is cloned, the worker checks
   that the base branch exists and that an active ruleset targets it **by
   name** (`refs/heads/main`, not "Default branch") and blocks deletion,
-  force pushes and updates without a pull request. Create the branch and
-  the ruleset first.
+  force pushes and updates without a pull request. The ruleset's bypass
+  list must not include the token's own user (GitHub must report
+  `current_user_can_bypass: never`). Create the branch and the ruleset
+  first.
 - **A new empty folder** for each agent (a local repository on the Mac
   stands in for GitHub, so agents share one history).
 - **No project files**: agents that only talk (Code analysis).
@@ -295,8 +320,11 @@ Things to know while using it:
 - **Changes** (a window's ⋯ menu) shows each turn's commit. In a GitHub
   project, **Push branch** pushes the agent's `console/…` branch through
   your mirror and opens or updates its pull request; **Open pull request**
-  asks the agent to write the title and description first. With
-  `CONSOLE_CODEX_REVIEW=on` in `.env.local` (off by default; restart the
+  asks the agent to write the title and description first. Push branch
+  sends only the commit the Console recorded at the end of the agent's
+  last turn, even after a worker restart; a commit made after that is
+  refused until the next turn. With `CONSOLE_CODEX_REVIEW=on` in
+  `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
@@ -381,9 +409,11 @@ launchctl kickstart -k gui/$(id -u)/io.squadroom.console-worker
 ```
 
 Run it when no turn is running (the page says how many a restart would
-interrupt; interrupted turns wait for you in Needs you). If `npm ci` or the
-build fails, the web server stays stopped and the script prints how to go
-back to the previous commit.
+interrupt; interrupted turns wait for you in Needs you). When the update
+changed the launcher or the pinned agent programs, it prints the commands
+at the end of step 3 instead: stop the worker, run the setup script, start
+the worker. If `npm ci` or the build fails, the web server stays stopped
+and the script prints how to go back to the previous commit.
 
 ## 11. Notifications, backups, dead-man's switch, image tools
 
@@ -437,9 +467,8 @@ macOS sandbox profile. All of them, and the login or key each one uses:
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Code edit or Code analysis |
 | OpenCode | the chosen model's key, each paid and capped (see below) | Code edit or Code analysis, with the project's network on |
 
-All six are listed under **Add**, **Agent** and in the team setup (Gemini
-CLI, Kimi Code and OpenCode since pull request
-[#9](https://github.com/squadroom/squadroom/pull/9)), at either access level:
+All six are listed under **Add**, **Agent** and in the team setup, at
+either access level:
 
 - **Code edit**: the agent changes files in its own folder, and Squadroom
   commits them after each turn. The sandbox lets it write only in its own
@@ -487,8 +516,8 @@ Kimi Code is logged in as `agent` with a device code:
 sudo -u agent /usr/local/libexec/console-agent spawn /Users/agent /opt/console-clients/bin/kimi login
 ```
 
-Restart the worker after adding a kind's key, then **Check connection** on
-its panel. An ACP agent has no network except the Console's own team tools,
+No restart is needed after adding a kind's key (step 8): press **Check
+connection** on its panel. An ACP agent has no network except the Console's own team tools,
 unless you switch network on for the whole project (Project settings,
 needs a fresh confirmation).
 
@@ -502,10 +531,12 @@ needs a fresh confirmation).
 | Running turns per login (one token, API key or ChatGPT account) | 3 | Others wait; a rate limit pauses that login's queue only |
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
-| A paid turn whose usage was not reported or does not add up | — | Charged its full allowance; the tab pauses until you Resume that pause |
+| Paid API spend across every tab in one UTC month (API-key models and image calls), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
+| A paid turn whose usage was not reported, does not add up, or never came (stopped mid-request, a crash, a restart) | — | Charged what it did report plus the full allowance (the model's whole context window in, its maximum output out) for each request it started without reporting usage; the tab pauses until you Resume that pause |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |
+| One line of a client's output | 8 MB | The line is dropped and the turn stops ("Output limit"); a Codex server that prints one is ended, with every turn on it |
 | Agent turns caused by one message of yours (through team messages) | 40 | The tab pauses; Resume continues |
 | Time one message of yours keeps the team going | 2 h | The tab pauses; Resume continues |
 | Two agents messaging with no new commit or message from you | 12 messages | The tab pauses (the circle detector) |
@@ -547,8 +578,8 @@ agent work unrecorded.
 
 - **"Squadroom is not configured correctly"**: a sign-in setting in
   `.env.local` is missing or malformed. The web server's log says which.
-- **"The installed launcher is older than this Console"**: install the
-  launcher again (step 3).
+- **"The installed launcher is not the version this Console needs"**: stop
+  the worker and run the setup script again (end of step 3).
 - **"The shared folder … is not in the agent user's group"**: run
   `sudo zsh scripts/console/setup-agent-user.sh` again.
 - **"Another Console worker is running"**: one already runs, or one just

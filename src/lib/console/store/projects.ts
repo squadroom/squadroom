@@ -56,6 +56,12 @@ export const projects = {
     );
     return this.agent(id)!;
   },
+  /** The project has an agent, open or closed, with Ask me first on: a new
+   * agent without it there needs a fresh code (closing one and making it
+   * again must not drop it). */
+  askFirstInUse(this: ConsoleStore, projectId: string): boolean {
+    return !!this.get("SELECT 1 AS x FROM console_agents WHERE project_id = ? AND ask_first = 1 LIMIT 1", projectId);
+  },
   /** Ask me first on or off: from the window's next turn. */
   setAskFirst(this: ConsoleStore, agentId: string, on: boolean): ConsoleAgent {
     const a = this.agent(agentId);

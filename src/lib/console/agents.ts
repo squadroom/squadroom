@@ -31,8 +31,8 @@ export interface AgentModel {
   taskTools?: false;
   /** A model billed per token through an API key: the provider and the
    * key's environment variable, its catalog prices, and the full allowance
-   * a turn without trustworthy usage is charged (its whole context window
-   * as input, its maximum output as output). */
+   * one request without trustworthy usage is charged (its whole context
+   * window as input, its maximum output as output). */
   paid?: {
     provider: AgentProvider;
     credential: string;
@@ -89,7 +89,9 @@ const CODEX_EFFORTS: ConsoleEffort[] = ["low", "medium", "high", "xhigh"];
 
 /** A price catalog entry's prices and limits for an API-key model. The
  * context window is the catalog's unless the provider documents a larger
- * one (or the catalog has none), so the full allowance never undercharges. */
+ * one (or the catalog has none), so the full allowance is never below what
+ * one request can cost (a turn without trustworthy usage is charged it for
+ * every request it was seen to start, spend.ts). */
 function catalog(id: string, credential: string, maxOutputTokens: number, prices?: Partial<TokenPrices>, contextWindow?: number): NonNullable<AgentModel["paid"]> {
   const m = MODELS.find((x) => x.id === id);
   const window = contextWindow ?? m?.contextTokens;
@@ -231,8 +233,8 @@ AGENT_KINDS.push({
     // DEEPSEEK_API_KEY. Charged at the catalog's peak rates always (the
     // off-peak half price is never assumed). The full allowance: the
     // 1,048,576-token window and 393,216 maximum output OpenCode's catalog
-    // gives, above the catalog's
-    // 1,000,000, so a turn without usage is never undercharged.
+    // gives, above the catalog's 1,000,000, so the allowance is never below
+    // what one request can cost.
     {
       id: "deepseek/deepseek-v4-pro",
       label: "DeepSeek V4 Pro (API key)",
@@ -329,7 +331,8 @@ AGENT_KINDS.push(
     // Its reported usage is checked offline but not
     // yet against Google's bill, so the key's provider-side monthly cap
     // (required before any agent gets it) is the backstop; a turn whose
-    // usage is missing or does not add up is charged its full allowance.
+    // usage is missing or does not add up is charged the full allowance
+    // for each request it started.
     offered: true,
     models: [
       {
@@ -374,7 +377,8 @@ AGENT_KINDS.push(
         efforts: [],
         // xAI documents no maximum output for Grok 4.7: the full allowance
         // takes the whole context window as output too, the bound no reply
-        // can exceed, so a turn without usage is never undercharged.
+        // can exceed, so the allowance is never below what one request can
+        // cost.
         paid: catalog("grok-4.7", "XAI_API_KEY", 500_000),
       },
     ],

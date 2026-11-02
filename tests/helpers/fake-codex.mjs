@@ -4,10 +4,15 @@
 // ({ account, profile }), and acts on each turn's first word:
 //   hello      streams text, runs a command (its output carries a token)
 //   write P    proposes a file change to P, writes it if accepted
+//   move P Q   proposes renaming P to Q, writes Q if accepted
+//   grant P    proposes a change to P with a write grant on its folder
+//   oddkind P  proposes a change of an unknown kind to P
+//   huge       prints one line over the output limit, then text, then waits
 //   net        asks to run a command with network access
 //   ask        asks the owner a question (request_user_input)
 //   elicit     asks to call a tool on the console server and on another one
 //   hang       waits; an interrupt ends the turn
+//   partial    reports one request's usage, then waits; an interrupt ends it
 //   deaf       waits and ignores interrupts
 //   lateack    accepts the turn but never answers turn/start: after a
 //              moment it reports usage, streams, asks to write a file
@@ -129,12 +134,33 @@ async function runTurn(threadId, turnId, text) {
     return done();
   }
   if (word === "write") {
-    note("item/started", { item: { type: "fileChange", id: "f1", changes: [{ path: arg }], status: "inProgress" } });
+    note("item/started", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: "inProgress" } });
     const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now() });
     if (answer.decision === "accept") fs.writeFileSync(arg, "written by codex\n");
-    note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg }], status: answer.decision === "accept" ? "completed" : "declined" } });
+    note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: answer.decision === "accept" ? "completed" : "declined" } });
     say(`file: ${answer.decision}`);
     return done();
+  }
+  if (word === "move" || word === "grant" || word === "oddkind") {
+    // move P Q: renames P to Q (the destination in `kind.move_path`);
+    // grant P: a change to P that also asks for a write grant on its folder;
+    // oddkind P: a change of a kind the schema does not have.
+    const [from, to] = rest;
+    const kind = word === "move" ? { type: "update", move_path: to } : word === "oddkind" ? { type: "rewrite" } : { type: "add" };
+    const changes = [{ path: from, kind, diff: "" }];
+    note("item/started", { item: { type: "fileChange", id: "f1", changes, status: "inProgress" } });
+    const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now(), ...(word === "grant" ? { grantRoot: from.replace(/\/[^/]*$/, "") } : {}) });
+    if (answer.decision === "accept") fs.writeFileSync(word === "move" ? to : from, "written by codex\n");
+    note("item/completed", { item: { type: "fileChange", id: "f1", changes, status: answer.decision === "accept" ? "completed" : "declined" } });
+    say(`file: ${answer.decision}`);
+    return done();
+  }
+  if (word === "huge") {
+    // One line over the Console's limit, then a line it must still read
+    // (an approval request), then a wait: only ending the server ends it.
+    process.stdout.write(`{"pad":"${"x".repeat(8 * 1024 * 1024 + 10)}"}\n`);
+    note("item/agentMessage/delta", { itemId: "m1", delta: "after the long line" });
+    return;
   }
   if (word === "plan") {
     note("turn/plan/updated", { explanation: null, plan: [{ step: "Look", status: "completed" }, { step: "Change", status: "pending" }] });
@@ -190,10 +216,14 @@ async function runTurn(threadId, turnId, text) {
     await new Promise((r) => setTimeout(r, 400));
     usage(threadId, note, { inputTokens: 5, cachedInputTokens: 0, outputTokens: 2 });
     note("item/agentMessage/delta", { itemId: "m1", delta: "Late but running." });
-    note("item/started", { item: { type: "fileChange", id: "f1", changes: [{ path: arg }], status: "inProgress" } });
+    note("item/started", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: "inProgress" } });
     const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now() });
     if (answer.decision === "accept") fs.writeFileSync(arg, "written late by codex\n");
-    note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg }], status: answer.decision === "accept" ? "completed" : "declined" } });
+    note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: answer.decision === "accept" ? "completed" : "declined" } });
+    return; // waits for the interrupt
+  }
+  if (word === "partial") {
+    usage(threadId, note, { inputTokens: 40, cachedInputTokens: 10, outputTokens: 5 });
     return; // waits for the interrupt
   }
   if (word === "deaf") turns.get(threadId).deaf = true;

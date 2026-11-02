@@ -42,6 +42,27 @@ test("a Claude request waits for the owner: Allow once, then Always for this age
   runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "deny" });
   await h.ended(fourth);
   assert.equal(h.said(lead.id).at(-1), "tool: deny");
+  // A client tool's rule has its own prefix: never one of the Console's own.
+  assert.equal(h.store.openRequests().length, 0);
+  assert.ok(h.store.hasRule(lead.id, "client:Skill"));
+  assert.ok(!h.store.hasRule(lead.id, "tool:Skill"));
+});
+
+test("the approve tool refuses the Console's own tool names: an agent's own call can never pass for, or leave a rule for, a push", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent();
+  await h.ready(lead.id);
+  for (const name of ["team_push", "team_pr_reply", "approve", "mcp__console__approve", "mcp__console__nope", "image_generate"]) {
+    const turn = h.send(lead.id, `tool ${name}`);
+    await h.ended(turn);
+    assert.equal(h.said(lead.id).at(-1), "tool: deny", name);
+    assert.equal(h.store.openRequests().length, 0, name);
+  }
+  assert.equal(needsView(h.store).requests.length, 0);
+  // The Console's own team tools, as Claude Code asks about them, still pass.
+  await h.ended(h.send(lead.id, "tool mcp__console__team_list"));
+  assert.equal(h.said(lead.id).at(-1), "tool: allow");
 });
 
 test("a question gets the owner's answer; Stop closes an open request", async (t) => {
@@ -91,7 +112,7 @@ test("after a restart, an open request is closed and its turn waits as interrupt
   assert.equal(h.store.request(request.id)!.state, "expired");
   assert.equal(needsView(h.store).requests.length, 0);
   assert.throws(() => runCommand(h.store, { action: "decide", requestId: request.id, decision: "always" }), /already decided/);
-  assert.equal(h.store.hasRule(lead.id, "tool:Skill"), false);
+  assert.equal(h.store.hasRule(lead.id, "client:Skill"), false);
   await next.stop();
 });
 

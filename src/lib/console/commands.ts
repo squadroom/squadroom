@@ -111,6 +111,8 @@ export type ConsoleCommand =
   | { action: "setNeedsMail"; on: boolean }
   | { action: "setSpendLimit"; tabId: string; limitUsd: number | string | null }
   | { action: "resetSpend"; tabId: string }
+  | { action: "setConsoleSpendLimit"; limitUsd: number | string | null }
+  | { action: "resetConsoleSpend" }
   | { action: "signOutDevice"; id: string };
 /** One definition for the page, the route and the checks below: a case or
  * a page call naming an action that does not exist fails to compile. */
@@ -123,29 +125,56 @@ export type CommandFields<A extends CommandAction> = Omit<Extract<ConsoleCommand
  * of sign-in's 10-minute default. */
 export const CONSOLE_CODE_MS = 8 * 60 * 60_000;
 
+/** What `needsFreshCode` measures a request against, read from the store
+ * by `freshCodeContext`. */
+export interface FreshCodeContext {
+  /** The tab's spend limit now (its own or the default); null when the
+   * tab is unknown, which needs a code. */
+  spendLimit?: number | null;
+  /** The Console-wide spend limit now. */
+  consoleSpendLimit?: number;
+  /** The project an agent, team or template tab is made in has an agent,
+   * open or closed, with Ask me first on. */
+  askFirstInUse?: boolean;
+}
+
 /**
  * Commands with weight beyond the page: a permanent or project-wide rule,
- * deleting folders, switching Ask me first off, the ACP network switch,
- * switching image tools on, raising a spend limit or resetting spend, and
- * every Keys write. Each needs a code entered in the last CONSOLE_CODE_MS,
- * so a stolen session cookie alone (good for 30 days) cannot do them.
- * Pushes and their approvals, archiving and closing, and roles do not need
- * one. Pure: decided from the request.
+ * deleting folders, switching Ask me first off (or making agents without
+ * it in a project that uses it), the ACP network switch, switching image
+ * tools on, raising a spend limit (a tab's or the Console's) or
+ * resetting spend, and every Keys write. Each needs a code entered in the
+ * last CONSOLE_CODE_MS, so a stolen session cookie alone (good for 30 days)
+ * cannot do them. Pushes and their approvals, archiving and closing, and
+ * roles do not need one. Pure: decided from the request and `context`.
  */
-export function needsFreshCode(
-  input: Record<string, unknown>,
-  spendLimit: number | null = null,
-): boolean {
+export function needsFreshCode(input: Record<string, unknown>, context: FreshCodeContext = {}): boolean {
   switch (input.action as CommandAction) {
-    // Raising a tab's spend limit, measured against the limit it has now
-    // (`spendLimit`, its own or the default; null when the tab is unknown,
-    // which needs a code). Lowering it, or a value the command refuses
-    // anyway, does not.
+    // Raising a tab's spend limit, against the limit it has now. Lowering it, or a value the command
+    // refuses anyway, does not.
     case "setSpendLimit": {
       const next = spendLimitInput(input.limitUsd);
       if (next === undefined) return false;
-      return spendLimit === null || (next ?? LIMITS.tabSpendUsd) > spendLimit;
+      return context.spendLimit == null || (next ?? LIMITS.tabSpendUsd) > context.spendLimit;
     }
+    // The Console-wide limit, the same way: a cookie alone cannot spend
+    // past it by making new tabs, each with its own fresh tab limit.
+    case "setConsoleSpendLimit": {
+      const next = spendLimitInput(input.limitUsd, CONSOLE_SPEND_LIMIT_MAX);
+      if (next === undefined) return false;
+      return context.consoleSpendLimit === undefined || (next ?? LIMITS.consoleSpendUsd) > context.consoleSpendLimit;
+    }
+    case "resetConsoleSpend":
+      return true;
+    // An agent without Ask me first, a team or a template tab (whose agents
+    // never ask first) in a project that uses Ask me first: otherwise a
+    // cookie could close an agent and make it again without it.
+    case "createAgent":
+      return context.askFirstInUse === true && input.askFirst !== true;
+    case "createTeam":
+      return context.askFirstInUse === true;
+    case "createTab":
+      return context.askFirstInUse === true && !!input.templateId;
     case "decide":
       return input.decision === "always" || input.decision === "project";
     case "cleanupDelete":
@@ -171,21 +200,51 @@ export function needsFreshCode(
 /** The highest spend limit a tab can be given. The key's provider-side cap
  * stays the hard ceiling. */
 export const SPEND_LIMIT_MAX = 1_000;
+/** The highest Console-wide spend limit. */
+export const CONSOLE_SPEND_LIMIT_MAX = 10_000;
 
 /** A spend limit as sent: dollars, rounded to the cent, from $0.01 to
- * SPEND_LIMIT_MAX; null (the default); undefined when not valid. */
-export function spendLimitInput(value: unknown): number | null | undefined {
+ * `max`; null (the default); undefined when not valid. */
+export function spendLimitInput(value: unknown, max = SPEND_LIMIT_MAX): number | null | undefined {
   if (value === null) return null;
   const n = typeof value === "number" ? value : typeof value === "string" && /^\s*\d+(\.\d+)?\s*$/.test(value) ? Number(value) : NaN;
   if (!Number.isFinite(n)) return undefined;
   const cents = Math.round(n * 100) / 100;
-  return cents >= 0.01 && cents <= SPEND_LIMIT_MAX ? cents : undefined;
+  return cents >= 0.01 && cents <= max ? cents : undefined;
 }
 
-/** What the route checked before a command: `mayRaiseSpend` when it found a
- * fresh code where one was needed for a spend limit. */
+/** What the route checked before a command: `freshCode` when it found a
+ * fresh code where `needsFreshCode` asked for one. The commands it
+ * measured against the store check again here, so a change made meanwhile
+ * cannot slip past. */
 export interface CommandOptions {
-  mayRaiseSpend?: boolean;
+  freshCode?: boolean;
+}
+
+/** The store's side of `needsFreshCode` for this request. */
+export function freshCodeContext(store: ConsoleStore, input: Record<string, unknown>): FreshCodeContext {
+  switch (input.action as CommandAction) {
+    case "setSpendLimit":
+      return { spendLimit: currentSpendLimit(store, input.tabId) };
+    case "setConsoleSpendLimit":
+      return { consoleSpendLimit: store.consoleSpend().limitUsd };
+    case "createAgent":
+    case "createTeam": {
+      const tab = typeof input.tabId === "string" ? store.tab(input.tabId) : undefined;
+      return { askFirstInUse: !!tab && store.askFirstInUse(tab.projectId) };
+    }
+    case "createTab":
+      return { askFirstInUse: typeof input.projectId === "string" && store.askFirstInUse(input.projectId) };
+    default:
+      return {};
+  }
+}
+
+/** A command that needs a fresh code by the store as it is now, run
+ * without one (the store changed after the route checked). */
+function codeStillNeeded(store: ConsoleStore, input: Record<string, unknown>, options: CommandOptions) {
+  if (!options.freshCode && needsFreshCode(input, freshCodeContext(store, input)))
+    throw new CommandError("This changed meanwhile and now needs the code we email you. Try again.");
 }
 
 const TEAM_NEEDS_FILES = "A coding team needs a project with files.";
@@ -311,6 +370,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       // setup, the default team.
       const tab = store.tab(id(input.tabId, "Tab"));
       if (!tab) throw new CommandError("That tab does not exist.");
+      codeStillNeeded(store, input, options);
       return createTeam(store, tab, input.setup);
     }
     case "saveTemplate": {
@@ -493,6 +553,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (input.templateId && !template) throw new CommandError("That template no longer exists.");
       if (template) checkTemplate(store, template.body);
       if (template && store.project(String(input.projectId))?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
+      codeStillNeeded(store, input, options);
       const tab = store.createTab(id(input.projectId, "Project"), text(input.name, "Name", NAME_MAX));
       if (!template) return { tab };
       // Steps first, so the team is checked as a tab with steps.
@@ -517,10 +578,15 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (store.project(tab.projectId)?.source === "none" && input.permission !== "look")
         throw new CommandError("A project without files has Code analysis agents only.");
       if (input.askFirst === true && kind.kind !== "claude-code") throw new CommandError(ASK_FIRST_CLAUDE_ONLY);
+      // One name per agent in a tab, as the team setup checks.
+      const name = text(input.name, "Name", NAME_MAX);
+      if (store.agents(tab.projectId).some((a) => a.tabId === tab.id && a.state !== "closed" && a.name.trim().toLowerCase() === name.toLowerCase()))
+        throw new CommandError(`${name}: an agent in this tab already has that name.`);
+      codeStillNeeded(store, input, options);
       return {
         agent: store.createAgent({
           tabId: tab.id,
-          name: text(input.name, "Name", NAME_MAX),
+          name,
           role: text(input.role ?? "", "Role instructions", ROLE_MAX, false),
           kind: kind.kind,
           model: model.id,
@@ -563,13 +629,22 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     case "setSpendLimit": {
       const limit = spendLimitInput(input.limitUsd);
       if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(SPEND_LIMIT_MAX)}, or none for the default.`);
-      store.setSpendLimit(id(input.tabId, "Tab"), limit, LIMITS.tabSpendUsd, options.mayRaiseSpend === true);
+      store.setSpendLimit(id(input.tabId, "Tab"), limit, LIMITS.tabSpendUsd, options.freshCode === true);
       return { tab: store.tab(String(input.tabId)) };
     }
     case "resetSpend": {
       store.resetSpend(id(input.tabId, "Tab"));
       return { reset: true };
     }
+    case "setConsoleSpendLimit": {
+      const limit = spendLimitInput(input.limitUsd, CONSOLE_SPEND_LIMIT_MAX);
+      if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(CONSOLE_SPEND_LIMIT_MAX)}, or none for the default.`);
+      store.setConsoleSpendLimit(limit, options.freshCode === true);
+      return { spend: store.consoleSpend() };
+    }
+    case "resetConsoleSpend":
+      store.resetConsoleSpend();
+      return { spend: store.consoleSpend() };
     case "setAskFirst": {
       if (typeof input.on !== "boolean") throw new CommandError("Say on or off.");
       return { agent: store.setAskFirst(id(input.agentId, "Agent"), input.on) };

@@ -52,6 +52,7 @@ const RULESET = {
   target: "branch",
   conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
   rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "pull_request" }],
+  current_user_can_bypass: "never",
 };
 function api(ruleset: Record<string, unknown> | null = RULESET, seen: string[] = []) {
   return (async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -91,6 +92,9 @@ test("GitHub checks: the base branch exists and a ruleset names it exactly", asy
   );
   await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, rules: [{ type: "deletion" }] })), /names it exactly/);
   await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, enforcement: "evaluate" })), /names it exactly/);
+  // A ruleset the token's own user may bypass protects nothing from it.
+  for (const bypass of ["always", "pull_requests_only", undefined])
+    await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, current_user_can_bypass: bypass })), /no bypass for the token's user/);
   await assert.rejects(checkGitHub("owner/repo", "main", "tok", api(null)), /names it exactly/);
   // An exclusion that matches the base wins on GitHub.
   for (const exclude of ["refs/heads/main", "refs/heads/*", "~ALL", "~DEFAULT_BRANCH"])
@@ -175,6 +179,22 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   assert.ok(!leak(h.agentHome), "the GitHub token reached the agent's files");
   assert.ok(!leak(h.shared), "the GitHub token reached the shared folder");
   assert.throws(() => runCommand(h.store, { action: "push", agentId: look.id }), /Code analysis/);
+  // A commit made after the turn ended (a program the agent left running)
+  // was never checked, so it is not pushed until a turn has seen it.
+  writeFileSync(join(leadFolder, "late.txt"), "after the turn\n");
+  git(leadFolder, "add", "late.txt");
+  git(leadFolder, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "--quiet", "-m", "late");
+  const stray = (runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } }).job;
+  await h.until(() => ["done", "failed"].includes(h.store.job(stray.id)!.state), "push refused");
+  assert.match(h.store.job(stray.id)!.message ?? "", /has a commit the Console has not checked/);
+  assert.notEqual(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
+  // The next turn records it (Changes shows it), and then it pushes.
+  await h.ended(h.send(lead.id, "hello once more"));
+  assert.ok(changesView(h.store, lead.id)!.diff!.files.includes("late.txt"));
+  const after = (runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } }).job;
+  await h.until(() => ["done", "failed"].includes(h.store.job(after.id)!.state), "push after the turn");
+  assert.equal(h.store.job(after.id)!.state, "done", h.store.job(after.id)!.message ?? "");
+  assert.equal(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
 
   // A branch holding a credential the Console handed out is never pushed.
   const leaked = h.send(lead.id, "leak debug.txt");
@@ -327,6 +347,11 @@ function commitFiles(folder: string, message: string, files: Record<string, stri
   git(folder, "add", "-A");
   git(folder, "-c", "user.name=Agent", "-c", "user.email=a@x", "commit", "--quiet", "--no-verify", "-m", message);
 }
+/** A commit made outside a turn, recorded as a turn's end would record it
+ * (Push branch sends only a recorded head). */
+async function recorded(worker: ConsoleWorker, store: ConsoleWorker["store"], agentId: string) {
+  await worker.repos.refreshDiff(store.agent(agentId)!, worker.epoch!);
+}
 
 test("Push branch checks the objects GitHub lacks, not a patch: binary and -diff blobs, removed history, messages and a moved base ref are refused; a clean binary artifact pushes", async (t) => {
   const bare = origin(t);
@@ -343,6 +368,7 @@ test("Push branch checks the objects GitHub lacks, not a patch: binary and -diff
   const folder = (n: (typeof names)[number]) => h.store.agent(agents[n].id)!.folder;
   const branch = (n: (typeof names)[number]) => h.store.agentBase(agents[n].id).branch!;
   const push = async (n: (typeof names)[number]) => {
+    await recorded(h.worker, h.store, agents[n].id);
     const { job } = runCommand(h.store, { action: "push", agentId: agents[n].id }) as { job: { id: number } };
     await h.until(() => ["done", "failed"].includes(h.store.job(job.id)!.state), `push ${n}`);
     return h.store.job(job.id)!;
@@ -396,6 +422,7 @@ test("the push check knows every key in the key file, in a worker that never han
   const lead = h.agent("Lead");
   await h.ready(lead.id);
   commitFiles(h.store.agent(lead.id)!.folder, "config", { "config.env": `GEMINI_API_KEY=${GEMINI}\n` });
+  await recorded(h.worker, h.store, lead.id);
   // A new worker on the same store: it spawned nothing, so it was handed
   // nothing; the key file alone must tell it what to refuse.
   await h.worker.stop();
@@ -451,6 +478,7 @@ test("a worker that never spawned an agent refuses to push a branch holding a pr
   const lead = h.agent("Lead");
   await h.ready(lead.id);
   commitFiles(h.store.agent(lead.id)!.folder, "limits", { "LIMITS.md": `Set the cap at ${cap.url} (checked ${cap.checkedAt}, $${cap.usd}).\n` });
+  await recorded(h.worker, h.store, lead.id);
   await h.worker.stop();
   const next = new ConsoleWorker({
     store: h.store,
@@ -475,6 +503,7 @@ test("a worker that never spawned an agent refuses to push a branch holding a pr
     assert.equal(h.store.job(first.job.id)!.state, "done", h.store.job(first.job.id)!.message ?? "");
     // The project's own key is: refused, in a worker that handed out nothing.
     commitFiles(h.store.agent(lead.id)!.folder, "config", { "config.env": `OPENAI_API_KEY=${OVERRIDE}\n` });
+    await recorded(next, h.store, lead.id);
     const second = runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } };
     await h.until(() => ["done", "failed"].includes(h.store.job(second.job.id)!.state), "second push");
     assert.equal(h.store.job(second.job.id)!.state, "failed");

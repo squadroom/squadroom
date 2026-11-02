@@ -3,6 +3,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { mcpConfigPath } from "../claude-session.ts";
 import { errorMessage as message, type AgentSession, type SessionContext, type SessionEvent } from "../session.ts";
+import { requestGauged, requestStarted, requestUsage, type RunningUsage } from "../spend.ts";
 import { mapTaskText, type TaskOp } from "../tasks.ts";
 import type { ConsoleAgent, TurnStatus } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -293,24 +294,20 @@ export const sessions = {
         return t.events.emit("tool", { id: ev.id, name: ev.name, summary: ev.summary });
       case "tool_result":
         return t.events.toolResult(ev.id, ev.text, ev.error);
-      case "usage": {
-        const sum = (a?: number, b?: number) => (a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0));
-        t.usage = {
-          inputTokens: sum(t.usage?.inputTokens, ev.usage.inputTokens),
-          cacheReadTokens: sum(t.usage?.cacheReadTokens, ev.usage.cacheReadTokens),
-          cacheWriteTokens: sum(t.usage?.cacheWriteTokens, ev.usage.cacheWriteTokens),
-          outputTokens: sum(t.usage?.outputTokens, ev.usage.outputTokens),
-        };
-        return;
-      }
+      // One request's usage, a request's start, and the gauge (one
+      // request's input) are what the turn is charged from if its end never
+      // reports usage it can be trusted on (spend.ts).
+      case "usage":
+        return this.keepRunning(rt, t, requestUsage(t.running, ev.usage, rt.model));
       case "request_start":
         t.gaugePending = true;
-        return;
+        return this.keepRunning(rt, t, requestStarted(t.running));
       case "gauge":
         if (ev.measuredOnly && !t.gaugeSeen) return;
         if (ev.update.tokens !== undefined) {
           t.gaugeSeen = true;
           t.gaugePending = false;
+          this.keepRunning(rt, t, requestGauged(t.running, ev.update.tokens));
         }
         return void this.safe(() => this.store.setGauge(epoch, rt.agent.id, ev.update));
       case "task_call":
@@ -357,7 +354,15 @@ export const sessions = {
     else if (!t.validated) [status, reason] = ["failed", `${label} ended the turn before confirming its login and model.`];
     else if (ev.outcome === "done") [status, reason] = ["done", null];
     else [status, reason] = [ev.outcome, this.redactor.text(ev.error ?? `${label} ended the turn.`).slice(0, 500)];
-    return this.finish(rt, status, reason, { usage: ev.usage });
+    // Done, the requests' own usage (Codex reports no whole-turn usage) is
+    // the turn's; ended any other way, a request may have been under way.
+    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" });
+  },
+  /** What the turn's client has reported so far; a paid turn's is kept
+   * with it, so a restart charges it from that. */
+  keepRunning(this: ConsoleWorker, rt: Runtime, t: ActiveTurn, next: RunningUsage): void {
+    t.running = next;
+    if (rt.model.paid) this.safe(() => this.store.setRunning(this.epoch!, t.id, next));
   },
   taskOp(this: ConsoleWorker, op: TaskOp): TaskOp {
     return mapTaskText(op, (text) => this.redactor.text(text));

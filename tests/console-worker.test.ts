@@ -205,9 +205,9 @@ test("a restart marks the earlier worker's running turn interrupted and never re
   await next.stop();
 });
 
-test("a launcher without spawn --keep is refused before any agent runs", async (t) => {
+test("a launcher from before versions is refused before any agent runs, with the setup script to run again", async (t) => {
   const h = await harness(t, {}, true);
-  await assert.rejects(h.worker.start(), /sudo install -o root -g wheel -m 755 scripts\/console\/console-agent/);
+  await assert.rejects(h.worker.start(), /not the version this Console needs .*sudo zsh scripts\/console\/setup-agent-user\.sh/);
   assert.doesNotMatch(h.log(), /sweep/);
 });
 

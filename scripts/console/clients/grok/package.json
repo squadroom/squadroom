@@ -1,0 +1,7 @@
+{
+  "name": "console-client-grok",
+  "private": true,
+  "dependencies": {
+    "@xai-official/grok": "1.0.62"
+  }
+}

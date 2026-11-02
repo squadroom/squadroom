@@ -27,14 +27,48 @@ export function expectedKeySource(model: AgentModel): string {
   return model.paid ? model.paid.credential : "none";
 }
 
+/** One model's figures in a result's `modelUsage`. */
+export type ModelPart = { model: string; usage: TurnUsage; webSearches: number | undefined };
+
+/**
+ * This turn's share of Claude Code's per-model usage. `modelUsage` is a
+ * running total for the session: each result carries every earlier turn
+ * too, and a resumed session's first result already carries the turns
+ * before the restart. So a turn is the latest totals less the last result's
+ * (`before`). Null when that cannot be read: there is no earlier result to
+ * subtract (a session resumed by a worker that never saw its totals), a
+ * figure is missing, or a total went down (a zeroed or reset report). A
+ * model that did not move this turn is left out.
+ */
+export function turnModelUsage(now: ModelPart[], before: ModelPart[] | null): ModelPart[] | null {
+  if (!before) return null;
+  if (before.some((b) => !now.some((p) => p.model === b.model))) return null;
+  const fields = ["inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens"] as const;
+  const out: ModelPart[] = [];
+  for (const part of now) {
+    const prev = before.find((b) => b.model === part.model);
+    const usage: TurnUsage = {};
+    for (const f of fields) {
+      const a = part.usage[f];
+      const b = prev ? prev.usage[f] : 0;
+      if (a === undefined || b === undefined || a < b) return null;
+      usage[f] = a - b;
+    }
+    const searches = part.webSearches === undefined || (prev && prev.webSearches === undefined) ? undefined : part.webSearches - (prev?.webSearches ?? 0);
+    if (searches === undefined || searches < 0) return null;
+    if (searches || fields.some((f) => usage[f])) out.push({ model: part.model, usage, webSearches: searches });
+  }
+  return out;
+}
+
 /**
  * What an API-key turn is charged from: every model's usage this turn
- * (`modelUsage`, so helpers and Claude Code's own small requests count),
+ * (`turnModelUsage`, so helpers and Claude Code's own small requests count),
  * summed and priced at the window's model. A model priced above it, one
  * the Console does not know, or a web search (which has its own price)
  * makes the usage untrusted: the turn is then charged its full allowance.
  */
-export function apiKeyUsage(model: AgentModel, parts: { model: string; usage: TurnUsage; webSearches: number | undefined }[]): TurnUsage | null {
+export function apiKeyUsage(model: AgentModel, parts: ModelPart[]): TurnUsage | null {
   const paid = model.paid;
   if (!paid || !parts.length) return null;
   const known = agentKind("claude-code")?.models.filter((m) => m.paid) ?? [];
@@ -55,6 +89,16 @@ export function apiKeyUsage(model: AgentModel, parts: { model: string; usage: Tu
   return sum;
 }
 
+/** An API-key turn's usage from a result: this turn's share of the running
+ * totals (null: charged its full allowance). A turn no model moved in used
+ * nothing. */
+export function apiKeyTurnUsage(model: AgentModel, now: ModelPart[], before: ModelPart[] | null): TurnUsage | null {
+  const parts = turnModelUsage(now, before);
+  if (!parts) return null;
+  if (!parts.length) return now.length ? { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 } : null;
+  return apiKeyUsage(model, parts);
+}
+
 class ClaudeSession implements AgentSession {
   private proc: ClaudeProcess;
   private ctx: SessionContext;
@@ -66,6 +110,10 @@ class ClaudeSession implements AgentSession {
   private discard = false;
   private topModel: string | undefined;
   private taskCalls = new Set<string>();
+  /** The last result's running totals in this process (`modelUsage`);
+   * null until one is seen for a resumed session whose totals this worker
+   * does not know. */
+  private totals: ModelPart[] | null;
 
   constructor(driver: ClaudeDriver, ctx: SessionContext) {
     this.driver = driver;
@@ -78,13 +126,15 @@ class ClaudeSession implements AgentSession {
     writeFileSync(temp, JSON.stringify({ mcpServers: { console: { type: "http", url: host.mcpUrl(), headers: { Authorization: `Bearer ${token}` } } } }), { mode: 0o640 });
     chmodSync(temp, 0o640);
     renameSync(temp, config);
+    const resume = ctx.storedSession();
+    this.totals = resume ? (driver.totals.get(resume) ?? null) : [];
     const args = claudeArgs({
       model,
       effort: agent.effort,
       settings: claudeSettings(agent.folder, agent.permission, host.paths, !!agent.askFirst, !!ctx.documentsOnly, !!model.paid),
       mcpConfig: config,
       system: ctx.system(),
-      resume: ctx.storedSession(),
+      resume,
     });
     this.askFirst = !!agent.askFirst;
     this.proc = new ClaudeProcess(host.launcher, agent.folder, host.binary(agent.kind), args, ctx.credentials);
@@ -143,6 +193,8 @@ class ClaudeSession implements AgentSession {
       );
       return;
     }
+    // Every result moves the running totals, a discarded turn's too.
+    const charged = ev.type === "result" ? this.turnUsage(ev) : undefined;
     // A turn that broke a rule keeps nothing more; its process is ended.
     if (!this.active || this.discard) return;
     const fail = (reason: string) => {
@@ -234,11 +286,25 @@ class ClaudeSession implements AgentSession {
           outcome: ev.ok ? "done" : "failed",
           error: ev.ok ? null : `Claude Code reported ${ev.subtype}${ev.text ? `: ${ev.text}` : ""}`,
           text: ev.ok ? ev.text : undefined,
-          // An API-key turn is charged from every model's usage this turn.
-          usage: ctx.model.paid ? apiKeyUsage(ctx.model, ev.models) : ev.usage,
+          usage: charged,
         });
       }
     }
+  }
+  /** A result's usage: an API-key turn's from every model's usage this
+   * turn (its share of the running totals, which are kept for the next
+   * result and for a resume of this session by this worker). */
+  private turnUsage(ev: Extract<ClaudeEvent, { type: "result" }>): TurnUsage | null {
+    const before = this.totals;
+    // A zeroed report (a crash or startup-error result may carry one, or a
+    // result without `modelUsage`) is not a new starting point: the totals
+    // it came after still are.
+    const zeroed = ev.models.every((p) => !p.webSearches && !p.usage.inputTokens && !p.usage.outputTokens && !p.usage.cacheReadTokens && !p.usage.cacheWriteTokens);
+    if (!zeroed) {
+      this.totals = ev.models;
+      if (ev.sessionId) this.driver.totals.set(ev.sessionId, ev.models);
+    }
+    return this.ctx.model.paid ? apiKeyTurnUsage(this.ctx.model, ev.models, before) : ev.usage;
   }
   /** A Claude task call (task list), pending until its result. */
   private taskCall(id: string, name: string, input: unknown) {
@@ -259,6 +325,9 @@ export class ClaudeDriver extends OwnProcessDriver implements AgentDriver {
   readonly label = "Claude Code";
   readonly permissionTool = true;
   readonly folderScope = null;
+  /** Each Claude session's last running totals (`modelUsage`), so a new
+   * process resuming it charges only what comes after. */
+  readonly totals = new Map<string, ModelPart[]>();
   open(ctx: SessionContext): AgentSession {
     return new ClaudeSession(this, ctx);
   }

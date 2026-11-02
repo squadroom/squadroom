@@ -136,7 +136,19 @@ export function ClosedTabsDialog({ closedTabs, run, onClose }: { closedTabs: Pro
 /** A tab's spend and its limit: the owner sets the limit in dollars or goes
  * back to the default. Raising it asks for a fresh code; setting it never
  * lifts a pause. */
-export function SpendLimit({ tabId, spend, run }: { tabId: string; spend: TabSpend; run: Run }) {
+export function SpendLimit({
+  tabId,
+  spend,
+  run,
+  since = "since the last Reset spend",
+}: {
+  /** A tab's limit, or (null) the Console-wide one. */
+  tabId: string | null;
+  spend: TabSpend;
+  run: Run;
+  since?: string;
+}) {
+  const set = (limitUsd: number | null) => void run(tabId ? { action: "setSpendLimit", tabId, limitUsd } : { action: "setConsoleSpendLimit", limitUsd });
   const [value, setValue] = useState(spend.limitUsd.toFixed(2));
   const parsed = parseDollars(value);
   const changed = Number.isFinite(parsed) && parsed !== spend.limitUsd;
@@ -144,7 +156,7 @@ export function SpendLimit({ tabId, spend, run }: { tabId: string; spend: TabSpe
     <div className={styles.spendLimit}>
       <p className={styles.hint}>
         Spent {money(spend.usd)} of {money(spend.limitUsd)}
-        {spend.isDefault ? " (the default)" : ""} on API-key models since the last Reset spend.
+        {spend.isDefault ? " (the default)" : ""} on API-key models {since}.
       </p>
       <label className={styles.inlineField}>
         <span>Limit $</span>
@@ -152,7 +164,7 @@ export function SpendLimit({ tabId, spend, run }: { tabId: string; spend: TabSpe
         <button
           disabled={!changed || parsed < 0.01}
           title={parsed > spend.limitUsd ? "Raising the limit needs a fresh code" : "Lowering the limit"}
-          onClick={() => void run({ action: "setSpendLimit", tabId, limitUsd: parsed })}
+          onClick={() => set(parsed)}
         >
           Save
         </button>
@@ -161,7 +173,7 @@ export function SpendLimit({ tabId, spend, run }: { tabId: string; spend: TabSpe
             title={`Use the default, ${money(spend.defaultUsd)}${spend.defaultUsd > spend.limitUsd ? " (needs a fresh code)" : ""}`}
             onClick={() => {
               setValue(spend.defaultUsd.toFixed(2));
-              void run({ action: "setSpendLimit", tabId, limitUsd: null });
+              set(null);
             }}
           >
             Use default

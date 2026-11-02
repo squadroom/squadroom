@@ -4,7 +4,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { Launcher, launcherEnvironment } from "../src/lib/console/launcher.ts";
+import { LAUNCHER_VERSION, Launcher, launcherEnvironment } from "../src/lib/console/launcher.ts";
 
 // only the credentials the worker lists in `spawn --keep`
 // reach an agent. The real launcher script runs here with its user check
@@ -261,6 +261,29 @@ test("spawn --sandbox: no network but the Console's loopback port, unless the pr
   assert.equal(await check(probe(elsewhere.port), "on"), 0, "the project's switch turns network on");
 });
 
+test("git reads objects as stored: an agent's replace refs, grafts and commit-graph are ignored", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  const g = (...a: string[]) => spawnSync("git", ["-c", "user.name=a", "-c", "user.email=a@b", ...a], { cwd: s.mine, encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as unknown as NodeJS.ProcessEnv }).stdout.trim();
+  g("init", "-q");
+  for (const n of ["1", "2", "3"]) {
+    writeFileSync(join(s.mine, "f"), `${n}\n`);
+    g("add", "f");
+    g("commit", "-qm", n);
+  }
+  const [c3, c2, c1] = g("rev-list", "HEAD").split("\n");
+  // The agent's own Git: a grafted history and a replaced commit.
+  writeFileSync(join(s.mine, ".git", "info", "grafts"), `${c3} ${c1}\n`);
+  g("replace", c2, g("commit-tree", `${c1}^{tree}`, "-p", c1, "-m", "fake"));
+  assert.equal(g("log", "--format=%s"), "3\n1");
+  const launched = (...a: string[]) => {
+    const r = spawnSync("/bin/zsh", ["-f", s.path, "git", s.mine, ...a], { env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  assert.equal(launched("log", "--format=%s"), "3\n2\n1");
+  assert.equal(launched("config", "core.commitGraph"), "false");
+});
+
 test("spawn --sandbox refuses a folder outside an agent's clone and a --deny outside its project", { skip: !zsh }, (t) => {
   const s = sandboxLauncher(t);
   const run = (args: string[]) => spawnSync("/bin/zsh", ["-f", s.path, "spawn", "--keep", "", ...args], { env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });
@@ -295,4 +318,29 @@ test("a launcher call sudo refuses before the user directory is up is tried agai
   writeFileSync(other, `#!/bin/sh\necho x >> "${join(root, "other-tries")}"\necho "pkill: failed" >&2\nexit 2\n`, { mode: 0o755 });
   await assert.rejects(new Launcher({ command: [other], bootRetryMs: 1 }).sweep(), /The agent sweep failed: pkill: failed/);
   assert.equal(readFileSync(join(root, "other-tries"), "utf8").trim().split("\n").length, 1);
+});
+
+// The worker checks the installed launcher's version, so an update that
+// changes the launcher tells the owner to run the setup script again.
+test("the launcher's version line is LAUNCHER_VERSION, and its version action prints it", { skip: !zsh }, (t) => {
+  assert.match(readFileSync(SCRIPT, "utf8"), new RegExp(`^readonly VERSION=${LAUNCHER_VERSION}$`, "m"));
+  const { run } = launcher(t);
+  const result = run(["version"], { PATH: "/usr/bin:/bin" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), String(LAUNCHER_VERSION));
+});
+
+test("the worker refuses a launcher of another version, or one without a version action, and says to run the setup script", { skip: !existsSync("/bin/sh") }, async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "console-version-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const fake = (name: string, body: string) => {
+    const path = join(root, name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return new Launcher({ command: [path], bootRetryMs: 1 });
+  };
+  const ok = `if [ "$1" = version ]; then echo ${LAUNCHER_VERSION}; fi\nexit 0`;
+  await fake("current", ok).check(root);
+  await assert.rejects(fake("newer", `[ "$1" = version ] && echo ${LAUNCHER_VERSION + 1}\nexit 0`).check(root), new RegExp(`reported ${LAUNCHER_VERSION + 1}\\). .*setup-agent-user\\.sh`));
+  await assert.rejects(fake("old", `echo "console-agent: unknown action: $1" >&2\nexit 64`).check(root), /reported console-agent: unknown action: version\). .*setup-agent-user\.sh/);
+  await assert.rejects(fake("broken", `if [ "$1" = version ]; then echo ${LAUNCHER_VERSION}; exit 0; fi\necho "sudo: no" >&2\nexit 1`).check(root), /could not start a program as agent: sudo: no/);
 });

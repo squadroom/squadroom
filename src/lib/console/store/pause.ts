@@ -1,11 +1,27 @@
-import { SPEND_PAUSE, USAGE_PAUSE, type ConsoleAgent } from "../types.ts";
+import { CONSOLE_SPEND_PAUSE, LIMITS, SPEND_PAUSE, USAGE_PAUSE, type ConsoleAgent } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
-import { spendPauseReason, spendRaisedReason } from "../spend.ts";
+import { consoleSpendPauseReason, consoleSpendRaisedReason, spendPauseReason, spendRaisedReason } from "../spend.ts";
 
 /** The flag that pauses everything (its value is the reason). */
 export const PAUSE_ALL = "pause-all";
 /** Set ("on") when the owner wants the Needs you e-mail. */
 export const NEEDS_MAIL = "needs-mail";
+/** The Console-wide spend limit in dollars, when the owner set one. */
+const CONSOLE_SPEND_LIMIT = "console-spend-limit";
+/** When the owner last reset the Console-wide spend (ms). */
+const CONSOLE_SPEND_FROM = "console-spend-from";
+
+/** The Console-wide spend as the Overview shows it and the worker applies
+ * it: API-key spend since the start of this UTC month or the last reset. */
+export interface ConsoleSpend {
+  usd: number;
+  limitUsd: number;
+  /** True when the owner has not set a limit of their own. */
+  isDefault: boolean;
+  defaultUsd: number;
+  /** Spend counts from here: the month's start or the last reset. */
+  from: number;
+}
 
 type Paused = { scope: "all" | "project" | "tab"; id: string | null; name: string; projectId: string | null; reason: string };
 
@@ -57,10 +73,11 @@ export const pause = {
         // A usage hold is lifted only by resuming that tab's own pause that
         // showed it; resuming a project or everything leaves it, and the
         // tab pauses again with it. A spend-limit pause outlasts any
-        // Resume: only Reset spend lifts it.
+        // Resume: only Reset spend lifts it; the Console-wide one, only
+        // raising or resetting that limit.
         this.run(
-          `UPDATE console_tabs SET usage_hold = CASE WHEN ? AND paused = 1 AND substr(pause_reason, 1, ?) = ? THEN NULL ELSE usage_hold END, paused = 0, pause_reason = NULL, count_from = ?, resumed_at = ? ${where ? `${where} AND` : "WHERE"} NOT (paused = 1 AND substr(COALESCE(pause_reason, ''), 1, ?) = ?)`,
-          scope === "tab" ? 1 : 0, USAGE_PAUSE.length, USAGE_PAUSE, last, now, ...args, SPEND_PAUSE.length, SPEND_PAUSE,
+          `UPDATE console_tabs SET usage_hold = CASE WHEN ? AND paused = 1 AND substr(pause_reason, 1, ?) = ? THEN NULL ELSE usage_hold END, paused = 0, pause_reason = NULL, count_from = ?, resumed_at = ? ${where ? `${where} AND` : "WHERE"} NOT (paused = 1 AND (substr(COALESCE(pause_reason, ''), 1, ?) = ? OR substr(COALESCE(pause_reason, ''), 1, ?) = ?))`,
+          scope === "tab" ? 1 : 0, USAGE_PAUSE.length, USAGE_PAUSE, last, now, ...args, SPEND_PAUSE.length, SPEND_PAUSE, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE,
         );
         // The owner's Resume also lifts the agents' holds.
         this.run(`UPDATE console_holds SET released_at = ? WHERE released_at IS NULL AND tab_id IN (SELECT id FROM console_tabs ${where})`, now, ...args);
@@ -189,6 +206,52 @@ export const pause = {
       if (!tab.paused || !(tab.pauseReason ?? "").startsWith(SPEND_PAUSE)) return;
       const spent = this.tabSpend(tabId);
       this.run("UPDATE console_tabs SET pause_reason = ? WHERE id = ?", spent < after ? spendRaisedReason(spent, after) : spendPauseReason(spent, after), tabId);
+    });
+  },
+
+  // ── The Console-wide spend limit ───────────────────────────────────────
+  /** API-key spend across every tab, open or closed, since the start of
+   * this UTC month or the owner's last reset, whichever is later: turns by
+   * when they ended, image calls by when they were charged. */
+  consoleSpend(this: ConsoleStore): ConsoleSpend {
+    const d = new Date(this.now());
+    const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    const from = Math.max(monthStart, Number(this.flag(CONSOLE_SPEND_FROM) ?? 0));
+    const own = this.flag(CONSOLE_SPEND_LIMIT);
+    const spent = Number(
+      this.get(
+        `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM console_turns WHERE cost_usd IS NOT NULL AND ended_at >= ?1)
+          + (SELECT COALESCE(SUM(cost_usd), 0) FROM console_image_calls WHERE created_at >= ?1) AS usd`,
+        from,
+      )!.usd,
+    );
+    const defaultUsd = LIMITS.consoleSpendUsd;
+    return { usd: spent, limitUsd: own === null ? defaultUsd : Number(own), isDefault: own === null, defaultUsd, from };
+  },
+  /**
+   * The owner sets the Console-wide limit (dollars, or null for the
+   * default). Raising it needs a fresh code: the caller says whether it
+   * checked one, and a raise without one is refused in the transaction that
+   * reads the limit. Tabs paused at it become ordinary pauses (Resume)
+   * once the limit is above the spend; others keep the new limit in their
+   * reason.
+   */
+  setConsoleSpendLimit(this: ConsoleStore, limitUsd: number | null, mayRaise: boolean) {
+    this.transaction(() => {
+      const before = this.consoleSpend();
+      const after = limitUsd ?? before.defaultUsd;
+      if (after > before.limitUsd && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
+      this.putFlag(CONSOLE_SPEND_LIMIT, limitUsd === null ? null : String(limitUsd));
+      const reason = before.usd < after ? consoleSpendRaisedReason(before.usd, after) : consoleSpendPauseReason(before.usd, after);
+      this.run("UPDATE console_tabs SET pause_reason = ? WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", reason, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
+    });
+  },
+  /** Reset the Console-wide spend (owner, behind a fresh code): it counts
+   * from now, and the tabs paused at its limit resume. */
+  resetConsoleSpend(this: ConsoleStore) {
+    this.transaction(() => {
+      this.putFlag(CONSOLE_SPEND_FROM, String(this.now()));
+      this.run("UPDATE console_tabs SET paused = 0, pause_reason = NULL WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
     });
   },
 

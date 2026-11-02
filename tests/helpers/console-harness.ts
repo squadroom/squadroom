@@ -1,12 +1,13 @@
 import type { AgentKind } from "../../src/lib/console/agents.ts";
 import type { TestContext } from "node:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ConsoleStore } from "../../src/lib/console/store.ts";
 import { ConsoleWorker, type ConsoleWorkerOptions } from "../../src/lib/console/worker.ts";
-import { Launcher } from "../../src/lib/console/launcher.ts";
+import { LAUNCHER_VERSION, Launcher } from "../../src/lib/console/launcher.ts";
 import { runCommand } from "../../src/lib/console/commands.ts";
 import type { LIMITS, ConsoleEvent } from "../../src/lib/console/types.ts";
 
@@ -21,11 +22,21 @@ const FAKE_ACP = fileURLToPath(new URL("./fake-acp.mjs", import.meta.url));
 export const TOKEN = "sk-ant-oat01-fake-login-token-0000000000ABCD";
 export const GIT_TOKEN = "github_pat_11FAKEGITTOKEN0000000000000000WXYZ";
 const AMBIENT = "sk-ambient-owner-openai-key-00000000WXYZ";
+/** Timing headroom for a loaded machine (CI, --test-concurrency=8): an ACP
+ * agent's cold start is sh, then sh, then node. CONSOLE_TEST_TIME_FACTOR
+ * scales both waits, for a slower machine still. */
+const TIME_FACTOR = Math.max(1, Number(process.env.CONSOLE_TEST_TIME_FACTOR) || 1);
+/** An ACP setup call's time limit (production: 60 s). A test that needs a
+ * call to time out passes its own `acpCallMs`. */
+export const ACP_CALL_MS = 30_000 * TIME_FACTOR;
+/** How long `until` waits by default. */
+const UNTIL_MS = 20_000 * TIME_FACTOR;
 
 /** A launcher that behaves like scripts/console/console-agent: a clean
  * environment with only the `--keep` names, its own process group, and Git
- * in a repository with hooks off. `old` mimics a launcher from before
- * `--keep` (it reads `--keep` as the working folder and refuses). */
+ * in a repository with hooks off, and this checkout's version. `old`
+ * mimics a launcher from before versions and `--keep` (no `version`
+ * action; it reads `--keep` as the working folder and refuses). */
 function fakeLauncher(root: string, agentHome: string, old = false) {
   const path = join(root, old ? "old-launcher" : "launcher");
   writeFileSync(
@@ -57,6 +68,7 @@ case "$1" in
     ;;
   signal) if [ -f ${root}/fail-signal ]; then rm ${root}/fail-signal; exit 1; fi; echo "signal $2 $3" >> $LOG; kill -s "$2" -- "-$3" 2>/dev/null; exit 0 ;;
   sweep) echo sweep >> $LOG; exit 0 ;;
+  ${old ? "" : `version) echo ${LAUNCHER_VERSION}; exit 0 ;;`}
 esac
 exit 64
 `,
@@ -70,7 +82,7 @@ export interface HarnessExtra {
   codex?: Record<string, unknown>;
   /** fake-acp.json in the agent home (ACP agents). */
   acp?: Record<string, unknown>;
-  /** ACP setup calls' time limit. */
+  /** ACP setup calls' time limit (default ACP_CALL_MS). */
   acpCallMs?: number;
   /** Drivers in place of the built-in ones (a stub driver). */
   drivers?: ConsoleWorkerOptions["drivers"];
@@ -125,7 +137,7 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     stopGraceMs: 300,
     codexStopGraceMs: extra.codexStopGraceMs ?? 1_500,
     codexCallMs: extra.codexCallMs,
-    acpCallMs: extra.acpCallMs,
+    acpCallMs: extra.acpCallMs ?? ACP_CALL_MS,
     drivers: extra.drivers,
     limits,
     log: () => {},
@@ -138,7 +150,26 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     storePath: join(root, "console.sqlite"),
     ...extra.options,
   };
+  // A new program's first run waits for macOS's malware scan, seconds on
+  // a loaded machine: run the fake launcher once now, outside the worker's
+  // timed launcher check.
+  spawnSync(options.launcher.config.command[0], [], { stdio: "ignore" });
   const worker = new ConsoleWorker(options);
+  // Finished scheduling passes, for `passes`.
+  let finished = 0;
+  const tick = worker.tick.bind(worker);
+  worker.tick = async () => {
+    const ran = !(worker as unknown as { ticking: boolean }).ticking;
+    await tick();
+    if (ran) finished++;
+  };
+  /** Wait until the worker has finished `n` whole scheduling passes after
+   * this call: the positive marker before asserting that something did
+   * not happen (a queued turn stays queued), in place of a fixed sleep. */
+  const passes = async (n = 3) => {
+    const target = finished + n + 1;
+    await until(() => finished >= target, `${n} scheduling passes`);
+  };
   /** Another worker against the same store and folders (as after a
    * restart), stopped with the rest. */
   const workers: ConsoleWorker[] = [];
@@ -167,7 +198,7 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
   const acpAgent = (name = "Scout", model = "openai/gpt-5.6-luna", permission: "look" | "edit" = "look", kind: AgentKind = "opencode") =>
     store.createAgent({ tabId: tab.id, name, role: "", kind, model, effort: null, permission });
   const send = (agentId: string, text: string) => (runCommand(store, { action: "send", agentId, text }) as { turnId: number }).turnId;
-  const until = async (what: () => boolean, label: string, ms = 8000) => {
+  const until = async (what: () => boolean, label: string, ms = UNTIL_MS) => {
     const end = Date.now() + ms;
     while (!what()) {
       if (Date.now() > end) throw new Error(`timed out: ${label}`);
@@ -202,5 +233,5 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
           .slice(0, -1)
           .map((l) => JSON.parse(l) as { pid: number; cwd: string; argv?: string[]; method: string | null; id: number | null; params: Record<string, unknown> | null; result: Record<string, unknown> | null })
       : [];
-  return { root, store, worker, newWorker, project, tab, agent, codexAgent, acpAgent, acpCalls, keysFile, send, until, ended, started, events, said, log, codexCalls, ready, agentHome, shared };
+  return { root, store, worker, newWorker, project, tab, agent, codexAgent, acpAgent, acpCalls, keysFile, send, until, ended, started, events, said, log, codexCalls, ready, passes, agentHome, shared };
 }

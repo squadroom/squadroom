@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { readCodexNotification } from "../src/lib/console/codex.ts";
+import { changedFiles, readCodexNotification } from "../src/lib/console/codex.ts";
 import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand, decideCodexFiles } from "../src/lib/console/permissions.ts";
 import { harness } from "./helpers/console-harness.ts";
 
@@ -59,9 +59,18 @@ test("the notification reader keeps executed items and the reply apart", () => {
     readCodexNotification("item/completed", { item: { type: "commandExecution", id: "c", aggregatedOutput: "out", exitCode: 2 } }),
     [{ type: "tool_result", itemId: "c", text: "out\n(exit 2)", error: true }],
   );
-  assert.deepEqual(readCodexNotification("item/started", { item: { type: "fileChange", id: "f", changes: [{ path: "/w/a/x" }] } }), [
+  assert.deepEqual(readCodexNotification("item/started", { item: { type: "fileChange", id: "f", changes: [{ path: "/w/a/x", kind: { type: "add" } }] } }), [
     { type: "tool", itemId: "f", name: "Edit", summary: "/w/a/x", paths: ["/w/a/x"] },
   ]);
+  // A rename's destination is one of the files it changes; a change the
+  // Console cannot read (no kind, an unknown kind, no path) names none.
+  assert.deepEqual(readCodexNotification("item/started", { item: { type: "fileChange", id: "f", changes: [{ path: "/w/a/x", kind: { type: "update", move_path: "/w/b/y" } }] } }), [
+    { type: "tool", itemId: "f", name: "Edit", summary: "/w/a/x, /w/b/y", paths: ["/w/a/x", "/w/b/y"] },
+  ]);
+  assert.deepEqual(changedFiles([{ path: "/w/a/x", kind: { type: "update", move_path: null } }, { path: "/w/a/z", kind: { type: "delete" } }]), ["/w/a/x", "/w/a/z"]);
+  assert.deepEqual(changedFiles([{ path: "/w/a/x", move_path: "/w/b/y", kind: { type: "update" } }]), ["/w/a/x", "/w/b/y"]);
+  for (const changes of [[{ path: "/w/a/x" }], [{ path: "/w/a/x", kind: { type: "rewrite" } }], [{ kind: { type: "add" } }], [{ path: "/w/a/x", kind: { type: "update", move_path: 7 } }], [], null])
+    assert.equal(changedFiles(changes), null, JSON.stringify(changes));
   assert.deepEqual(readCodexNotification("turn/completed", { turn: { id: "t", status: "failed", error: { message: "boom" } } }), [
     { type: "completed", turnId: "t", status: "failed", error: "boom" },
   ]);
@@ -133,7 +142,7 @@ test("a new agent folder: made only between Codex turns, and the thread is resum
   await h.started(hang);
   await h.until(() => h.codexCalls().some((c) => c.method === "turn/start"), "turn started");
   const late = h.agent("Late");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.agent(late.id)!.state, "creating", "no folder while a Codex turn runs");
   runCommand(h.store, { action: "stop", agentId: coder.id });
   await h.ended(hang);
@@ -163,6 +172,22 @@ test("file changes: allowed in its folder, refused elsewhere; the Console's own 
   await h.ended(h.send(coder.id, `write ${theirs}`));
   assert.equal(h.said(coder.id).at(-1), "file: decline");
   assert.ok(!existsSync(theirs));
+  // A rename out of its folder is a write there: refused.
+  const moved = join(h.store.agent(other.id)!.folder, "moved.txt");
+  await h.ended(h.send(coder.id, `move ${mine} ${moved}`));
+  assert.equal(h.said(coder.id).at(-1), "file: decline");
+  assert.ok(!existsSync(moved));
+  const inside = join(h.store.agent(coder.id)!.folder, "renamed.txt");
+  await h.ended(h.send(coder.id, `move ${mine} ${inside}`));
+  assert.equal(h.said(coder.id).at(-1), "file: accept");
+  // A change of an unknown kind, or one asking for a standing grant on a
+  // folder, is refused even inside its folder.
+  for (const word of ["oddkind", "grant"]) {
+    const file = join(h.store.agent(coder.id)!.folder, `${word}.txt`);
+    await h.ended(h.send(coder.id, `${word} ${file}`));
+    assert.equal(h.said(coder.id).at(-1), "file: decline", word);
+    assert.ok(!existsSync(file), word);
+  }
   await h.ended(h.send(coder.id, "escalate"));
   assert.equal(h.said(coder.id).at(-1), "escalate: decline");
   await h.ended(h.send(coder.id, "elicit"));
@@ -174,6 +199,9 @@ test("network and questions wait for the owner; Always is remembered for that ag
   await h.worker.start();
   const coder = h.codexAgent();
   await h.ready(coder.id);
+  // A first turn starts the shared server, so its cold start (slow on a
+  // loaded machine) does not count against this test's short deadline.
+  await h.ended(h.send(coder.id, "hello"));
   const net = h.send(coder.id, "net");
   await h.until(() => h.store.turn(net)!.status === "waiting_for_owner", "waiting");
   // Time waiting for the owner does not count toward the deadline.
@@ -296,4 +324,19 @@ test("a Codex turn holds only its own project's new folders; other projects' thr
   const start = h.codexCalls().find((c) => c.method === "thread/start")!;
   const filesystem = ((start.params.config as Record<string, unknown>).permissions as Record<string, { filesystem: Record<string, string> }>)[CODEX_PROFILE].filesystem;
   assert.equal(filesystem[join(h.agentHome, "work", other.id)], "deny");
+});
+
+test("a Codex line over the output limit: the running turn stops, the server is ended through the launcher, and the next turn gets a new one", async (t) => {
+  const h = await harness(t, {}, false, { codex: {} });
+  await h.worker.start();
+  const coder = h.codexAgent();
+  await h.ready(coder.id);
+  const turn = h.send(coder.id, "huge");
+  await h.ended(turn);
+  assert.equal(h.store.turn(turn)!.status, "stopped");
+  assert.match(h.store.turn(turn)!.reason ?? "", /Output limit/);
+  await h.ended(h.send(coder.id, "hello"));
+  assert.equal(h.said(coder.id).at(-1), "Hi from Codex.");
+  const starts = readFileSync(join(h.agentHome, "codex-starts.jsonl"), "utf8").trim().split("\n");
+  assert.equal(starts.length, 2, "a new server for the next turn");
 });

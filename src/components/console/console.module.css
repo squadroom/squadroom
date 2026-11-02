@@ -75,9 +75,11 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* A dialog or the Settings page takes focus itself to catch Escape; the
-   box needs no ring. */
+/* A dialog, the phone's drawer, the file panel or the Settings page takes
+   focus itself to catch Escape; the box needs no ring. */
 .console .dialog:focus-visible,
+.console .drawer:focus-visible,
+.console .filePanel:focus-visible,
 .console .settingsPage:focus-visible {
   outline: none;
 }

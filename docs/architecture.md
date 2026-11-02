@@ -36,7 +36,17 @@ browser ──https──▶ TLS proxy (e.g. Tailscale Serve) ──▶ web serv
   as `agent` (one `sudoers` rule). It starts a program in a given folder
   with only the listed credentials (`spawn --keep`), optionally inside a
   macOS sandbox profile (`spawn --sandbox`), and can end every `agent`
-  process (`sweep`).
+  process (`sweep`). It carries a version number (`version`); the worker
+  refuses to start with any launcher but its own version
+  (`LAUNCHER_VERSION` in `src/lib/console/launcher.ts`), so raise both
+  when you change the launcher.
+- **The agent clients** install from committed lockfiles in
+  `scripts/console/clients/<name>`, one per client, with `npm ci` run as
+  `agent` (never root); root then copies the result into
+  `/opt/console-clients`, read-only. A test keeps each lockfile equal to
+  its pin in `src/lib/console/clients.ts`. To change a version, edit both:
+  the pin, and the client's `package.json`, then run
+  `npm install --package-lock-only --ignore-scripts` in its folder.
 
 ## The store
 
@@ -46,6 +56,33 @@ e-mail queue and the worker's lease. The web process and the worker share
 it; every worker write is fenced by its lease epoch, so a worker that lost
 its lease cannot write. `signin.sqlite` is separate and holds only the
 sign-in's state. Events are redacted before they are written.
+
+The schema has a version (`PRAGMA user_version`). A store from an earlier
+version gains the columns it lacks when it is opened (each only if it is
+missing); one that still lacks a column after that is refused and left as
+it was.
+
+### How a paid turn is charged
+
+A paid turn is charged the usage its client reported times the model's
+catalog prices, cache included. A model's long-context rates apply per
+request: where each request reports its own usage (Codex), only the
+requests above the threshold get them; where only the turn's total is
+reported (ACP clients), the whole turn does when the largest request the
+context gauge saw was above the threshold.
+
+A turn whose usage is missing, does not add up, or never comes (stopped
+mid-request, its program died, the worker restarted) is charged what its
+requests did report plus the model's full allowance (its whole context
+window as input and its maximum output) for each request it was seen to
+start without reporting it, and at least one. Requests are counted from
+what the clients already send: Claude Code's request starts, Codex's
+usage per request, and context-gauge changes. While a turn runs, what its
+client has reported so far, the prices it started with and the paying
+key's fingerprint are kept on its row (`running`, `billing`), so a restart
+charges it the same way even if its model has left the catalog. The
+Overview counts each turn in the UTC day and month it started, against the
+key that paid for it.
 
 ## Agents
 
@@ -66,7 +103,17 @@ sign-in's state. Events are redacted before they are written.
   (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused; in a tab with steps, only the current step's files)
   or files it in Needs you (network per host, unknown tools, pushes).
-  "Always" rules are the Console's own, never the client's. In a tab with
+  "Always" rules are the Console's own, never the client's, and a client
+  tool's rule is kept under its own prefix (`client:<tool>`), apart from the
+  Console's own decisions (`tool:team_push`, `tool:team_pr_reply`). Claude's
+  permission tool (`approve`) refuses the Console's own tool names, so an
+  agent calling it directly can't pass for, or leave a rule for, a push. A
+  Codex file change is approved only if every file it touches is in the
+  agent's folder, a rename's destination (`kind.move_path`) included;
+  unknown change kinds and `grantRoot` requests are refused. An ACP team
+  tool call skips the owner only when the client itself names the tool
+  (Grok Build's `UseTool` record); a title or a `tool_name` in the model's
+  arguments never counts. In a tab with
   steps the worker also puts back, before each commit, anything the turn
   changed outside the step's files, whichever way it was written.
 - **Only what ran counts.** Changes and commits come from the folder on
@@ -96,7 +143,21 @@ mirror; a push goes the other way. Before any clone the worker checks that
 the base branch exists and is protected by a ruleset that names it; it only
 ever pushes `console/` branches, and before a push it reads every object
 GitHub does not have yet, raw, and refuses the push if any holds a
-credential the Console handed out. It opens or updates the branch's pull request
+credential the Console handed out. It pushes only the commit it recorded
+at the end of the agent's last turn, so a commit made later by a program
+the agent left running waits for the next turn.
+
+The agent owns its clone's `.git`, so the worker trusts nothing in it that
+changes how objects read. Every Git command it runs there reads objects as
+stored: `--no-replace-objects`, `core.commitGraph=false`, and in the
+launcher `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE=/dev/null`.
+Without that, a replace ref could make a commit look like it holds another
+tree, and a file outside a step would look unchanged. Before the step
+check and the uncommitted-changes check it also clears skip-worktree and
+assume-unchanged flags. A step commit is checked again against where the
+step began before it is recorded. Bundles the worker copies out of an
+agent's folder are opened without following links and must be regular
+files owned by the agent user. It opens or updates the branch's pull request
 with the same token and, only when `CONSOLE_CODEX_REVIEW` is on, comments
 `@codex review` on it.
 
@@ -119,22 +180,35 @@ code step once when mail is down; it does not confirm weighty commands.
 - **Someone on the network or the internet.** Only the configured GitHub
   account can sign in; every request needs a session; commands need the
   public `Origin`, a same-origin fetch and a custom header; sign-in steps
-  are rate limited per address and in total.
+  are rate limited per address, and the GitHub return and the code step in
+  total as well (starting a sign-in has no total limit, so nobody can stop
+  you starting one).
 - **Agents, including a prompt-injected one.** An agent cannot read your
   home folder, other projects or teammates' folders (beyond what the team
   tools give it), cannot write outside its clone, has no GitHub credential,
   and gets only the one credential its model needs. Its requests to the web
   server from the same Mac are refused like anyone's: loopback is never
   trusted. Its Markdown is rendered without raw HTML and its images are
-  placeholders unless they are the Console's own, under a strict
-  Content-Security-Policy, so its output cannot make your browser call out.
+  placeholders unless they are inline (`data:image/…`), under a strict
+  Content-Security-Policy, so its output cannot make your browser call out
+  or call one of Squadroom's own routes with your cookies.
   The Console's e-mails never carry model-written text.
 - **A stolen session cookie.** Weighty actions need a fresh e-mailed code
   (and are refused when mail is off), so a cookie alone cannot raise
-  limits, change keys or grant permanent permissions.
+  limits, change keys or grant permanent permissions. New tabs start with
+  their own limit, but the Console-wide monthly limit caps them all, and
+  raising or resetting it is weighty. In a project that uses Ask me first,
+  making agents without it is weighty too.
 - **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
-  their spend limit; a turn whose usage cannot be trusted is charged its
-  full allowance and pauses its tab.
+  their spend limit, and every tab with an API-key agent pauses at the
+  Console-wide monthly limit; a turn whose usage cannot be trusted is
+  charged the full allowance for each request it started without reporting
+  usage, and pauses its tab. Claude Code reports `modelUsage` as a running
+  total for its session, so an API-key turn is charged the change since the
+  last result the worker saw for that session (kept across a process
+  restart and resume). A total that went down, or a session resumed by a
+  worker that never saw its totals, is charged the full allowance for each
+  request it started.
 
 **Not protected against (known limits):**
 
@@ -152,6 +226,30 @@ code step once when mail is down; it does not confirm weighty commands.
   multi-tenant sandbox.
 - **Without mail**, GitHub is the only sign-in factor (weighty actions
   are then off).
+
+## The page
+
+- **Composers outlive their windows.** Each agent window's unsent text,
+  the queued message being edited, its attached files and whether a send
+  is on its way live in one page-level store keyed by agent id
+  (`src/lib/console/composer.ts`, used by `useComposer`). Maximizing
+  another window or switching tab or project unmounts the window but loses
+  nothing, and the page renews held uploads every 10 minutes. After a send
+  the box is cleared only if it still holds what was sent.
+- **Streaming replies stay cheap.** The reply still streaming is cut into
+  pieces at blank lines outside code fences
+  (`src/lib/shared/markdown-stream.ts`); finished pieces render once, the
+  growing one is re-rendered without highlighting, and the whole reply is
+  rendered once when the turn ends. On a 53 KB reply this took the render
+  work from about 9.5 s to 0.65 s, and the slowest update from 99 ms to 8 ms.
+- **One at a time.** Create buttons and the fresh-code dialog go through
+  `oneAtATime` (`src/lib/console/busy.ts`): a double click creates one
+  thing, and commands that need a code at the same time share one dialog.
+- **Keyboard.** Dialogs and the phone's drawer keep Tab inside them, close
+  on Escape and give focus back on close (`useDialogFocus`); the file panel
+  takes focus and gives it back. On Settings, Escape in a text field only
+  leaves the field, and Escape elsewhere asks first if something was typed
+  since the last button press (`src/lib/console/focus.ts`).
 
 ## Where the code is
 

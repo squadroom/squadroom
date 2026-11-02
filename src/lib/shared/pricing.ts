@@ -11,6 +11,10 @@ export interface BillingUsage {
   cacheWriteInputTokens?: number;
   longCacheWriteInputTokens?: number;
   requestedAt?: string;
+  /** Whether the model's long-context rates apply. Left out, they apply
+   * when this one request's input is above the threshold; a caller pricing
+   * the sum of several requests says which of them were (the Console). */
+  longContext?: boolean;
 }
 
 export function tokenPrices(model: PricedModel, at = new Date(), peak = false): TokenPrices {
@@ -41,7 +45,8 @@ export function costUsd(
   const longWrite = Math.min(inputTokens - cached, Math.max(0, usage.longCacheWriteInputTokens ?? 0));
   const write = Math.min(inputTokens - cached - longWrite, Math.max(0, usage.cacheWriteInputTokens ?? 0));
   const ordinary = inputTokens - cached - write - longWrite;
-  const longContext = model.longContext && inputTokens > model.longContext.aboveTokens ? model.longContext : undefined;
+  const long = usage.longContext ?? (!!model.longContext && inputTokens > model.longContext.aboveTokens);
+  const longContext = long ? model.longContext : undefined;
   return (
     ((ordinary * rates.inputPerMtok +
       cached * (rates.cachedInputPerMtok ?? rates.inputPerMtok) +
@@ -54,12 +59,4 @@ export function costUsd(
 
 export function formatUsd(amount: number): string {
   return amount >= 0.01 ? `$${amount.toFixed(2)}` : `$${amount.toFixed(4)}`;
-}
-
-/** Conservative estimate for unreported usage; never a provider invoice. */
-export function reservedCostUsd(model: PricedModel, inputTokens: number, outputTokens: number): number {
-  const rates: TokenPrices[] = [model, ...(model.scheduledPrices ? [model.scheduledPrices.prices] : []), ...(model.offPeakPrices ? [model.offPeakPrices] : [])];
-  const inputRate = Math.max(...rates.flatMap((r) => [r.inputPerMtok, r.cachedInputPerMtok ?? 0, r.cacheWritePerMtok ?? 0, r.longCacheWritePerMtok ?? 0]));
-  const outputRate = Math.max(...rates.map((r) => r.outputPerMtok));
-  return (inputTokens * inputRate * (model.longContext?.inputMultiplier ?? 1) + outputTokens * outputRate * (model.longContext?.outputMultiplier ?? 1)) / 1_000_000;
 }

@@ -3,12 +3,15 @@
 # agent programs and the launcher, and checks the boundary. Run once from
 # the owner's account, in the repository folder:
 #
-#   sudo zsh scripts/console/setup-agent-user.sh
+#   sudo zsh scripts/console/setup-agent-user.sh [--force]
 #
-# Safe to run again: every step checks what already exists. It changes
-# nothing in the owner's account except adding the owner to the `agent`
-# group, so the owner can read agents' work.
+# Safe to run again: every step checks what already exists. Stop the
+# Console worker first: while agent programs run, it refuses (--force stops
+# them all, ending their turns). It changes nothing in the owner's account
+# except adding the owner to the `agent` group, so the owner can read
+# agents' work.
 set -eu
+umask 022
 
 readonly AGENT=agent
 readonly ID=600
@@ -30,13 +33,91 @@ warn() { print -u2 -P "%F{yellow}Warning:%f $*" }
 readonly OWNER=${SUDO_USER-}
 [[ -n $OWNER && $OWNER != root ]] || fail "run with sudo from your own account, not as root"
 [[ -f $HERE/console-agent ]] || fail "run from the repository (scripts/console/console-agent is missing)"
+force=0
+for arg in "$@"; do
+  [[ $arg == --force ]] && force=1 || fail "unknown option '$arg' (the only option is --force)"
+done
+# The paths are baked into the launcher with sed and into sudoers: plain
+# absolute paths only.
+for dir in $AGENT_HOME $CLIENTS $LAUNCHER $SHARED; do
+  [[ $dir =~ '^/[A-Za-z0-9._/-]+$' ]] || fail "$dir: use a plain absolute path (letters, digits, . _ - /)"
+done
+
+# The Console worker restarts itself (its LaunchAgent) and, each time it
+# stops, ends every '$AGENT' process: that would kill the installs below.
+# It is stopped for the length of setup (its own stop also ends the App
+# Servers it keeps between turns) and started again on exit, even when setup
+# fails, so a failed run never leaves it off.
+readonly OWNER_UID=$(/usr/bin/id -u $OWNER)
+readonly OWNER_HOME=$(/usr/bin/dscl . -read /Users/$OWNER NFSHomeDirectory | /usr/bin/awk '{print $2}')
+readonly WORKER=gui/$OWNER_UID/io.squadroom.console-worker
+readonly WORKER_PLIST=$OWNER_HOME/Library/LaunchAgents/io.squadroom.console-worker.plist
+worker_loaded() { /bin/launchctl print $WORKER >/dev/null 2>&1 }
+worker_was_on=0
+worker_loaded && worker_was_on=1
+restart_worker() {
+  (( worker_was_on )) && [[ -f $WORKER_PLIST ]] || return 0
+  local try
+  for try in {1..10}; do
+    worker_loaded && { print "  the Console worker is started again"; return 0 }
+    /bin/launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST 2>/dev/null || /bin/sleep 1
+  done
+  worker_loaded && print "  the Console worker is started again" ||
+    warn "the Console worker did not start again; start it: launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST"
+}
+
+# A Console turn running now (or waiting for your answer) would be ended.
+# The store says which are; a store moved with CONSOLE_STORE is passed the
+# same way as the other paths (sudo CONSOLE_STORE=… zsh …).
+readonly STORE=${CONSOLE_STORE:-$OWNER_HOME/.squadroom/console.sqlite}
+turns=0
+if [[ -f $STORE ]]; then
+  turns=$(/usr/bin/sqlite3 -readonly "$STORE" "select count(*) from console_turns where status in ('running', 'waiting_for_owner')" 2>/dev/null) || turns=""
+  [[ $turns == <-> ]] || { (( force )) || fail "could not read running turns from $STORE; let any turn finish, then run this again with --force"; turns=0 }
+fi
+if (( turns > 0 )); then
+  (( force )) || fail "$turns Console turn(s) are running or waiting for you. Let them finish, then run this again. --force ends them now."
+  warn "--force: ending $turns Console turn(s)"
+fi
+if (( worker_was_on )); then
+  step "Stopping the Console worker until setup ends"
+  trap restart_worker EXIT
+  /bin/launchctl bootout $WORKER 2>/dev/null || true
+  for try in {1..60}; do worker_loaded || break; /bin/sleep 1; done
+  worker_loaded && fail "the Console worker did not stop within a minute; stop it (launchctl bootout $WORKER), then run this again"
+  print "  stopped"
+fi
+
+# What is left running as '$AGENT' after that is a program the worker did
+# not end (one an agent left behind, or a worker run by hand). macOS runs a
+# few of its own for any account in use (distnoted, cfprefsd and the like,
+# from /usr or /System); those do not count.
+agent_programs() {
+  /bin/ps -U $AGENT -o comm= 2>/dev/null | /usr/bin/grep -Ev '^(/usr/(sbin|libexec|bin)/|/System/)' || true
+}
+if /usr/bin/id $AGENT >/dev/null 2>&1 && running=$(agent_programs) && [[ -n $running ]]; then
+  (( force )) || fail "${#${(f)running}} '$AGENT' programs are still running (an agent's leftovers, or a worker run by hand: stop it with Ctrl-C). --force stops them all now."
+  warn "--force: stopping ${#${(f)running}} running '$AGENT' programs"
+fi
+
+# Node 24 or newer: it reads the pinned versions, installs the clients, and
+# its folder goes on the agents' PATH. Homebrew's node@24 is keg-only (not
+# linked into bin), so its keg is looked in too, then wherever your own
+# shell finds `node`.
+owner_shell=$(/usr/bin/dscl . -read /Users/$OWNER UserShell | /usr/bin/awk '{print $2}')
+[[ $owner_shell == /* && -x $owner_shell ]] || owner_shell=/bin/zsh
+owner_node=$(cd / && /usr/bin/sudo -u $OWNER -H $owner_shell -ilc 'command -v node' </dev/null 2>/dev/null | /usr/bin/tail -1) || true
+node=""
+for candidate in /opt/homebrew/bin/node /usr/local/bin/node /opt/homebrew/opt/node@24/bin/node /usr/local/opt/node@24/bin/node $owner_node; do
+  [[ $candidate == /* && -x $candidate && -x ${candidate:h}/npm ]] || continue
+  (( $($candidate -p 'process.versions.node.split(".")[0]' 2>/dev/null || print 0) >= 24 )) && { node=$candidate; break; }
+done
+[[ -n $node ]] || fail "no Node 24 or newer found (in /opt/homebrew/bin, /usr/local/bin, Homebrew's node@24, or on your PATH); install it first: brew install node@24"
+readonly NODE_BIN=${node:h}
+[[ $NODE_BIN =~ '^/[A-Za-z0-9._/@+-]+$' ]] || fail "$NODE_BIN: Node's folder must be a plain path"
+print "Using Node $($node --version) from $NODE_BIN"
 
 # The pinned versions, from their one source (src/lib/console/clients.ts).
-node=""
-for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
-  [[ -x $candidate ]] && { node=$candidate; break; }
-done
-[[ -n $node ]] || fail "node not found in /opt/homebrew/bin or /usr/local/bin; install Node 24 first"
 versions=($($node --no-warnings --input-type=module -e 'const { CLIENT_VERSIONS: v } = await import(process.argv[1]); console.log(v.claude, v.codex);' "file://${HERE:h:h}/src/lib/console/clients.ts")) ||
   fail "could not read the pinned versions from src/lib/console/clients.ts"
 readonly CLAUDE_VERSION=${versions[1]} CODEX_VERSION=${versions[2]}
@@ -104,6 +185,7 @@ fi
 # No password at all: the account is used only through sudo, so there is
 # nothing to know, guess or see in the process list. Any earlier password
 # (or other authentication) is removed on every run.
+# (Only --force reaches here with agent programs running.)
 /usr/bin/pkill -KILL -U $AGENT 2>/dev/null || true
 /usr/bin/dscl . -delete /Users/$AGENT AuthenticationAuthority 2>/dev/null || true
 /usr/bin/dscl . -create /Users/$AGENT Password '*'
@@ -151,40 +233,70 @@ done
 /usr/sbin/chown -h $OWNER:$AGENT $SHARED
 /bin/chmod -h 750 $SHARED
 
+step "The agent user must be able to run $node"
+(cd / && sudo -u $AGENT $node --version >/dev/null 2>&1) ||
+  fail "the '$AGENT' user cannot run $node (is it inside your home folder?); install Node 24 with Homebrew or the official installer"
+
 step "Installing Claude Code $CLAUDE_VERSION, Codex $CODEX_VERSION and the ACP clients in $CLIENTS"
-npm=""
-for candidate in /opt/homebrew/bin/npm /usr/local/bin/npm; do
-  [[ -x $candidate ]] && { npm=$candidate; break; }
-done
-[[ -n $npm ]] || fail "npm not found in /opt/homebrew/bin or /usr/local/bin; install Node first"
+# Each client installs from its committed lockfile (scripts/console/clients/
+# <name>, kept equal to clients.ts by a test), so every dependency is the
+# one reviewed. npm and the clients' own install scripts run as '$AGENT', in
+# a staging folder, never as root. Root then copies the result into place:
+# fresh root-owned files, read-only, with no set-id bits.
 /bin/mkdir -p $CLIENTS/bin
 for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai/codex $CODEX_VERSION codex ${=acp_clients}; do
-  prefix=$CLIENTS/$name-$version
-  if [[ ! -x $prefix/node_modules/.bin/$name ]]; then
-    HOME=/var/root $npm install --global=false --prefix $prefix --no-audit --no-fund "$pkg@$version" >/dev/null
-  fi
-  /bin/ln -sf $prefix/node_modules/.bin/$name $CLIENTS/bin/$name
+  src=$HERE/clients/$name prefix=$CLIENTS/$name-$version
+  [[ -f $src/package-lock.json ]] || fail "scripts/console/clients/$name/package-lock.json is missing"
+  [[ -x $prefix/node_modules/.bin/$name ]] && /usr/bin/cmp -s $src/package-lock.json $prefix/package-lock.json || {
+    stage=$(/usr/bin/mktemp -d /private/tmp/console-client.XXXXXX)
+    /bin/chmod 755 $stage
+    /bin/mkdir $stage/home $stage/pkg
+    /bin/cp $src/package.json $src/package-lock.json $stage/pkg/
+    /usr/sbin/chown -R $AGENT:$AGENT $stage/home $stage/pkg
+    (cd $stage/pkg && sudo -u $AGENT /usr/bin/env -i PATH=$NODE_BIN:/usr/bin:/bin:/usr/sbin:/sbin \
+      HOME=$stage/home TMPDIR=$stage/home/ npm_config_cache=$stage/home/.npm \
+      $NODE_BIN/npm ci --no-audit --no-fund --loglevel=error >/dev/null) ||
+      { /bin/rm -rf $stage; fail "npm ci for $name failed"; }
+    # Anything an install script left running goes before root reads it.
+    /usr/bin/pkill -KILL -U $AGENT 2>/dev/null || true
+    /bin/rm -rf $prefix.new
+    /usr/bin/ditto $stage/pkg $prefix.new
+    /bin/rm -rf $stage
+    /usr/sbin/chown -R root:wheel $prefix.new
+    /bin/chmod -R a-w,ug-s $prefix.new
+    [[ -z $(/usr/bin/find $prefix.new -perm +6000 -print -quit) ]] || fail "$prefix.new has set-id files"
+    [[ -x $prefix.new/node_modules/.bin/$name ]] || fail "the $name install has no $name program"
+    /bin/rm -rf $prefix
+    /bin/mv $prefix.new $prefix
+  }
+  /bin/ln -sfh $prefix/node_modules/.bin/$name $CLIENTS/bin/$name
 done
-/usr/sbin/chown -R root:wheel $CLIENTS
-/bin/chmod -R go-w $CLIENTS
+/usr/sbin/chown -h root:wheel $CLIENTS $CLIENTS/bin $CLIENTS/bin/*
+/bin/chmod -h go-w $CLIENTS $CLIENTS/bin
 # From /: the agent user cannot read the owner's folder this runs in, and
 # Bun and Node clients fail to start in a folder they cannot read.
-print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
-print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
+print "  $(cd / && sudo -H -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
+print "  $(cd / && sudo -H -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
 for line in $acp_clients; do
   name=${line##* }
-  print "  $name: $(cd / && sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
+  print "  $name: $(cd / && sudo -H -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
 done
 
 step "Installing the launcher at $LAUNCHER"
 /bin/mkdir -p ${LAUNCHER:h}
 # The launcher with this host's paths baked in (the defaults leave it
-# byte-identical to scripts/console/console-agent).
+# byte-identical to scripts/console/console-agent). Each line must have
+# been replaced: a launcher with the default paths here would quietly
+# point at the wrong folders.
 launcher_tmp=$(/usr/bin/mktemp)
 /usr/bin/sed -e "s|^readonly AGENT_HOME=/Users/agent\$|readonly AGENT_HOME=$AGENT_HOME|" \
   -e "s|^readonly SHARED=/opt/console-shared\$|readonly SHARED=$SHARED|" \
   -e "s|^readonly CLIENTS=/opt/console-clients/bin\$|readonly CLIENTS=$CLIENTS/bin|" \
+  -e "s|^readonly NODE_BIN=/opt/homebrew/bin\$|readonly NODE_BIN=$NODE_BIN|" \
   $HERE/console-agent > $launcher_tmp
+for line in "AGENT_HOME=$AGENT_HOME" "SHARED=$SHARED" "CLIENTS=$CLIENTS/bin" "NODE_BIN=$NODE_BIN"; do
+  /usr/bin/grep -qxF "readonly $line" $launcher_tmp || { /bin/rm -f $launcher_tmp; fail "could not set $line in the launcher (scripts/console/console-agent changed?)"; }
+done
 /usr/bin/install -o root -g wheel -m 755 $launcher_tmp $LAUNCHER
 /bin/rm -f $launcher_tmp
 

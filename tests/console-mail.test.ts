@@ -83,7 +83,7 @@ test("a store at version 1 without the queue is upgraded in place", (t) => {
   assert.equal(store.mailRows().length, 1);
   store.close();
   const after = new DatabaseSync(path);
-  assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 2);
+  assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 3);
   after.close();
 });
 

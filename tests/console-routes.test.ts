@@ -262,7 +262,10 @@ test("a new agent can start with Ask me first", async (t) => {
     askFirst: boolean;
   };
   assert.equal(a.askFirst, true);
-  assert.equal((runCommand(h.store, { action: "createAgent", tabId: h.tab.id, name: "Plain", kind: "claude-code", model: "haiku", permission: "edit" }).agent as { askFirst: boolean }).askFirst, false);
+  // Once the project uses Ask me first, one without it needs the code.
+  assert.throws(() => runCommand(h.store, { action: "createAgent", tabId: h.tab.id, name: "Plain", kind: "claude-code", model: "haiku", permission: "edit" }), /needs the code/);
+  const plain = runCommand(h.store, { action: "createAgent", tabId: h.tab.id, name: "Plain", kind: "claude-code", model: "haiku", permission: "edit" }, { freshCode: true });
+  assert.equal((plain.agent as { askFirst: boolean }).askFirst, false);
 });
 
 test("WebFetch and WebSearch ask like any network access: per host, under the sandbox's host rules and Always for this project", async (t) => {

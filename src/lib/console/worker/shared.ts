@@ -2,7 +2,8 @@ import type { AgentModel } from "../agents.ts";
 import type { TurnEvents } from "../events.ts";
 import type { AgentSession } from "../session.ts";
 import { TEAM_NOTE } from "../team.ts";
-import type { ConsoleAgent, TurnStatus, TurnUsage } from "../types.ts";
+import type { RunningUsage } from "../spend.ts";
+import type { ConsoleAgent, TurnStatus } from "../types.ts";
 
 // What the Console worker's area modules share (worker.ts and worker/*.ts).
 // Nothing here imports the worker at runtime.
@@ -37,7 +38,8 @@ export interface ActiveTurn {
   /** Time spent waiting for the owner, excluded from the limits. */
   waitedMs: number;
   waitingSince: number | null;
-  usage: TurnUsage | null;
+  /** What its client has reported so far (spend.ts), kept with the turn. */
+  running: RunningUsage;
   /** The agent's latest whole message: its summary in the commit, and the
    * answer to asks it did not answer with team_reply. */
   lastText: string | null;
@@ -76,6 +78,8 @@ export interface Credential {
   credentials: Record<string, string>;
   print: string;
   login: string;
+  /** Which entry of the key file it came from (none for an account login). */
+  scope?: "project" | "global";
 }
 export interface OwnerAnswer {
   allow: boolean;

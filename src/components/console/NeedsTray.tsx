@@ -1,7 +1,7 @@
 import type { ConsoleCommand } from "@/lib/console/commands";
 import { useState } from "react";
 import type { needsView } from "@/lib/console/views";
-import { SPEND_PAUSE, type ConsoleProject } from "@/lib/console/types";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleProject } from "@/lib/console/types";
 import { needCount } from "@/lib/console/ui";
 import type { Run } from "./api";
 import Icon from "./Icon";
@@ -121,7 +121,9 @@ export default function NeedsTray({
           <div className={styles.dialogButtons}>
             {/* A tab's spend counts until a Reset spend, so its
                 pause offers that; Resume alone pauses it again at once. */}
-            {p.scope === "tab" && p.reason.startsWith(SPEND_PAUSE)
+            {p.scope === "tab" && p.reason.startsWith(CONSOLE_SPEND_PAUSE)
+              ? act("Reset Console spend", { action: "resetConsoleSpend" }, true, "Count the Console's spend from zero again (needs a fresh code)")
+              : p.scope === "tab" && p.reason.startsWith(SPEND_PAUSE)
               ? act("Reset spend", { action: "resetSpend", tabId: p.id! }, true, "Count this tab's spend from zero again (needs a fresh code)")
               : act("Resume", { action: "resume", scope: p.scope, id: p.id ?? undefined }, true)}
           </div>

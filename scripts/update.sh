@@ -108,12 +108,14 @@ fi
 
 # The worker imports across src/lib and src/config (the shared modules
 # included), so any change there may affect it.
-if changed src/lib src/config scripts/console-worker.ts scripts/console package.json package-lock.json; then
+if changed scripts/console/console-agent scripts/console/setup-agent-user.sh scripts/console/clients src/lib/console/clients.ts; then
+  # The worker refuses an older launcher; the setup script stops and
+  # restarts the worker itself.
+  print "The launcher or the agent programs changed. When no Console turn is running, run the setup script again from this folder (it stops and restarts the worker):"
+  print "  sudo zsh scripts/console/setup-agent-user.sh"
+elif changed src/lib src/config scripts/console-worker.ts scripts/console package.json package-lock.json; then
   print "The Console worker's code may have changed. When no Console turn is running, restart it:"
   print "  launchctl kickstart -k $DOMAIN/io.squadroom.console-worker"
-  if changed scripts/console/console-agent scripts/console/setup-agent-user.sh; then
-    print "The launcher or the agent user's setup may have changed too: see docs/setup.md (the sudo step)."
-  fi
 fi
 
 /bin/rm -f $FROM
