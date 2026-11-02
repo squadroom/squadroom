@@ -1,5 +1,5 @@
-import type { AgentModel } from "../agents.ts";
-import { chargeTurn, pricedAt, spendPauseReason, usd, type Charge } from "../spend.ts";
+import { agentModel, type AgentModel } from "../agents.ts";
+import { chargeTurn, consoleSpendPauseReason, pricedAt, spendPauseReason, usd, type Charge } from "../spend.ts";
 import { USAGE_PAUSE, type TurnRow } from "../store.ts";
 import type { ConsoleAgent, TurnUsage } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -11,14 +11,30 @@ import type { ConsoleWorker } from "../worker.ts";
 const HOLD_STALL = "Waiting on a hold that nobody is working to lift: ";
 
 export const holds = {
-  /** A tab's paid spend is at or over its limit. */
-  overSpend(this: ConsoleWorker, tabId: string): boolean {
+  /** A tab's paid spend is at or over its limit, or (for a paid turn, or
+   * after one) the Console-wide spend is at or over its own. */
+  overSpend(this: ConsoleWorker, tabId: string, paid = false): boolean {
     const tab = this.store.tab(tabId);
     if (!tab) return false;
     const limit = tab.spendLimitUsd ?? this.limits.tabSpendUsd;
     const spent = this.store.tabSpend(tabId);
-    if (spent < limit) return false;
-    this.pause(tabId, spendPauseReason(spent, limit));
+    if (spent >= limit) {
+      this.pause(tabId, spendPauseReason(spent, limit));
+      return true;
+    }
+    return paid && this.consoleOverSpend();
+  },
+  /** The Console-wide spend is at or over its limit: every open tab with an
+   * open API-key agent pauses (subscription work goes on). */
+  consoleOverSpend(this: ConsoleWorker): boolean {
+    const all = this.store.consoleSpend();
+    if (all.usd < all.limitUsd) return false;
+    const reason = consoleSpendPauseReason(all.usd, all.limitUsd);
+    for (const tab of this.store.allTabs()) {
+      if (tab.paused || tab.archivedAt !== null) continue;
+      const agents = this.store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed");
+      if (agents.some((a) => agentModel(a.kind, a.model)?.paid)) this.pause(tab.id, reason);
+    }
     return true;
   },
   /** After a paid turn: the tab pauses at its spend limit, and when the
@@ -28,7 +44,7 @@ export const holds = {
     // the charge), so it always needs a Resume; a spend limit it also
     // reached pauses the tab again at the next paid turn, until Reset spend.
     if (charge.basis === "allowance") return;
-    this.overSpend(agent.tabId);
+    this.overSpend(agent.tabId, true);
   },
   /** A paid turn's charge; an allowance carries the tab's hold, which the
    * store writes in the same transaction. */
@@ -47,6 +63,7 @@ export const holds = {
    * the pause never depends on a write after the charge. */
   spendHolds(this: ConsoleWorker): void {
     for (const tab of this.store.allTabs()) if (!tab.paused && tab.archivedAt === null) this.overSpend(tab.id);
+    this.consoleOverSpend();
   },
   /** A tab held for a usage failure whose other pause was lifted pauses
    * again with that reason. */

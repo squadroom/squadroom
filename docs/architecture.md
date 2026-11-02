@@ -119,7 +119,9 @@ code step once when mail is down; it does not confirm weighty commands.
 - **Someone on the network or the internet.** Only the configured GitHub
   account can sign in; every request needs a session; commands need the
   public `Origin`, a same-origin fetch and a custom header; sign-in steps
-  are rate limited per address and in total.
+  are rate limited per address, and the GitHub return and the code step in
+  total as well (starting a sign-in has no total limit, so nobody can stop
+  you starting one).
 - **Agents, including a prompt-injected one.** An agent cannot read your
   home folder, other projects or teammates' folders (beyond what the team
   tools give it), cannot write outside its clone, has no GitHub credential,
@@ -131,10 +133,14 @@ code step once when mail is down; it does not confirm weighty commands.
   The Console's e-mails never carry model-written text.
 - **A stolen session cookie.** Weighty actions need a fresh e-mailed code
   (and are refused when mail is off), so a cookie alone cannot raise
-  limits, change keys or grant permanent permissions.
+  limits, change keys or grant permanent permissions. New tabs start with
+  their own limit, but the Console-wide monthly limit caps them all, and
+  raising or resetting it is weighty. In a project that uses Ask me first,
+  making agents without it is weighty too.
 - **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
-  their spend limit; a turn whose usage cannot be trusted is charged its
-  full allowance and pauses its tab.
+  their spend limit, and every tab with an API-key agent pauses at the
+  Console-wide monthly limit; a turn whose usage cannot be trusted is
+  charged its full allowance and pauses its tab.
 
 **Not protected against (known limits):**
 

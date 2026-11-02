@@ -21,7 +21,10 @@ export const CODE_INTERVAL_MS = 60_000;
 export const CODE_MS = 10 * 60_000;
 export const EMERGENCY_MS = 10 * 60_000;
 const TOUCH_MS = 60_000;
-/** Requests per minute for each sign-in step, per client address and in total. */
+/** Requests per minute for each sign-in step, per client address, and in
+ * total for the steps that check something (`callback`, `code`). `start`
+ * only sets a state cookie and redirects, so it has no total limit: a total
+ * there would let anyone stop the owner starting a sign-in. */
 const PER_ADDRESS = 10;
 const IN_TOTAL = 30;
 
@@ -308,10 +311,12 @@ export class SignIn {
     return true;
   }
 
-  /** Rate limit for one sign-in step: per client address and in total. */
+  /** Rate limit for one sign-in step: per client address, and in total for
+   * every step but `start`. */
   allow(step: "start" | "callback" | "code", address: string): boolean {
     const now = this.now();
     const one = this.store.rateHit(`${step}:${address}`, PER_ADDRESS, 60_000, now);
+    if (step === "start") return one;
     const all = this.store.rateHit(`${step}:*`, IN_TOTAL, 60_000, now);
     return one && all;
   }

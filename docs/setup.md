@@ -187,8 +187,12 @@ How sign-in works with and without them:
 
 Weighty actions are: **Always** permission rules, deleting folders in
 Clean up, switching **Ask me first** off, the ACP network switch, turning
-image tools on, raising a spend limit or **Reset spend**, and every change
-on the Keys page. Without mail they are all refused, with a message saying
+image tools on, raising a spend limit (a tab's or the Console-wide one),
+**Reset spend** and **Reset Console spend**, and every change on the Keys
+page. In a project where any agent (open or closed) has Ask me first on,
+making an agent without it, a team or a tab from a template is weighty
+too, so closing a careful agent and making it again cannot drop Ask me
+first. Without mail they are all refused, with a message saying
 to configure mail, so a stolen Squadroom cookie alone can never do them;
 because adding keys is one of them, configure mail before step 8. Either
 way, protect your GitHub account with a passkey or two-factor
@@ -502,6 +506,7 @@ needs a fresh confirmation).
 | Running turns per login (one token, API key or ChatGPT account) | 3 | Others wait; a rate limit pauses that login's queue only |
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
+| Paid API spend across every tab in one UTC month (API-key models and image calls), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
 | A paid turn whose usage was not reported or does not add up | — | Charged its full allowance; the tab pauses until you Resume that pause |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |

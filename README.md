@@ -122,6 +122,11 @@ with its turn.
   it, the tab pauses until you press **Reset spend**. Subscription logins
   (a Claude plan, a ChatGPT login) aren't counted. There are no separate
   project or per-agent spend limits.
+- **Spend, across Squadroom.** API-key spend across every tab is limited
+  to $25 per calendar month (UTC) unless you change it on the Overview,
+  anywhere from $0.01 to $10,000. When it is reached, every tab with an
+  API-key agent pauses until you raise the limit or press **Reset Console
+  spend**. Making new tabs doesn't get round it.
 - **Spend, per key.** Each paid API key needs a monthly cap that you set on
   the provider's own site first and then enter in Squadroom. No agent gets
   the key until you do. The provider's cap is the real ceiling.
@@ -235,7 +240,8 @@ The longer version, with the threat model, is in
 - **One owner.** Only the configured GitHub account can sign in. With mail
   configured, sign-in also needs an 8-digit code e-mailed to you, and
   weighty actions (permanent permission rules, deleting folders, raising
-  spend limits, every key change) need a code from the last 8 hours.
+  or resetting spend limits, every key change, and agents without Ask me
+  first in a project that uses it) need a code from the last 8 hours.
   Without mail, GitHub is the only step and those actions are refused until
   mail is configured.
 - **Requests from the Mac itself aren't trusted either.** The web server

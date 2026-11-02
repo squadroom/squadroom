@@ -640,8 +640,9 @@ export class ConsoleWorker {
       // A process being ended, folders being made: the driver says wait.
       if (driver.waiting(agent)) continue;
       // A tab at its spend limit runs no further turn of any model, Resume
-      // or not, until the owner resets its spend.
-      if (this.overSpend(agent.tabId)) continue;
+      // or not, until the owner resets its spend; at the Console-wide
+      // limit, no further API-key turn anywhere.
+      if (this.overSpend(agent.tabId, !!model.paid)) continue;
       let credential: Credential;
       try {
         credential = this.credentialFor(agent, model);
