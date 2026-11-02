@@ -1,22 +1,10 @@
 "use client";
 import { useState } from "react";
 import styles from "./SignInForm.module.css";
-import { reload } from "@/components/shared/FreshCode";
+import { reload, signInAction } from "@/components/shared/FreshCode";
 
 // The sign-in steps. The page never asks for an e-mail address: a code goes
 // to the configured address only. Without mail, GitHub is the only step.
-
-async function auth(body: Record<string, unknown>) {
-  const response = await fetch("/api/auth", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-workspace-request": "1" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "Sign-in failed. Start again.");
-  return data;
-}
 
 export default function SignInForm({
   step,
@@ -38,7 +26,7 @@ export default function SignInForm({
     setError(null);
     setNotice("");
     try {
-      await auth(body);
+      await signInAction(body, "Sign-in failed. Start again.");
       done();
     } catch (e) {
       setError((e as Error).message);

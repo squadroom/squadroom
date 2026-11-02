@@ -5,6 +5,7 @@ import { NAME_MAX, PERMISSION_LABELS } from "@/lib/console/types";
 import { firstModel, roleKind } from "@/lib/console/ui";
 import AiPicker from "./AiPicker";
 import Dialog from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 /** The coding team's setup screen (roles): the Orchestrator's AI, the
@@ -15,6 +16,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
   const { codexOff, takenNames, roles, onClose, onCreate } = props;
   const [setup, setSetup] = useState<TeamSetup>(() => defaultTeamSetup(!!codexOff, takenNames, roles));
   const checked = checkTeamSetup(setup, { takenNames, codexOff: !!codexOff, roles });
+  const { busy, guard } = useBusy();
   const member = (i: number, change: Partial<TeamMemberSetup>) =>
     setSetup((s) => ({ ...s, members: s.members.map((m, j) => (j === i ? { ...m, ...change } : m)) }));
   const memberRoles = roles.filter((r) => r.id !== "orchestrator");
@@ -127,7 +129,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
       {checked.ok && checked.warnings.map((w) => <p key={w} className={styles.hint}>{w}</p>)}
       <div className={styles.dialogButtons}>
         <button onClick={onClose}>Cancel</button>
-        <button className={styles.primary} disabled={!checked.ok} onClick={() => void onCreate(setup)}>
+        <button className={styles.primary} disabled={busy || !checked.ok} onClick={() => guard(() => onCreate(setup))}>
           Create team
         </button>
       </div>

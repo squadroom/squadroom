@@ -1,5 +1,6 @@
 import type { templatesView } from "@/lib/console/views";
 import { useEffect, useRef, useState } from "react";
+import { settingsEscape } from "@/lib/console/focus";
 import { APPEARANCES, SETTINGS_SECTIONS, settingsHash, templateSummary, type Appearance, type SettingsSection } from "@/lib/console/ui";
 import type { Run } from "./api";
 import { Panel } from "./Dialog";
@@ -15,6 +16,9 @@ import styles from "./console.module.css";
 
 type Templates = ReturnType<typeof templatesView>;
 
+/** A field typed into (a checkbox or radio button applies at once). */
+const TEXT_FIELD = 'input:not([type="checkbox"]):not([type="radio"]), textarea';
+
 export default function SettingsView({
   section,
   onClose,
@@ -29,16 +33,35 @@ export default function SettingsView({
   // Focus moves in on open, so Escape reaches the page at once, and again
   // when a section opens on the phone, which hides the link that had it.
   const page = useRef<HTMLDivElement>(null);
+  // Escape never throws away what was typed: in a field
+  // it only leaves the field; elsewhere it asks first when something was
+  // typed since the last button press (Save, Cancel, Add…).
+  const typed = useRef(false);
   useEffect(() => {
     const el = document.activeElement as HTMLElement | null;
     if (page.current && (!page.current.contains(el) || !el?.offsetParent)) page.current.focus({ preventScroll: true });
+    typed.current = false;
   }, [section]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    const inField = (e.target as HTMLElement).matches(TEXT_FIELD);
+    const what = settingsEscape(inField, typed.current);
+    if (what === "leave field") return page.current?.focus({ preventScroll: true });
+    if (what === "ask" && !window.confirm("Close Settings? What you typed and did not save is lost.")) return;
+    onClose();
+  };
   return (
     <div
       ref={page}
       tabIndex={-1}
       className={`${styles.settingsPage} ${open ? styles.settingsOpen : ""}`}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      onKeyDown={onKeyDown}
+      onInput={(e) => {
+        if ((e.target as HTMLElement).matches(TEXT_FIELD)) typed.current = true;
+      }}
+      onClickCapture={(e) => {
+        if ((e.target as HTMLElement).closest("button")) typed.current = false;
+      }}
     >
       <header className={styles.settingsHeader}>
         {open && (

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
 import Icon from "./Icon";
+import { useDialogFocus } from "./useDialogFocus";
 import styles from "./console.module.css";
 
 /** A Settings section's screen: shown in place, under the page's own
@@ -13,32 +13,13 @@ export function Panel({ title, children }: { title: string; children: React.Reac
 }
 
 /** The Console's dialog: a titled box over the page, closed by its ✕, by
- * Escape or by a click outside it. Focus moves into it on open and
- * back to where it was on close (a dialog under it, or the opener). */
+ * Escape or by a click outside it. Focus moves into it on open,
+ * stays inside it, and goes back to where it was on close (a dialog under
+ * it, or the opener). */
 export default function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  // Read while rendering, before an input inside takes focus with autoFocus.
-  const [before] = useState(() => (typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null)));
-  useEffect(() => {
-    if (box.current && !box.current.contains(document.activeElement)) box.current.focus({ preventScroll: true });
-    return () => {
-      if (before?.isConnected) before.focus({ preventScroll: true });
-    };
-  }, [before]);
+  const { box, onKeyDown } = useDialogFocus(onClose);
   return (
-    <div
-      className={styles.overlay}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-      onClick={onClose}
-      onKeyDown={(e) => {
-        // Only the innermost dialog closes: a dialog opened from another sits inside it.
-        if (e.key !== "Escape") return;
-        e.stopPropagation();
-        onClose();
-      }}
-    >
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label={title} onClick={onClose} onKeyDown={onKeyDown}>
       <div ref={box} tabIndex={-1} className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <header className={styles.dialogHeader}>
           <h2>{title}</h2>

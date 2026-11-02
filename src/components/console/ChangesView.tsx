@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { changesView } from "@/lib/console/views";
+import { nextPolled, type Polled } from "@/lib/console/polled";
 import { approvalLine } from "@/lib/console/ui";
 import { api, usePolled, type Run } from "./api";
 import Dialog from "./Dialog";
@@ -60,12 +61,18 @@ function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Ap
  * produced as the agent user with Git's hooks off. An editing agent in a
  * GitHub project also gets Push branch and Open pull request. */
 export default function ChangesView({ agentId, onClose, run, onOpenFile }: { agentId: string; onClose: () => void; run: Run; onOpenFile: (path: string) => void }) {
-  const [changes, setChanges] = useState<NonNullable<ReturnType<typeof changesView>> | null>(null);
+  const [polled, setPolled] = useState<Polled<NonNullable<ReturnType<typeof changesView>>> | null>(null);
+  const changes = polled?.value ?? null;
   const [failed, setFailed] = useState<string | null>(null);
+  // A later answer clears an earlier error; an unchanged one is not drawn
+  // again.
   const load = useCallback(
     () =>
       void api(undefined, `?changes=${encodeURIComponent(agentId)}`)
-        .then(setChanges)
+        .then((data) => {
+          setFailed(null);
+          setPolled((last) => nextPolled(last, data));
+        })
         .catch((e: Error) => setFailed(e.message)),
     [agentId],
   );

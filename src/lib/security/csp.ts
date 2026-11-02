@@ -2,7 +2,7 @@
 // own scripts, styles, fonts and images, show inline images (the file
 // panel's `data:` images and downloads), and call its own origin; nothing
 // else, and no page may frame it. An agent's Markdown is rendered without raw HTML and its images are
-// placeholders unless they are the Console's own (markdown-image.ts), so
+// placeholders unless they are inline (markdown-image.ts), so
 // the browser never calls out on an agent's behalf. No referrer leaves with
 // any link an agent wrote.
 //

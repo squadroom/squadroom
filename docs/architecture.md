@@ -189,8 +189,9 @@ code step once when mail is down; it does not confirm weighty commands.
   and gets only the one credential its model needs. Its requests to the web
   server from the same Mac are refused like anyone's: loopback is never
   trusted. Its Markdown is rendered without raw HTML and its images are
-  placeholders unless they are the Console's own, under a strict
-  Content-Security-Policy, so its output cannot make your browser call out.
+  placeholders unless they are inline (`data:image/…`), under a strict
+  Content-Security-Policy, so its output cannot make your browser call out
+  or call one of Squadroom's own routes with your cookies.
   The Console's e-mails never carry model-written text.
 - **A stolen session cookie.** Weighty actions need a fresh e-mailed code
   (and are refused when mail is off), so a cookie alone cannot raise
@@ -225,6 +226,30 @@ code step once when mail is down; it does not confirm weighty commands.
   multi-tenant sandbox.
 - **Without mail**, GitHub is the only sign-in factor (weighty actions
   are then off).
+
+## The page
+
+- **Composers outlive their windows.** Each agent window's unsent text,
+  the queued message being edited, its attached files and whether a send
+  is on its way live in one page-level store keyed by agent id
+  (`src/lib/console/composer.ts`, used by `useComposer`). Maximizing
+  another window or switching tab or project unmounts the window but loses
+  nothing, and the page renews held uploads every 10 minutes. After a send
+  the box is cleared only if it still holds what was sent.
+- **Streaming replies stay cheap.** The reply still streaming is cut into
+  pieces at blank lines outside code fences
+  (`src/lib/shared/markdown-stream.ts`); finished pieces render once, the
+  growing one is re-rendered without highlighting, and the whole reply is
+  rendered once when the turn ends. On a 53 KB reply this took the render
+  work from about 9.5 s to 0.65 s, and the slowest update from 99 ms to 8 ms.
+- **One at a time.** Create buttons and the fresh-code dialog go through
+  `oneAtATime` (`src/lib/console/busy.ts`): a double click creates one
+  thing, and commands that need a code at the same time share one dialog.
+- **Keyboard.** Dialogs and the phone's drawer keep Tab inside them, close
+  on Escape and give focus back on close (`useDialogFocus`); the file panel
+  takes focus and gives it back. On Settings, Escape in a text field only
+  leaves the field, and Escape elsewhere asks first if something was typed
+  since the last button press (`src/lib/console/focus.ts`).
 
 ## Where the code is
 

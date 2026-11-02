@@ -1,5 +1,6 @@
 /* Minimal styling for model output rendered from markdown. */
-.markdown > * + * {
+.markdown > * + *,
+.markdown + .markdown {
   margin-top: 0.75em;
 }
 .markdown {
