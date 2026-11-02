@@ -36,7 +36,17 @@ browser ──https──▶ TLS proxy (e.g. Tailscale Serve) ──▶ web serv
   as `agent` (one `sudoers` rule). It starts a program in a given folder
   with only the listed credentials (`spawn --keep`), optionally inside a
   macOS sandbox profile (`spawn --sandbox`), and can end every `agent`
-  process (`sweep`).
+  process (`sweep`). It carries a version number (`version`); the worker
+  refuses to start with any launcher but its own version
+  (`LAUNCHER_VERSION` in `src/lib/console/launcher.ts`), so raise both
+  when you change the launcher.
+- **The agent clients** install from committed lockfiles in
+  `scripts/console/clients/<name>`, one per client, with `npm ci` run as
+  `agent` (never root); root then copies the result into
+  `/opt/console-clients`, read-only. A test keeps each lockfile equal to
+  its pin in `src/lib/console/clients.ts`. To change a version, edit both:
+  the pin, and the client's `package.json`, then run
+  `npm install --package-lock-only --ignore-scripts` in its folder.
 
 ## The store
 

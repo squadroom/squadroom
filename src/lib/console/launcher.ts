@@ -20,6 +20,9 @@ export interface LauncherConfig {
 /** Where the setup script installs the launcher by default
  * (`CONSOLE_LAUNCHER` moves it: src/lib/console/config.ts). */
 export const SYSTEM_LAUNCHER_PATH = "/usr/local/libexec/console-agent";
+/** The launcher version this worker needs: `readonly VERSION=` in
+ * scripts/console/console-agent (a test keeps the two equal). */
+export const LAUNCHER_VERSION = 1;
 const BASE_ENV = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8" };
 
 /** The environment sudo starts with: a fixed PATH and only the credentials
@@ -162,13 +165,16 @@ export class Launcher {
     const result = await run(this.config, ["sweep"]);
     if (result.code !== 0) throw new LauncherError(`The agent sweep failed: ${result.stderr || `exit ${result.code}`}`);
   }
-  /** The installed launcher understands `spawn --keep`. An older one
-   * reads `--keep` as the working folder and refuses. */
+  /** The installed launcher is this checkout's (its `version` action prints
+   * LAUNCHER_VERSION; one from before versions has no such action) and
+   * starts a program as `agent`. */
   async check(agentHome: string) {
-    const result = await run(this.config, ["spawn", "--keep", "", agentHome, "/usr/bin/true"], 15_000);
-    if (result.code !== 0)
+    const version = await run(this.config, ["version"], 15_000, 100);
+    if (version.code !== 0 || version.stdout.trim() !== String(LAUNCHER_VERSION))
       throw new LauncherError(
-        `The installed launcher is older than this Console (it needs spawn --keep). Update it with: sudo install -o root -g wheel -m 755 scripts/console/console-agent ${this.config.command.at(-1)}  (${result.stderr || `exit ${result.code}`})`,
+        `The installed launcher is not the version this Console needs (${LAUNCHER_VERSION}; it reported ${version.code === 0 ? version.stdout.trim() || "nothing" : version.stderr || `exit ${version.code}`}). Stop the worker and run the setup script again: sudo zsh scripts/console/setup-agent-user.sh`,
       );
+    const result = await run(this.config, ["spawn", "--keep", "", agentHome, "/usr/bin/true"], 15_000);
+    if (result.code !== 0) throw new LauncherError(`The launcher could not start a program as agent: ${result.stderr || `exit ${result.code}`}`);
   }
 }

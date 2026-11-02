@@ -290,6 +290,10 @@ test("parallel requests (conformance, current behaviour): one answered parallel 
   const a = h.agent("A");
   const b = h.agent("B");
   await h.ready(a.id, b.id);
+  // A first turn each, so a cold start (slow on a loaded machine) does not
+  // count against this test's short deadline.
+  await h.ended(h.send(a.id, "hello"));
+  await h.ended(h.send(b.id, "hello"));
   const turn = h.send(a.id, "parallelwait");
   await h.until(() => h.store.openRequests().filter((r) => r.agentId === a.id).length === 2, "two simultaneous permissions");
   // The waiting turn holds no slot: the other agent runs under cap 1.

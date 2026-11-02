@@ -30,9 +30,13 @@ You need:
 - macOS with **about 10 GB free**, which is plenty
   (`df -h /System/Volumes/Data`); the setup script warns you with less.
   The worker makes no new agent copy when free disk would fall below 5 GB.
-- **Node.js** at the version in `.nvmrc` (24), from Homebrew
-  (`brew install node@24`) or the official installer. The setup script looks
-  for `node` in `/opt/homebrew/bin` or `/usr/local/bin`.
+- **Node.js** 24 or newer (the version in `.nvmrc`), from Homebrew
+  (`brew install node@24`) or the official installer. The setup script
+  uses the first Node 24 it finds in `/opt/homebrew/bin`, `/usr/local/bin`,
+  Homebrew's `node@24` folder (`brew install node@24` doesn't link it into
+  `bin`) or on your own `PATH`, and puts that folder on the agents' `PATH`.
+  The `agent` user must be able to run it, so a Node inside your home folder
+  (nvm, for example) won't do.
 - **Git**, and `sudo` rights on the Mac.
 - **A [Resend](https://resend.com) account** with a sender on a domain you
   verified there, for e-mailed codes (step 6). Without it Squadroom signs
@@ -59,16 +63,22 @@ Agents never run as you. They run as a separate, hidden macOS user named
 sudo zsh scripts/console/setup-agent-user.sh
 ```
 
-It asks for your password once and is safe to run again. It:
+It asks for your password once and is safe to run again, with the worker
+stopped: while any `agent` program is running it stops and says so.
+`--force` stops them all instead, ending their turns. It:
 
 1. **Creates the `agent` user and group** (id 600). The account is hidden
-   from the login window, has no login shell and a random password nobody
-   keeps, and is in none of `admin`, `staff` or `wheel`.
+   from the login window, has no login shell and no password at all (it
+   can only be used through `sudo`), and is in none of `admin`, `staff` or
+   `wheel`.
 2. **Adds you to the `agent` group**, so you can read the agents' work.
 3. **Installs the pinned agent programs** (Claude Code, Codex, and the ACP
-   clients) in `/opt/console-clients`, owned by root and read-only for
-   agents. Your own `claude` or `codex`, if you have them, are untouched.
-   The versions come from `src/lib/console/clients.ts`.
+   clients) in `/opt/console-clients`, owned by root and read-only. Each
+   one installs with `npm ci` from its own lockfile in
+   `scripts/console/clients/`, so every dependency is the one in the
+   repository, and npm and the packages' install scripts run as `agent`,
+   never as root. Your own `claude` or `codex`, if you have them, are
+   untouched. The versions come from `src/lib/console/clients.ts`.
 4. **Installs the launcher**, `/usr/local/libexec/console-agent`
    (root-owned), and one `sudoers` rule: your account may run only that
    launcher as `agent`, and only the named credentials cross.
@@ -83,12 +93,18 @@ move one, pass the same name to the script
 (`sudo CONSOLE_SHARED=/path zsh scripts/console/setup-agent-user.sh`), which
 bakes it into the launcher, and set it in the worker's environment too.
 
-When `scripts/console/console-agent` changes in an update, install the
-launcher again (the worker refuses to start with an older one):
+When an update changes the launcher or the pinned agent programs,
+`npm run update` says so. Stop the worker, run the setup script again,
+and start the worker:
 
 ```bash
-sudo install -o root -g wheel -m 755 scripts/console/console-agent /usr/local/libexec/console-agent
+launchctl kill TERM gui/$(id -u)/io.squadroom.console-worker
+sudo zsh scripts/console/setup-agent-user.sh
+launchctl kickstart gui/$(id -u)/io.squadroom.console-worker
 ```
+
+The launcher has a version number, and the worker refuses to start with
+any launcher but its own version.
 
 ## 4. Sign the agent account in
 
@@ -381,9 +397,11 @@ launchctl kickstart -k gui/$(id -u)/io.squadroom.console-worker
 ```
 
 Run it when no turn is running (the page says how many a restart would
-interrupt; interrupted turns wait for you in Needs you). If `npm ci` or the
-build fails, the web server stays stopped and the script prints how to go
-back to the previous commit.
+interrupt; interrupted turns wait for you in Needs you). When the update
+changed the launcher or the pinned agent programs, it prints the commands
+at the end of step 3 instead: stop the worker, run the setup script, start
+the worker. If `npm ci` or the build fails, the web server stays stopped
+and the script prints how to go back to the previous commit.
 
 ## 11. Notifications, backups, dead-man's switch, image tools
 
@@ -437,9 +455,8 @@ macOS sandbox profile. All of them, and the login or key each one uses:
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Code edit or Code analysis |
 | OpenCode | the chosen model's key, each paid and capped (see below) | Code edit or Code analysis, with the project's network on |
 
-All six are listed under **Add**, **Agent** and in the team setup (Gemini
-CLI, Kimi Code and OpenCode since pull request
-[#9](https://github.com/squadroom/squadroom/pull/9)), at either access level:
+All six are listed under **Add**, **Agent** and in the team setup, at
+either access level:
 
 - **Code edit**: the agent changes files in its own folder, and Squadroom
   commits them after each turn. The sandbox lets it write only in its own
@@ -487,8 +504,8 @@ Kimi Code is logged in as `agent` with a device code:
 sudo -u agent /usr/local/libexec/console-agent spawn /Users/agent /opt/console-clients/bin/kimi login
 ```
 
-Restart the worker after adding a kind's key, then **Check connection** on
-its panel. An ACP agent has no network except the Console's own team tools,
+No restart is needed after adding a kind's key (step 8): press **Check
+connection** on its panel. An ACP agent has no network except the Console's own team tools,
 unless you switch network on for the whole project (Project settings,
 needs a fresh confirmation).
 
@@ -547,8 +564,8 @@ agent work unrecorded.
 
 - **"Squadroom is not configured correctly"**: a sign-in setting in
   `.env.local` is missing or malformed. The web server's log says which.
-- **"The installed launcher is older than this Console"**: install the
-  launcher again (step 3).
+- **"The installed launcher is not the version this Console needs"**: stop
+  the worker and run the setup script again (end of step 3).
 - **"The shared folder … is not in the agent user's group"**: run
   `sudo zsh scripts/console/setup-agent-user.sh` again.
 - **"Another Console worker is running"**: one already runs, or one just

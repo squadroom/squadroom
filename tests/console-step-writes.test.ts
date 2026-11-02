@@ -32,7 +32,7 @@ const committed = (folder: string, path: string) => {
 };
 
 test("ACP on an API key in a tab with steps: the step's file is written, committed and charged; another file is refused", async (t) => {
-  const h = await stepped(t, { acp: {}, acpCallMs: 1_000 });
+  const h = await stepped(t, { acp: {} });
   // Made by the owner's command: neither Edit nor a paid model is refused.
   const editor = h.agent("Writer", "edit", "openai/gpt-5.6-luna", "opencode");
   await h.ready(editor.id);

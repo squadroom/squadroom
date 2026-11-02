@@ -35,7 +35,7 @@ function keys(path: string, extra: Record<string, unknown> = {}) {
   );
 }
 async function acp(t: Parameters<typeof harness>[0], setup: Record<string, unknown> = {}, limits: Parameters<typeof harness>[1] = {}) {
-  const h = await harness(t, limits, false, { acp: setup, acpCallMs: 1_000 });
+  const h = await harness(t, limits, false, { acp: setup });
   keys(h.keysFile);
   await h.worker.start();
   return h;
@@ -253,7 +253,7 @@ test("usage: repeated context updates are not usage; a late update is not the ne
   assert.ok(row.costUsd! > chargeTurn(LUNA, HELLO_USAGE)!.usd * 100);
   assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: /);
   const waiting = h.send(scout.id, "badusage");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(waiting)!.status, "queued");
   // Resume lets it run; usage that does not add up is charged the same way.
   runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
@@ -318,7 +318,7 @@ test("the owner's spend limit: lowering needs no code; the tab pauses at it; a r
   runCommand(h.store, { action: "setSpendLimit", tabId: h.tab.id, limitUsd: limit * 100 }, { mayRaiseSpend: true });
   assert.equal(h.store.tab(h.tab.id)!.paused, true);
   assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Spend limit raised to /);
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(waiting)!.status, "queued");
   runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
   await h.ended(waiting);
@@ -457,7 +457,7 @@ test("an unknown start: a prompt whose write failed with the program alive is co
       return child;
     }
   }
-  const h = await harness(t, {}, false, { acp: {}, acpCallMs: 1_000, launcher: (l) => new FlakyInput(l.config) });
+  const h = await harness(t, {}, false, { acp: {}, launcher: (l) => new FlakyInput(l.config) });
   keys(h.keysFile);
   await h.worker.start();
   const scout = h.acpAgent();
@@ -556,11 +556,11 @@ test("the project's network switch: behind a fresh code, waits for running ACP t
   const hang = h.send(scout.id, "hang");
   await prompted(h, 1);
   runCommand(h.store, { action: "setAcpNetwork", projectId: h.project.id, on: true });
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   // Still off while the ACP turn runs; a queued one waits.
   assert.deepEqual([h.store.project(h.project.id)!.acpNetwork, h.store.project(h.project.id)!.acpNetworkPending], [false, true]);
   const queued = h.send(scout.id, "hello");
-  await new Promise((r) => setTimeout(r, 200));
+  await h.passes();
   assert.equal(h.store.turn(queued)!.status, "queued");
   // Stop now: the running turn is stopped, the session restarts, then on.
   runCommand(h.store, { action: "setAcpNetwork", projectId: h.project.id, on: true, mode: "now" });
@@ -579,7 +579,7 @@ test("a new clone in the project waits for its ACP turns; the session then resta
   const hang = h.send(scout.id, "hang");
   await prompted(h, 1);
   const mate = h.agent("Mate");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.agent(mate.id)!.state, "creating");
   runCommand(h.store, { action: "stop", agentId: scout.id });
   await h.ended(hang);
@@ -761,7 +761,7 @@ test("a paid prompt is recorded as prompted before it is written, so no crash af
       return child;
     }
   }
-  const h = await harness(t, {}, false, { acp: {}, acpCallMs: 1_000, launcher: (l) => new Swallow(l.config) });
+  const h = await harness(t, {}, false, { acp: {}, launcher: (l) => new Swallow(l.config) });
   keys(h.keysFile);
   await h.worker.start();
   const scout = h.acpAgent();
@@ -778,7 +778,9 @@ test("an update read in the same chunk as the turn's answer is not the turn's", 
   const turn = h.send(scout.id, "sametick");
   await h.ended(turn);
   assert.equal(h.store.turn(turn)!.status, "done");
-  await new Promise((r) => setTimeout(r, 100));
+  // A later turn's answer comes after the stray update on the same
+  // stream: once that turn has ended, the update has long been read.
+  await h.ended(h.send(scout.id, "hello"));
   assert.ok(!said(h, scout.id).includes("AFTER THE ANSWER"));
 });
 
@@ -851,7 +853,7 @@ test("a new conversation whose instructed first prompt never reached the agent i
       return child;
     }
   }
-  const h = await harness(t, {}, false, { acp: {}, acpCallMs: 1_000, launcher: (l) => new FailFirstPrompt(l.config) });
+  const h = await harness(t, {}, false, { acp: {}, launcher: (l) => new FailFirstPrompt(l.config) });
   keys(h.keysFile);
   await h.worker.start();
   const scout = h.acpAgent();
@@ -883,10 +885,10 @@ test("a tab over its spend limit pauses from its stored costs, for every model: 
   const queued = h.send(lead.id, "hello");
   await h.worker.start();
   await h.until(() => (h.store.tab(h.tab.id)!.pauseReason ?? "").startsWith("Spend limit: "), "spend pause");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(queued)!.status, "queued");
   runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(queued)!.status, "queued");
   runCommand(h.store, { action: "resetSpend", tabId: h.tab.id });
   await h.ended(queued);

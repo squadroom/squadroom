@@ -36,7 +36,13 @@ test("the server ending by itself never exits 0, so its LaunchAgent restarts it"
   assert.equal(serverExitCode(3), 3);
 });
 
-test("the LaunchAgent and update scripts parse (zsh -n)", { skip: !existsSync("/bin/zsh") }, () => {
-  for (const script of ["scripts/install-web-launch-agent.sh", "scripts/update.sh", "scripts/console/install-launch-agent.sh"])
+test("the LaunchAgent, update, setup and launcher scripts parse (zsh -n)", { skip: !existsSync("/bin/zsh") }, () => {
+  for (const script of [
+    "scripts/install-web-launch-agent.sh",
+    "scripts/update.sh",
+    "scripts/console/install-launch-agent.sh",
+    "scripts/console/setup-agent-user.sh",
+    "scripts/console/console-agent",
+  ])
     execFileSync("/bin/zsh", ["-n", script]);
 });

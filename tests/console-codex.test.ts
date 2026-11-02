@@ -133,7 +133,7 @@ test("a new agent folder: made only between Codex turns, and the thread is resum
   await h.started(hang);
   await h.until(() => h.codexCalls().some((c) => c.method === "turn/start"), "turn started");
   const late = h.agent("Late");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.agent(late.id)!.state, "creating", "no folder while a Codex turn runs");
   runCommand(h.store, { action: "stop", agentId: coder.id });
   await h.ended(hang);
@@ -174,6 +174,9 @@ test("network and questions wait for the owner; Always is remembered for that ag
   await h.worker.start();
   const coder = h.codexAgent();
   await h.ready(coder.id);
+  // A first turn starts the shared server, so its cold start (slow on a
+  // loaded machine) does not count against this test's short deadline.
+  await h.ended(h.send(coder.id, "hello"));
   const net = h.send(coder.id, "net");
   await h.until(() => h.store.turn(net)!.status === "waiting_for_owner", "waiting");
   // Time waiting for the owner does not count toward the deadline.

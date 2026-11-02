@@ -8,6 +8,7 @@
 #   sudo -u agent /usr/local/libexec/console-agent git <repo> [git args…]   (git <new folder> init [--bare])
 #   sudo -u agent /usr/local/libexec/console-agent signal <TERM|KILL|INT> <pgid>
 #   sudo -u agent /usr/local/libexec/console-agent sweep
+#   sudo -u agent /usr/local/libexec/console-agent version
 #
 # sudo's env_reset already drops the owner's environment. The sudoers rule
 # keeps only the named credentials below, and `spawn` passes on only those
@@ -20,9 +21,17 @@
 set -eu
 umask 027
 
+# This launcher's version. The worker refuses to start with any other
+# (LAUNCHER_VERSION in src/lib/console/launcher.ts, kept equal by a test):
+# raise both whenever this file changes, so an update tells the owner to
+# run the setup script again.
+readonly VERSION=1
+# setup-agent-user.sh replaces these four lines with the host's paths
+# (NODE_BIN: the folder of the Node it installed the clients with).
 readonly AGENT_HOME=/Users/agent
 readonly SHARED=/opt/console-shared
 readonly CLIENTS=/opt/console-clients/bin
+readonly NODE_BIN=/opt/homebrew/bin
 # The only variables that may cross from the worker (also listed in sudoers).
 readonly CREDENTIALS=(CLAUDE_CODE_OAUTH_TOKEN CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY
   XAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY ZAI_API_KEY MOONSHOT_API_KEY OPENROUTER_API_KEY)
@@ -39,7 +48,7 @@ for name in $CREDENTIALS; do
 done
 for name in ${(k)parameters[(R)*export*]}; do unset $name 2>/dev/null || true; done
 export HOME=$AGENT_HOME USER=agent LOGNAME=agent LANG=en_US.UTF-8 \
-  PATH=$CLIENTS:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+  PATH=$CLIENTS:$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 # Every working folder lives under the agent's home.
 in_agent_home() {
@@ -259,6 +268,9 @@ case ${1-} in
     rc=$?
     (( rc == 1 )) && exit 0
     exit $rc
+    ;;
+  version)
+    print -r -- $VERSION
     ;;
   *)
     die "unknown action: ${1-}"

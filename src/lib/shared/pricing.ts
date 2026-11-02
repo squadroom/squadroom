@@ -55,11 +55,3 @@ export function costUsd(
 export function formatUsd(amount: number): string {
   return amount >= 0.01 ? `$${amount.toFixed(2)}` : `$${amount.toFixed(4)}`;
 }
-
-/** Conservative estimate for unreported usage; never a provider invoice. */
-export function reservedCostUsd(model: PricedModel, inputTokens: number, outputTokens: number): number {
-  const rates: TokenPrices[] = [model, ...(model.scheduledPrices ? [model.scheduledPrices.prices] : []), ...(model.offPeakPrices ? [model.offPeakPrices] : [])];
-  const inputRate = Math.max(...rates.flatMap((r) => [r.inputPerMtok, r.cachedInputPerMtok ?? 0, r.cacheWritePerMtok ?? 0, r.longCacheWritePerMtok ?? 0]));
-  const outputRate = Math.max(...rates.map((r) => r.outputPerMtok));
-  return (inputTokens * inputRate * (model.longContext?.inputMultiplier ?? 1) + outputTokens * outputRate * (model.longContext?.outputMultiplier ?? 1)) / 1_000_000;
-}

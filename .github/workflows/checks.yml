@@ -1,6 +1,7 @@
 # The four checks, on every pull request and on pushes to main. No secrets
-# and no deploy step. The tests are pure, so Linux runs them (macOS-only
-# sandbox tests skip themselves there).
+# and no deploy step. The tests are pure, so Linux runs them; the launcher
+# and sandbox tests need macOS (zsh, sandbox-exec) and skip themselves on
+# Linux, so the macos job runs them, and none may skip there.
 name: Checks
 
 on:
@@ -39,3 +40,28 @@ jobs:
           path: test-output.log
           if-no-files-found: ignore
       - run: npm run build
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: The shell scripts parse (zsh -n)
+        run: for script in scripts/console/console-agent scripts/console/*.sh scripts/*.sh; do zsh -n "$script"; done
+      - name: Launcher, sandbox and setup tests (none may skip)
+        shell: bash
+        run: |
+          npm run test:macos 2>&1 | tee test-macos.log
+          grep -qx 'ℹ skipped 0' test-macos.log || { echo "a macOS test skipped"; exit 1; }
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-macos-output
+          path: test-macos.log
+          if-no-files-found: ignore

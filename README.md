@@ -54,8 +54,8 @@ Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
 you add an agent, and you can change the prompt for that one agent.
 
 To make your own, open **Settings**, then **Roles**, then **New role**: a
-name, a one-line description, edit or look only, a suggested tool (Claude
-Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
+name, a one-line description, the access (Code edit or Code analysis), a
+suggested tool (Claude Code or Codex) and a prompt of up to 3,500 characters. You can also rewrite
 a built-in role's prompt and reset it later. A tab can be saved as a
 template with its agents, roles and routes, and optionally steps: an
 ordered list of stages, each with the files the agents may change during
@@ -73,8 +73,8 @@ with seven members.
 - **Squads.** The agents in a tab work as a squad. It can be one agent, a
   pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
   seven members, and you can add more agents by hand. Each agent has its own
-  name, model and thinking level, and either edits in its own folder or only
-  looks. You can mix tools in one squad.
+  name, model and thinking level, and works at Code edit or Code analysis.
+  You can mix tools in one squad.
 
 Up to six agent turns run at once across everything, and three per account
 or API key. Anything over that waits in a queue.
@@ -82,24 +82,25 @@ or API key. Anything over that waits in a queue.
 ## Agent tools
 
 You can pick any of these when you add an agent or set up a team, and you
-can mix them in one squad. Gemini CLI, Kimi Code and OpenCode become
-selectable once pull request
-[#9](https://github.com/squadroom/squadroom/pull/9) is merged.
+can mix them in one squad.
 
-- **Claude Code**, on your Claude subscription or an API key. It can edit
-  in its own folder or only look.
-- **Codex**, on your ChatGPT login. It can edit or only look.
-- **Grok Build**, with an xAI API key. It can only look for now.
-- **Gemini CLI**, with a Gemini API key. It can only look for now.
-- **Kimi Code**, on your Kimi Code membership. It can only look for now.
+- **Claude Code**, on your Claude subscription or an Anthropic API key.
+- **Codex**, on your ChatGPT login or an OpenAI API key.
+- **Grok Build**, with an xAI API key.
+- **Gemini CLI**, with a Gemini API key.
+- **Kimi Code**, on your Kimi Code membership.
 - **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
   Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash, Kimi K3, GLM-5.3,
-  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It can only look for
-  now, and it needs the project's network switch on: with network off it
-  can't start.
+  GLM-5.3-Flash, or Qwen 3.8 Max through OpenRouter. It needs the project's
+  network switch on: with network off it can't start.
 
-An agent that only looks can read the code, run commands you approve and
-message its teammates, but it can't change files.
+Every agent works at one of two access levels, which you pick when you add
+it:
+
+- **Code edit**: it changes files in its own folder, and Squadroom commits
+  them after each turn.
+- **Code analysis**: it can read the code, run commands you approve and
+  message its teammates, but it can't change files.
 
 OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
 real Mac on 2026-11-01: each answered, named its model and reported what it
@@ -163,9 +164,11 @@ The pictures use invented demo data; they follow your light or dark setting.
 ## Requirements
 
 - **A Mac** with about 10 GB of free disk.
-- **Node.js** at the version in [`.nvmrc`](.nvmrc) (24), installed from
-  Homebrew or the official installer (the setup script looks for it in
-  `/opt/homebrew/bin` or `/usr/local/bin`).
+- **Node.js** 24 or newer (the version in [`.nvmrc`](.nvmrc)), from
+  Homebrew (`brew install node@24`) or the official installer. The setup
+  script finds it in `/opt/homebrew/bin`, `/usr/local/bin`, Homebrew's
+  `node@24` folder or on your `PATH`, as long as the `agent` user can run
+  it (so not one inside your home folder, such as nvm's).
 - **`sudo`**, once, to create the `agent` user, install the pinned agent
   programs and the launcher.
 - **An https address for the Mac**, through a TLS proxy on the same machine
