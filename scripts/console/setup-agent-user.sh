@@ -275,11 +275,11 @@ done
 /bin/chmod -h go-w $CLIENTS $CLIENTS/bin
 # From /: the agent user cannot read the owner's folder this runs in, and
 # Bun and Node clients fail to start in a folder they cannot read.
-print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
-print "  $(cd / && sudo -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
+print "  $(cd / && sudo -H -u $AGENT $CLIENTS/bin/claude --version 2>&1 | head -1)"
+print "  $(cd / && sudo -H -u $AGENT $CLIENTS/bin/codex --version 2>&1 | head -1)"
 for line in $acp_clients; do
   name=${line##* }
-  print "  $name: $(cd / && sudo -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
+  print "  $name: $(cd / && sudo -H -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
 done
 
 step "Installing the launcher at $LAUNCHER"

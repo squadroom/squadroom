@@ -52,6 +52,10 @@ test("the setup script looks for Homebrew's keg-only node@24 and refuses to run 
   // The clients install as the agent user, from their lockfiles, never as root.
   assert.match(setup, /sudo -u \$AGENT \/usr\/bin\/env -i [^\n]*\\\n[^\n]*\\\n\s+\$NODE_BIN\/npm ci /);
   assert.doesNotMatch(setup, /npm install/);
+  // The version checks run with the agent's own home: the owner's is not
+  // writable to it, and opencode, gemini and codex fail on it.
+  assert.doesNotMatch(setup, /sudo -u \$AGENT \$CLIENTS/);
+  assert.match(setup, /sudo -H -u \$AGENT \$CLIENTS\/bin\/claude --version/);
 });
 
 test("the setup script defines every helper it calls", () => {
