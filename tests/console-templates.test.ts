@@ -59,6 +59,9 @@ test("the steps editor: rows to steps and back, and only safe relative patterns"
     [[{ name: "X", files: ["./a.md"] }], /not a path inside/],
     [[{ name: "X", files: ["docs//a.md"] }], /not a path inside/],
     [[{ name: "X", files: [".git/hooks/post-commit"] }], /not a path inside/],
+    // A comma separates files in the editor: "docs/a,b.md" would come back as two.
+    [[{ name: "X", files: ["docs/a,b.md"] }], /has a comma/],
+    [[{ name: "X", files: ["docs/{a,b}.md"] }], /has a comma/],
     [[{ name: "X", files: ["a\u0000.md"] }], /not a path inside/],
     [[{ name: "X", files: [7] }], /not a path inside/],
     [[{ name: "", files: ["a.md"] }], /give it a name/],
@@ -267,8 +270,12 @@ test("a step tab with two editing agents: each needs its commit approved after a
   for (const x of created.agents) store.setAgentFolder(epoch, x.id, `/work/${x.name}`);
   const sha = { [a.id]: "a".repeat(40), [b.id]: "b".repeat(40) };
   for (const x of [a, b]) store.setDiff(epoch, x.id, { base: "0".repeat(40), head: sha[x.id], stat: " a.md | 1 +", patch: "+", files: ["a.md"] });
-  // C changed nothing: nothing of it to approve.
+  // C changed nothing: nothing of it to approve. D has not run yet (no
+  // diff at all): nothing either.
   store.setDiff(epoch, c.id, { base: "0".repeat(40), head: "0".repeat(40), stat: "", patch: "", files: [] });
+  const d = (runCommand(store, { action: "createAgent", tabId, name: "D", kind: "claude-code", model: "haiku", permission: "edit" }).agent as { id: string }).id;
+  store.setAgentFolder(epoch, d, "/work/D");
+  assert.equal(store.diff(d), null);
   const next = () => runCommand(store, { action: "setStep", tabId, step: 1 });
   // Only the Orchestrator reads: no reviewer, so approvals alone move it on.
   assert.throws(next, /^Error: Approve the current commits of A and B first \(in Changes\)\.$/);
@@ -277,9 +284,20 @@ test("a step tab with two editing agents: each needs its commit approved after a
   runCommand(store, { action: "approve", agentId: b.id, sha: sha[b.id] });
   next();
   assert.equal(store.tabSteps(tabId)!.index, 1);
+  // A recorded commit without a diff yet still needs its approval.
+  runCommand(store, { action: "setStep", tabId, step: 0 });
+  const turn = store.queueTurn(d, "work");
+  store.startTurn(epoch, turn.id);
+  store.finishTurn(epoch, turn.id, "done", null, null, "ok");
+  store.addCommit(epoch, { turnId: turn.id, agentId: d, sha: "d".repeat(40), stat: "", patch: "" });
+  assert.throws(next, /^Error: Approve D's current commit first/);
+  store.setDiff(epoch, d, { base: "0".repeat(40), head: "d".repeat(40), stat: "", patch: "", files: [] });
+  runCommand(store, { action: "approve", agentId: d, sha: "d".repeat(40) });
+  next();
 
   // With a reviewer in the tab, each approval needs its review.
   runCommand(store, { action: "setStep", tabId, step: 0 });
+  runCommand(store, { action: "close", agentId: d });
   const critic = (runCommand(store, { action: "createAgent", tabId, name: "Critic", kind: "claude-code", model: "haiku", permission: "look" }).agent as { id: string }).id;
   store.setAgentFolder(epoch, critic, "/work/Critic");
   assert.throws(next, /^Error: Approve the current commits of A and B, each after a reviewer's review, first/);

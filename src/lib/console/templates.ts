@@ -81,9 +81,12 @@ export const rowsToSteps = (rows: StepRow[]): TemplateStep[] =>
   rows.map((r) => ({ name: r.name.trim(), files: r.files.split(",").map((f) => f.trim()).filter(Boolean) }));
 
 /** A file pattern inside the agent's folder: relative, no `.`, `..` or
- * empty parts, nothing in `.git`, no backslashes or control characters. */
+ * empty parts, nothing in `.git`, no backslashes or control characters.
+ * No commas either: the steps editor separates files with them, so a
+ * pattern with one would not come back the same. */
 const safePattern = (f: string) =>
   !!f &&
+  !f.includes(",") &&
   f.length <= FILE_MAX &&
   !/[\\\u0000-\u001f]/.test(f) &&
   !f.startsWith("/") &&
@@ -111,7 +114,9 @@ export function checkSteps(raw: unknown): { ok: true; steps: TemplateStep[] } | 
     const files = Array.isArray(step.files) ? step.files : [];
     const paths = [...new Set(files.map((f) => (typeof f === "string" ? f.trim() : "")))].filter((f) => f !== PARKING_LOT);
     if (!paths.length || paths.length > STEP_FILES_MAX) errors.push(`${who}: name from 1 to ${STEP_FILES_MAX} files it may change, besides ${PARKING_LOT}.`);
-    for (const f of paths) if (!safePattern(f)) errors.push(`${who}: "${f.slice(0, 40)}" is not a path inside the agent's folder.`);
+    for (const f of paths)
+      if (f.includes(",")) errors.push(`${who}: "${f.slice(0, 40)}" has a comma; commas separate files, so name each file on its own.`);
+      else if (!safePattern(f)) errors.push(`${who}: "${f.slice(0, 40)}" is not a path inside the agent's folder.`);
     return { name, files: [...paths, PARKING_LOT] };
   });
   return errors.length ? { ok: false, errors } : { ok: true, steps };

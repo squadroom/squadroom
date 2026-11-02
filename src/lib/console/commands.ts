@@ -359,7 +359,9 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
         const reviewed = open.some((a) => a.permission === "look" && !isOrchestrator(a));
         const unapproved = editors.filter((a) => {
           const diff = store.diff(a.id);
-          if (diff && diff.head === diff.base) return false;
+          // No diff yet: the agent has not run, so nothing of it to approve
+          // unless a commit of its own is recorded.
+          if (diff ? diff.head === diff.base : !store.commits(a.id).length) return false;
           const approval = store.approval(a.id);
           return !approval?.current || (reviewed && !approval.reviewerId);
         });
