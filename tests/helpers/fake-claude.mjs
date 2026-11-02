@@ -11,6 +11,7 @@
 //   deaf       waits and ignores interrupts (only a signal ends it)
 //   flood      prints a lot of tool output
 //   exit       exits mid-turn
+//   zeroed     reports its running usage totals zeroed
 //   limited    reports the account's usage limit
 //   noinit     answers without an init event
 //   stopapprove P  waits; on an interrupt asks to Write P, then stops
@@ -68,15 +69,25 @@ const send = (x) => process.stdout.write(JSON.stringify(x) + "\n");
 const keySource = process.env.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : "none";
 const init = (extra = {}) => send({ type: "system", subtype: "init", session_id: session, model, apiKeySource: keySource, ...extra });
 // On an API key, each model's usage too (the window's model and a small
-// Haiku request of the client's own).
-const modelUsage = process.env.ANTHROPIC_API_KEY
-  ? {
-      modelUsage: {
-        [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 1, cacheCreationInputTokens: 0, webSearchRequests: 0, contextWindow: 200000 },
-        ...(model.startsWith("claude-haiku") ? {} : { "claude-haiku-4-5-20251001": { inputTokens: 20, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0 } }),
-      },
-    }
-  : {};
+// Haiku request of the client's own), as Claude Code reports it: running
+// totals for the session, across its turns. A resumed session starts from
+// the totals its transcript saved (here a file per session in the folder).
+const TURN_USAGE = {
+  [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 1, cacheCreationInputTokens: 0, webSearchRequests: 0 },
+  ...(model.startsWith("claude-haiku") ? {} : { "claude-haiku-4-5-20251001": { inputTokens: 20, outputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0 } }),
+};
+const TOTALS = `usage-${session}.json`;
+const totals = arg("--resume") && fs.existsSync(TOTALS) ? JSON.parse(fs.readFileSync(TOTALS, "utf8")) : {};
+const modelUsage = () => {
+  if (!process.env.ANTHROPIC_API_KEY) return {};
+  for (const [name, u] of Object.entries(TURN_USAGE)) {
+    const sum = (totals[name] ??= {});
+    for (const [k, v] of Object.entries(u)) sum[k] = (sum[k] ?? 0) + v;
+    if (name === model) sum.contextWindow = 200000;
+  }
+  fs.writeFileSync(TOTALS, JSON.stringify(totals));
+  return { modelUsage: structuredClone(totals) };
+};
 const result = (text, extra = {}) =>
   send({
     type: "result",
@@ -87,7 +98,7 @@ const result = (text, extra = {}) =>
     num_turns: 1,
     duration_ms: 5,
     usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 1, cache_creation_input_tokens: 0 },
-    ...modelUsage,
+    ...modelUsage(),
     ...extra,
   });
 const say = (text) => {
@@ -409,6 +420,13 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
     return result("flooded");
   }
   if (word === "exit") process.exit(3);
+  if (word === "zeroed") {
+    // A result whose running totals came back zeroed (as a crash or
+    // startup-error result may carry them).
+    say("zeroed");
+    const zero = Object.fromEntries(Object.keys(totals).map((name) => [name, { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0 }]));
+    return result("zeroed", { modelUsage: zero });
+  }
   if (word === "limited") {
     send({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(Date.now() / 1000) + 3600 } });
     return result("", { subtype: "error_during_execution", is_error: true });

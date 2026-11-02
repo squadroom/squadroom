@@ -29,13 +29,36 @@ function profileKey(spec: SandboxSpec) {
 }
 
 /**
+ * A call to one of the Console's own team tools (its `console` MCP server),
+ * which Grok Build asks about like any tool: allowed as Claude Code's and
+ * Codex's calls to them are; the worker checks and limits each call itself. Only where the client, not the model, names
+ * the tool: Grok Build's own record of an MCP call (`variant: "UseTool"`,
+ * the model's arguments inside `tool_input`). A title, or a `tool_name`
+ * among another tool's arguments, can be written by the model (OpenCode
+ * titles a web search with its query), so neither counts; any other
+ * client's team tool call is decided like any other tool.
+ */
+function ownTeamTool(toolCall: Record<string, unknown>, client: string | undefined): boolean {
+  if (client !== "grok-build") return false;
+  const raw = toolCall.rawInput;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const { variant, tool_name: name } = raw as Record<string, unknown>;
+  const own = variant === "UseTool" && typeof name === "string" ? /^console__(team_[a-z_]+)$/.exec(name) : null;
+  return !!own && TEAM_TOOL_NAMES.has(own[1]);
+}
+
+/**
  * How an ACP agent's permission request is decided: reads and thinking are
  * allowed; edits only in its own folder, and never at Look only; commands
  * run in the sandbox (Look only: the owner decides); network fetches, and
  * anything else, go to the owner. Ask me first sends every one that is not
  * refused to the owner.
  */
-export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst"> & { stepFiles?: string[] | null }, check = realInside): Decision {
+export function decideAcp(
+  toolCall: Record<string, unknown>,
+  agent: Pick<ConsoleAgent, "folder" | "permission" | "askFirst"> & { kind?: string; stepFiles?: string[] | null },
+  check = realInside,
+): Decision {
   const kind = typeof toolCall.kind === "string" ? toolCall.kind : "other";
   const title = typeof toolCall.title === "string" ? toolCall.title : kind;
   const summary = `${title}${toolCall.rawInput === undefined ? "" : `: ${JSON.stringify(toolCall.rawInput)}`}`;
@@ -46,15 +69,7 @@ export function decideAcp(toolCall: Record<string, unknown>, agent: Pick<Console
   const paths = (Array.isArray(toolCall.locations) ? toolCall.locations : [])
     .map((l) => (l && typeof l === "object" ? (l as { path?: unknown }).path : undefined))
     .filter((p): p is string => typeof p === "string");
-  // The Console's own team tools (its `console` MCP server), which some
-  // clients ask about like any tool (Grok Build does): allowed as Claude
-  // Code's and Codex's calls to them are; the worker checks and limits each
-  // call itself. Only a known team tool name.
-  const raw = toolCall.rawInput && typeof toolCall.rawInput === "object" ? (toolCall.rawInput as Record<string, unknown>) : {};
-  for (const name of [title, raw.tool_name]) {
-    const own = typeof name === "string" ? /^(?:mcp__)?console__(team_[a-z_]+)$/.exec(name) : null;
-    if (own && TEAM_TOOL_NAMES.has(own[1])) return { behavior: "allow", reason: "The Console's own team tool." };
-  }
+  if (kind === "other" && ownTeamTool(toolCall, agent.kind)) return { behavior: "allow", reason: "The Console's own team tool." };
   let decision: Decision;
   switch (kind) {
     case "read":

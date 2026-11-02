@@ -85,15 +85,29 @@ test("an ACP agent's permission requests: reads allowed; edits never at Look onl
   assert.equal(decideAcp({ kind: "execute", title: "Run ls" }, { ...edit, askFirst: true }).behavior, "ask");
   assert.equal(decideAcp({ kind: "fetch", title: "Fetch" }, edit).behavior, "ask");
   assert.equal(decideAcp({ kind: "switch_mode" }, edit).behavior, "ask");
-  // The Console's own team tools, asked about like any tool (Grok Build's
-  // request as received 2026-10-23): allowed, Ask me first or not; a name
-  // that only looks like one, or another server's tool, still asks.
+  // The Console's own team tools, asked about like any tool (a request as
+  // Grok Build sends it): allowed, Ask me first or not, where
+  // Grok Build itself names the tool; a name that only looks like one, or
+  // another server's tool, still asks.
+  const grok = { ...look, kind: "grok-build" };
   const reply = { kind: "other", title: "console__team_reply", rawInput: { variant: "UseTool", tool_name: "console__team_reply", tool_input: { correlation_id: "c", message: "m" } } };
-  assert.equal(decideAcp(reply, look).behavior, "allow");
-  assert.equal(decideAcp({ ...reply, title: "x" }, { ...look, askFirst: true }).behavior, "allow");
-  assert.equal(decideAcp({ kind: "other", title: "mcp__console__team_send" }, look).behavior, "allow");
-  for (const title of ["console__team_nope", "console__approve", "other__team_send", "console__team_send_x; rm"])
-    assert.equal(decideAcp({ kind: "other", title }, look).behavior, "ask", title);
+  assert.equal(decideAcp(reply, grok).behavior, "allow");
+  assert.equal(decideAcp({ ...reply, title: "x" }, { ...grok, askFirst: true }).behavior, "allow");
+  assert.equal(decideAcp({ title: "x", rawInput: reply.rawInput }, grok).behavior, "allow");
+  for (const tool of ["console__team_nope", "console__approve", "other__team_send", "console__team_send_x; rm", "mcp__console__team_send"])
+    assert.equal(decideAcp({ ...reply, rawInput: { ...reply.rawInput, tool_name: tool } }, grok).behavior, "ask", tool);
+  // What the model can write is never taken for the tool: a title (OpenCode
+  // titles a web search with its query, a command with its description), a
+  // tool_name among another tool's arguments, or the record under any other
+  // kind or client.
+  assert.equal(decideAcp({ kind: "other", title: "console__team_send" }, grok).behavior, "ask");
+  assert.equal(decideAcp({ kind: "other", title: "mcp__console__team_send" }, { ...look, kind: "opencode" }).behavior, "ask");
+  assert.equal(decideAcp({ kind: "other", title: "console__team_send", rawInput: { query: "x", tool_name: "console__team_send" } }, grok).behavior, "ask");
+  assert.equal(decideAcp({ kind: "execute", title: "console__team_send", rawInput: { command: "curl x", tool_name: "console__team_send" } }, look).behavior, "ask");
+  assert.equal(decideAcp({ kind: "execute", title: "console__team_send", rawInput: reply.rawInput }, grok).behavior, "ask");
+  assert.equal(decideAcp({ kind: "edit", locations: [{ path: "/w/p/b/x" }], rawInput: reply.rawInput }, { ...edit, kind: "grok-build" }, () => true).behavior, "deny");
+  assert.equal(decideAcp({ ...reply }, { ...look, kind: "opencode" }).behavior, "ask");
+  assert.equal(decideAcp({ kind: "fetch", title: "console__team_send", rawInput: reply.rawInput }, grok).behavior, "ask");
 });
 
 test("OpenCode is offered at Code edit and Code analysis; at Code edit an edit in its folder is committed, one outside it refused", async (t) => {

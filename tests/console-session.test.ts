@@ -234,3 +234,30 @@ test("team setup takes an ACP kind at Code edit", async () => {
     assert.equal(result.ok, true, JSON.stringify(result));
   }
 });
+
+test("the line reader: a line over the limit is dropped and reported, and every line after it is still read", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { ClientProcess, MAX_LINE_BYTES } = await import("../src/lib/console/session.ts");
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: Object.assign(new EventEmitter(), { writable: true }), pid: 1 });
+  const got: unknown[] = [];
+  class Reader extends ClientProcess {
+    protected received(message: Record<string, unknown>) {
+      got.push(message.n);
+    }
+  }
+  const reader = new Reader(child as never, "/w", "Test");
+  let oversize = 0;
+  reader.onOversize = () => oversize++;
+  const huge = `{"n":"huge","pad":"${"x".repeat(MAX_LINE_BYTES)}"}`;
+  // In one chunk: a line, one too long, and the lines after it.
+  child.stdout.emit("data", Buffer.from(`{"n":1}\n${huge}\n{"n":2}\n{"n":3}\n`));
+  assert.deepEqual(got, [1, 2, 3]);
+  assert.equal(oversize, 1);
+  // A long line still arriving is dropped as it comes, to its end: its tail
+  // (here one that parses) is never read as a line of its own.
+  child.stdout.emit("data", Buffer.from(`{"n":"partial","pad":"${"y".repeat(MAX_LINE_BYTES)}`));
+  child.stdout.emit("data", Buffer.from(`"} {"n":"tail"}\n`.slice(3)));
+  child.stdout.emit("data", Buffer.from(`{"n":4}\n`));
+  assert.deepEqual(got, [1, 2, 3, 4]);
+  assert.equal(oversize, 2);
+});
