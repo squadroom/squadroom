@@ -263,7 +263,14 @@ export const turns = {
         // checked either way, so a restart never checks it again (a
         // reviewer's refresh may move its HEAD later; that is not this turn).
         if (head || sha) this.safe(() => this.store.markProgress(epoch, t.id, !!sha || head !== before));
-        if (head && head !== before) {
+        // A tab with steps records only the Console's own checked commit: a
+        // head past it (a program the agent left running) is not recorded,
+        // so it is never pushed, and the next turn's check puts it back.
+        if (files && since && head && head !== (sha ?? before)) {
+          this.log(`turn ${t.id}: a commit appeared after the step check; it is not recorded.`);
+          // The Console's own commit is still checked against the claims.
+          if (sha) await this.checkRange(agent, before, sha);
+        } else if (head && head !== before) {
           // Commits the agent made itself (and no Console commit after them)
           // were never recorded: the branch's kept diff, which Changes and
           // team_diff read, is brought up to date here.

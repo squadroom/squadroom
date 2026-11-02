@@ -40,6 +40,7 @@ const RULESET = {
   target: "branch",
   conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
   rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "pull_request" }],
+  current_user_can_bypass: "never",
 };
 
 const FINDING =

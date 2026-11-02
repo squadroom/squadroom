@@ -261,6 +261,29 @@ test("spawn --sandbox: no network but the Console's loopback port, unless the pr
   assert.equal(await check(probe(elsewhere.port), "on"), 0, "the project's switch turns network on");
 });
 
+test("git reads objects as stored: an agent's replace refs, grafts and commit-graph are ignored", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  const g = (...a: string[]) => spawnSync("git", ["-c", "user.name=a", "-c", "user.email=a@b", ...a], { cwd: s.mine, encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as unknown as NodeJS.ProcessEnv }).stdout.trim();
+  g("init", "-q");
+  for (const n of ["1", "2", "3"]) {
+    writeFileSync(join(s.mine, "f"), `${n}\n`);
+    g("add", "f");
+    g("commit", "-qm", n);
+  }
+  const [c3, c2, c1] = g("rev-list", "HEAD").split("\n");
+  // The agent's own Git: a grafted history and a replaced commit.
+  writeFileSync(join(s.mine, ".git", "info", "grafts"), `${c3} ${c1}\n`);
+  g("replace", c2, g("commit-tree", `${c1}^{tree}`, "-p", c1, "-m", "fake"));
+  assert.equal(g("log", "--format=%s"), "3\n1");
+  const launched = (...a: string[]) => {
+    const r = spawnSync("/bin/zsh", ["-f", s.path, "git", s.mine, ...a], { env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  assert.equal(launched("log", "--format=%s"), "3\n2\n1");
+  assert.equal(launched("config", "core.commitGraph"), "false");
+});
+
 test("spawn --sandbox refuses a folder outside an agent's clone and a --deny outside its project", { skip: !zsh }, (t) => {
   const s = sandboxLauncher(t);
   const run = (args: string[]) => spawnSync("/bin/zsh", ["-f", s.path, "spawn", "--keep", "", ...args], { env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });

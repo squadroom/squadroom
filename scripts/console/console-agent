@@ -230,11 +230,17 @@ case ${1-} in
     fi
     gitbin=$(/usr/bin/xcrun --find git) || die "git not found"
     core=$($gitbin --exec-path) || die "git exec path not found"
+    # Objects are read as they are stored: the agent can write replace refs,
+    # grafts and a commit-graph file, each of which can make a commit seem
+    # to hold another tree or other parents than it has.
     export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
-      GIT_PAGER=cat GIT_EDITOR=true GIT_ALLOW_PROTOCOL=file GIT_CONFIG_COUNT=3 \
+      GIT_PAGER=cat GIT_EDITOR=true GIT_ALLOW_PROTOCOL=file \
+      GIT_NO_REPLACE_OBJECTS=1 GIT_GRAFT_FILE=/dev/null GIT_CONFIG_COUNT=5 \
       GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
       GIT_CONFIG_KEY_1=core.fsmonitor GIT_CONFIG_VALUE_1=false \
-      GIT_CONFIG_KEY_2=credential.helper GIT_CONFIG_VALUE_2=
+      GIT_CONFIG_KEY_2=credential.helper GIT_CONFIG_VALUE_2= \
+      GIT_CONFIG_KEY_3=core.commitGraph GIT_CONFIG_VALUE_3=false \
+      GIT_CONFIG_KEY_4=core.useReplaceRefs GIT_CONFIG_VALUE_4=false
     exec /usr/bin/sandbox-exec -p '
       (version 1)
       (allow default)

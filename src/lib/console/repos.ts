@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, rmSync, statfsSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, mkdirSync, openSync, readSync, rmSync, statfsSync, statSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import {
   readReviewThreadComments,
   replyToReviewThread,
   reviewThreadOwner,
+  STORED_OBJECTS,
 } from "./git.ts";
 import { CODEX_REVIEW, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { agentModel } from "./agents.ts";
@@ -46,6 +47,50 @@ export function freeBytes(path: string): number {
   return s.bavail * s.bsize;
 }
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+/** The largest bundle the worker copies out of an agent's folder. */
+export const MAX_BUNDLE_BYTES = 4 * 1024 ** 3;
+
+/**
+ * Copy a file the agent user wrote (a bundle in its `.git`) to `to`, a new
+ * file. The agent can swap the path for a link (to the owner's key file), a
+ * FIFO (which would hang the worker) or a device, so the file is opened
+ * without following a final link and without blocking, and must then be a
+ * regular file owned by the agent user (`uid`), at most `max` bytes. It is
+ * copied from that open file, never by name again.
+ */
+export function copyAgentFile(from: string, to: string, uid: number, max = MAX_BUNDLE_BYTES) {
+  let src: number;
+  try {
+    src = openSync(from, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    throw new GitError(`The agent's bundle could not be opened (${(error as NodeJS.ErrnoException).code ?? "error"}).`);
+  }
+  let dest: number | null = null;
+  try {
+    const s = fstatSync(src);
+    if (!s.isFile()) throw new GitError("The agent's bundle is not a regular file.");
+    if (s.uid !== uid) throw new GitError("The agent's bundle does not belong to the agent user.");
+    if (s.size > max) throw new GitError(`The agent's bundle is larger than ${gb(max)}.`);
+    rmSync(to, { force: true });
+    dest = openSync(to, "wx", 0o640);
+    const buffer = Buffer.alloc(1024 * 1024);
+    let total = 0;
+    for (;;) {
+      const n = readSync(src, buffer, 0, buffer.length, null);
+      if (!n) break;
+      total += n;
+      if (total > max) throw new GitError(`The agent's bundle is larger than ${gb(max)}.`);
+      writeSync(dest, buffer, 0, n);
+    }
+  } catch (error) {
+    if (dest !== null) rmSync(to, { force: true });
+    throw error;
+  } finally {
+    closeSync(src);
+    if (dest !== null) closeSync(dest);
+  }
+  chmodSync(to, 0o640);
+}
 
 export interface ReposOptions {
   store: ConsoleStore;
@@ -92,6 +137,16 @@ export class Repos {
   }
   private mirror(project: ConsoleProject): Mirror {
     return new Mirror(join(this.o.mirrorsDir, `${project.id}.git`), project.repo!, this.o.remoteUrl?.(project.repo!));
+  }
+  /** The branch head the Console last recorded (Changes shows it): the
+   * kept diff's, or the base commit before there is one. */
+  private recordedHead(agent: ConsoleAgent): string | null {
+    return this.o.store.diff(agent.id)?.head ?? this.o.store.agentBase(agent.id).baseCommit;
+  }
+  /** The agent user's id: what every file copied out of its folders must
+   * belong to. */
+  private agentUid(): number {
+    return statSync(this.o.paths.agentHome).uid;
   }
   clone(agent: Pick<ConsoleAgent, "folder">): Clone {
     return new Clone(this.o.launcher, agent.folder);
@@ -190,20 +245,18 @@ export class Repos {
         // takes it, so later agents start from the same history.
         const base = await clone.createEmpty(agent.name, agent.id);
         const seed = await clone.bundle("refs/heads/main", "console-seed.bundle");
-        copyFileSync(seed, bundle);
-        chmodSync(bundle, 0o640);
+        copyAgentFile(seed, bundle, this.agentUid());
         const init = await this.o.launcher.git(repo, ["init", "--quiet", "--bare", "-b", "main"], 4096);
         if (init.code !== 0 && !(await shared.head().catch(() => null)))
           throw new GitError(`Creating the project's repository failed: ${init.stderr || `exit ${init.code}`}`);
-        const fetched = await this.o.launcher.git(repo, ["fetch", "--quiet", bundle, "refs/heads/main:refs/heads/main"], 4096);
+        const fetched = await this.o.launcher.git(repo, [...STORED_OBJECTS, "fetch", "--quiet", bundle, "refs/heads/main:refs/heads/main"], 4096);
         if (fetched.code !== 0) throw new GitError(`Filling the project's repository failed: ${fetched.stderr || `exit ${fetched.code}`}`);
         if (branch) await clone.checkoutNew(branch, "main");
         return { folder, branch, base };
       }
-      const made = await this.o.launcher.git(repo, ["bundle", "create", "--quiet", join(repo, "console-base.bundle"), "refs/heads/main"], 4096);
+      const made = await this.o.launcher.git(repo, [...STORED_OBJECTS, "bundle", "create", "--quiet", join(repo, "console-base.bundle"), "refs/heads/main"], 4096);
       if (made.code !== 0) throw new GitError(`Bundling the project's repository failed: ${made.stderr || `exit ${made.code}`}`);
-      copyFileSync(join(repo, "console-base.bundle"), bundle);
-      chmodSync(bundle, 0o640);
+      copyAgentFile(join(repo, "console-base.bundle"), bundle, this.agentUid());
       return { folder, branch, base: await clone.createFromBundle(bundle, "main", branch) };
     });
   }
@@ -227,7 +280,7 @@ export class Repos {
     step: { files: string[]; since: string } | null = null,
   ): Promise<string | null> {
     if (step && project.source !== "none") await this.keepToStep(agent, epoch, step);
-    return this.commit(agent, project, turnId, commitMessage({ request: prompt, summary, agentName: agent.name, agentId: agent.id, turnId }), epoch, "throw", step?.files);
+    return this.commit(agent, project, turnId, commitMessage({ request: prompt, summary, agentName: agent.name, agentId: agent.id, turnId }), epoch, "throw", step && project.source !== "none" ? step : null);
   }
 
   /**
@@ -254,8 +307,7 @@ export class Repos {
       const made = await this.clone(author).bundleSince(source, since, `console-review-${into.id}.bundle`);
       const shared = join(this.o.paths.shared, `review-${into.id}-${randomBytes(6).toString("hex")}.bundle`);
       try {
-        copyFileSync(made, shared);
-        chmodSync(shared, 0o640);
+        copyAgentFile(made, shared, this.agentUid());
         await to.fetchBundle(shared, source, ref);
       } finally {
         rmSync(shared, { force: true });
@@ -313,8 +365,16 @@ export class Repos {
     const since = stepFiles && project.source !== "none" ? (this.o.store.stepBaseline(agent.id, turnId) ?? (await this.head(agent))) : null;
     if (stepFiles && since) await this.keepToStep(agent, epoch, { files: stepFiles, since });
     // An unfinished merge is left for the agent to resolve in this turn.
-    const committed = await this.commit(agent, project, turnId, `Console: changes not committed before turn ${turnId}`, epoch, "skip", stepFiles);
-    return { head: await this.head(agent), committed };
+    const committed = await this.commit(agent, project, turnId, `Console: changes not committed before turn ${turnId}`, epoch, "skip", stepFiles && since ? { files: stepFiles, since } : null);
+    // A tab with steps: the turn starts from the commit just checked (or
+    // the step's start), never from a HEAD a program the agent left running
+    // may have moved since; the turn's own check puts such a commit back.
+    if (stepFiles && since) return { head: committed ?? since, committed };
+    // Otherwise commits made between turns (by such a program) are recorded
+    // now, so Changes shows them and Push branch may send them.
+    const head = await this.head(agent);
+    if (head && agent.permission === "edit" && project.source !== "none" && head !== this.recordedHead(agent)) await this.refreshDiff(agent, epoch);
+    return { head, committed };
   }
   /** Changes since `since` outside the step's files are put back, and
    * named in Needs you. */
@@ -335,12 +395,12 @@ export class Repos {
     message: string,
     epoch: number,
     unresolved: "skip" | "throw" = "throw",
-    stepFiles: string[] | null = null,
+    step: { files: string[]; since: string } | null = null,
   ): Promise<string | null> {
     if (project.source === "none") return null;
     const clone = this.clone(agent);
-    const only = stepFiles ? (p: string) => inStep(agent.folder, join(agent.folder, p), stepFiles) : undefined;
-    const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files, only });
+    const only = step ? (p: string) => inStep(agent.folder, join(agent.folder, p), step.files) : undefined;
+    const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files, only, since: step?.since });
     // A finished merge (team_pull) is no longer waiting.
     if (sha && this.o.store.merging(agent.id) && !(await clone.merging())) this.o.store.setMerging(epoch, agent.id, null);
     if (!sha) return null;
@@ -360,16 +420,19 @@ export class Repos {
       files: shown.files.filter((f) => !this.o.redactor.holdsSecret(f)),
       patch: truncateBytes(this.o.redactor.text(shown.patch), COMMIT_PATCH_BYTES).text,
     });
-    await this.refreshDiff(agent, epoch);
+    await this.refreshDiff(agent, epoch, sha);
   }
 
   /** The branch (or folder) against its base. */
-  async refreshDiff(agent: ConsoleAgent, epoch: number) {
+  async refreshDiff(agent: ConsoleAgent, epoch: number, at: string | null = null) {
     const clone = this.clone(agent);
-    const head = await clone.head();
+    // A commit the Console just made and checked is recorded by its id,
+    // never by rereading HEAD, which a program the agent left running may
+    // have moved meanwhile.
+    const head = at ?? (await clone.head());
     if (!head) return;
     const base = this.o.store.agentBase(agent.id).baseCommit ?? EMPTY_TREE;
-    const diff = await clone.diff(base, BRANCH_PATCH_BYTES);
+    const diff = await clone.diff(base, BRANCH_PATCH_BYTES, head);
     this.o.store.setDiff(epoch, agent.id, {
       base,
       head,
@@ -446,7 +509,13 @@ export class Repos {
     // from pushed work). What is checked and what is pushed is exactly this
     // commit, whatever the agent's refs do meanwhile.
     const head = await clone.resolveBranch(branch);
-    const bundle = await clone.bundleBranch(branch);
+    // Only the commit the Console recorded (and checked: steps, claims) at
+    // the end of the agent's last turn is pushed. A commit made after it, by
+    // a program the agent left running, waits for the next turn.
+    if (head !== this.recordedHead(agent))
+      throw new GitError(
+        `${branch} has a commit the Console has not checked (made after the agent's last turn ended), so nothing was pushed. Send the agent a message: its next turn checks the branch. Then push again.`,
+      );
     const token = this.token(project.id);
     // The base branch must still be protected by name before every push.
     await checkGitHub(project.repo!, project.baseBranch, token, this.o.fetch);
@@ -456,6 +525,11 @@ export class Repos {
     // credential. The key file's values are known even before an agent
     // ran in this worker.
     this.knownCredentials();
+    // The bundle is the agent's file: copied safely into the owner's own
+    // folder before the mirror reads it.
+    mkdirSync(this.o.mirrorsDir, { recursive: true, mode: 0o700 });
+    const bundle = join(this.o.mirrorsDir, `push-${project.id}-${randomBytes(6).toString("hex")}.bundle`);
+    copyAgentFile(await clone.bundleBranch(branch), bundle, this.agentUid());
     await this.serial(project.id, async () => {
       const mirror = this.mirror(project);
       try {
@@ -465,7 +539,7 @@ export class Repos {
       } finally {
         await mirror.unstage(branch);
       }
-    });
+    }).finally(() => rmSync(bundle, { force: true }));
     const compare = `https://github.com/${project.repo}/compare/${encodeURIComponent(project.baseBranch)}...${branch
       .split("/")
       .map(encodeURIComponent)

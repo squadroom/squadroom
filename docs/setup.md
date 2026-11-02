@@ -280,8 +280,10 @@ without any model request.
   branch (default `main`). Before anything is cloned, the worker checks
   that the base branch exists and that an active ruleset targets it **by
   name** (`refs/heads/main`, not "Default branch") and blocks deletion,
-  force pushes and updates without a pull request. Create the branch and
-  the ruleset first.
+  force pushes and updates without a pull request. The ruleset's bypass
+  list must not include the token's own user (GitHub must report
+  `current_user_can_bypass: never`). Create the branch and the ruleset
+  first.
 - **A new empty folder** for each agent (a local repository on the Mac
   stands in for GitHub, so agents share one history).
 - **No project files**: agents that only talk (Code analysis).
@@ -314,7 +316,9 @@ Things to know while using it:
 - **Changes** (a window's ⋯ menu) shows each turn's commit. In a GitHub
   project, **Push branch** pushes the agent's `console/…` branch through
   your mirror and opens or updates its pull request; **Open pull request**
-  asks the agent to write the title and description first. With
+  asks the agent to write the title and description first. Push branch
+  sends only the commit the Console recorded at the end of the agent's
+  last turn; a commit made after that is refused until the next turn. With
   `CONSOLE_CODEX_REVIEW=on` in `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.
