@@ -363,13 +363,16 @@ export class ConsoleWorker {
     this.leading(epoch);
     await this.launcher.sweep();
     // Paid turns an earlier worker left running after their prompt reached
-    // the client are charged now. Their usage never came back, so they are
-    // charged their full allowance, and their tab waits for the owner.
-    // The charge is written in the same transaction as the interruption.
+    // the client are charged now. Their end never came back, so they are
+    // charged what their requests reported plus the full allowance for each
+    // request that did not (spend.ts), and their tab waits for the owner.
+    // They are priced as when they started, so a model that has left the
+    // catalog since is charged all the same. The charge is written in the
+    // same transaction as the interruption.
     const charged: { agent: ConsoleAgent; charge: { usd: number; basis: "reported" | "allowance" } }[] = [];
-    const interrupted = this.store.interruptEarlier(epoch, ({ id, agent, usage }) => {
-      const model = agentModel(agent.kind, agent.model);
-      const charge = model ? this.charge(agent, model, id, usage) : null;
+    const interrupted = this.store.interruptEarlier(epoch, ({ id, agent, billing, running }) => {
+      const model = billing?.model ?? agentModel(agent.kind, agent.model);
+      const charge = model ? this.charge(agent, model, id, null, running) : null;
       if (charge) charged.push({ agent, charge });
       return charge;
     });

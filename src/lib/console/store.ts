@@ -42,8 +42,27 @@ export interface TurnRow extends ConsoleTurn {
 }
 
 /** Raised whenever the schema below changes: a store stamped with an
- * earlier one is checked against it on open. */
-const SCHEMA_VERSION = 2;
+ * earlier one is upgraded by MIGRATIONS where it can be, and otherwise
+ * checked against it on open. */
+const SCHEMA_VERSION = 3;
+
+/** Columns a store stamped with an earlier version gains: each is added
+ * only where it is missing, so a store an older build opened since (and
+ * stamped back) is upgraded again safely. A store still missing a column
+ * after them is refused (and the transaction leaves it as it was). */
+const MIGRATIONS: { table: string; column: string; type: string }[] = [
+  // Version 3: what a turn is priced as and the key that pays, and what its
+  // client has reported while it runs.
+  { table: "console_turns", column: "billing", type: "TEXT" },
+  { table: "console_turns", column: "running", type: "TEXT" },
+];
+
+function migrate(db: DatabaseSync) {
+  for (const m of MIGRATIONS) {
+    const have = (db.prepare(`PRAGMA table_info(${m.table})`).all() as Row[]).map((c) => c.name as string);
+    if (have.length && !have.includes(m.column)) db.exec(`ALTER TABLE ${m.table} ADD COLUMN ${m.column} ${m.type}`);
+  }
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS console_lease (id INTEGER PRIMARY KEY CHECK (id = 1), epoch INTEGER NOT NULL, holder TEXT NOT NULL, renewed_at INTEGER NOT NULL);
@@ -53,7 +72,7 @@ CREATE INDEX IF NOT EXISTS console_tabs_project ON console_tabs (project_id);
 CREATE TABLE IF NOT EXISTS console_agents (id TEXT PRIMARY KEY, tab_id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, permission TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', branch TEXT, state TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, base_commit TEXT, merging TEXT, start_after TEXT, ask_first INTEGER NOT NULL DEFAULT 0, carry_summary TEXT, settling INTEGER);
 CREATE INDEX IF NOT EXISTS console_agents_project ON console_agents (project_id);
 CREATE TABLE IF NOT EXISTS console_sessions (agent_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, epoch INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS console_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, trigger TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, stop_requested TEXT, epoch INTEGER, created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, usage TEXT, bytes INTEGER NOT NULL DEFAULT 0, commit_before TEXT, commit_after TEXT, waited_ms INTEGER NOT NULL DEFAULT 0, acknowledged INTEGER NOT NULL DEFAULT 0, instruction_id INTEGER, resend_of INTEGER, push_approved INTEGER NOT NULL DEFAULT 0, progressed INTEGER NOT NULL DEFAULT 0, progress_mark INTEGER, next_at INTEGER, revised_at INTEGER, summary INTEGER NOT NULL DEFAULT 0, ended_seq INTEGER, prompted INTEGER NOT NULL DEFAULT 0, final_text TEXT, compacted INTEGER NOT NULL DEFAULT 0, cost_usd REAL, cost_basis TEXT, started_seq INTEGER);
+CREATE TABLE IF NOT EXISTS console_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, trigger TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, stop_requested TEXT, epoch INTEGER, created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, usage TEXT, bytes INTEGER NOT NULL DEFAULT 0, commit_before TEXT, commit_after TEXT, waited_ms INTEGER NOT NULL DEFAULT 0, acknowledged INTEGER NOT NULL DEFAULT 0, instruction_id INTEGER, resend_of INTEGER, push_approved INTEGER NOT NULL DEFAULT 0, progressed INTEGER NOT NULL DEFAULT 0, progress_mark INTEGER, next_at INTEGER, revised_at INTEGER, summary INTEGER NOT NULL DEFAULT 0, ended_seq INTEGER, prompted INTEGER NOT NULL DEFAULT 0, final_text TEXT, compacted INTEGER NOT NULL DEFAULT 0, cost_usd REAL, cost_basis TEXT, started_seq INTEGER, billing TEXT, running TEXT);
 CREATE INDEX IF NOT EXISTS console_turns_agent ON console_turns (agent_id, id);
 CREATE INDEX IF NOT EXISTS console_turns_status ON console_turns (status);
 CREATE TABLE IF NOT EXISTS console_events (id INTEGER PRIMARY KEY AUTOINCREMENT, turn_id INTEGER NOT NULL, agent_id TEXT NOT NULL, project_id TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -152,7 +171,10 @@ export class ConsoleStore {
     // was and the web process and the worker opening at once never race.
     try {
       this.transaction(() => {
-        if (Number(this.get("PRAGMA user_version")?.user_version) < SCHEMA_VERSION) refuseOlder(this.db);
+        if (Number(this.get("PRAGMA user_version")?.user_version) < SCHEMA_VERSION) {
+          migrate(this.db);
+          refuseOlder(this.db);
+        }
         this.db.exec(SCHEMA);
         this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
       });

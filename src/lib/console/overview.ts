@@ -2,7 +2,9 @@ import { agentModel } from "./agents.ts";
 import { keysPageView, needsView, tabSpend, workerView, type TabSpend, type WorkerView } from "./views.ts";
 import { consolePaths } from "./config.ts";
 import { IMAGE_KEY } from "./image-tools.ts";
-import type { KeyRow } from "./keys-page.ts";
+import { readKeyFile } from "./keys.ts";
+import { fingerprint } from "./spend.ts";
+import { credentialInfo, type KeyRow } from "./keys-page.ts";
 import { MIN_FREE_BYTES, freeBytes } from "./repos.ts";
 import type { ConsoleStore, EndedTurn } from "./store.ts";
 import { needCount } from "./ui.ts";
@@ -39,40 +41,83 @@ export interface Overview {
   problems: { turnId: number; agentId: string; agentName: string; place: string; status: string; reason: string | null; endedAt: number }[];
 }
 
-/** Local midnight and the first of the month, for `now`. */
+/** UTC midnight and the first of the month in UTC, for `now`: the months
+ * providers bill and cap by. */
 export function spendWindows(now: number): { dayStart: number; monthStart: number } {
   const d = new Date(now);
-  return { dayStart: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(), monthStart: new Date(d.getFullYear(), d.getMonth(), 1).getTime() };
+  return { dayStart: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()), monthStart: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) };
 }
 
-/** Which stored key a turn was charged to: its model's credential, from
- * the project's own entry when it has one, else the global one (as
- * `keyFor` chooses). Null for a subscription turn. */
-export function chargedKey(turn: Pick<EndedTurn, "kind" | "model" | "projectId" | "credential">, keys: { global: KeyRow[]; projects: Record<string, KeyRow[]> }): { name: string; projectId: string | null; row: KeyRow | null } | null {
-  const credential = turn.credential ?? agentModel(turn.kind, turn.model)?.paid?.credential;
+/** A charged key: its name and where it is set; `row` is the key there now,
+ * or null when the turn was paid by another key since replaced there (its
+ * spend stays with that earlier key). */
+export interface ChargedKey {
+  name: string;
+  projectId: string | null;
+  row: KeyRow | null;
+  /** The paying key's fingerprint, when the turn recorded it. */
+  print?: string;
+}
+
+/** Which stored key a turn was charged to: the one it recorded when it
+ * started (by its fingerprint and where it was set), or, for a turn from
+ * before that was kept and an image call, its model's credential from the
+ * project's own entry when it has one, else the global one (as `keyFor`
+ * chooses). `printAt` gives the fingerprint of the key set there now. Null
+ * for a subscription turn. */
+export function chargedKey(
+  turn: Pick<EndedTurn, "kind" | "model" | "projectId" | "credential" | "paidBy">,
+  keys: { global: KeyRow[]; projects: Record<string, KeyRow[]> },
+  printAt: (name: string, projectId: string | null) => string | null = () => null,
+): ChargedKey | null {
+  const credential = turn.credential ?? turn.paidBy?.name ?? agentModel(turn.kind, turn.model)?.paid?.credential;
   if (!credential) return null;
-  const own = keys.projects[turn.projectId]?.find((r) => r.name === credential);
+  const rowAt = (projectId: string | null) => (projectId ? keys.projects[projectId] : keys.global)?.find((r) => r.name === credential) ?? null;
+  if (turn.paidBy?.print) {
+    const projectId = turn.paidBy.scope === "project" ? turn.projectId : null;
+    const print = turn.paidBy.print;
+    return { name: credential, projectId, row: printAt(credential, projectId) === print ? rowAt(projectId) : null, print };
+  }
+  const own = rowAt(turn.projectId);
   if (own) return { name: credential, projectId: turn.projectId, row: own };
-  return { name: credential, projectId: null, row: keys.global.find((r) => r.name === credential) ?? null };
+  return { name: credential, projectId: null, row: rowAt(null) };
+}
+
+/** The fingerprints of the keys set now, by name and place. */
+function currentPrints(keysPath: string): (name: string, projectId: string | null) => string | null {
+  try {
+    const file = readKeyFile(keysPath);
+    return (name, projectId) => {
+      const value = (projectId ? file.projects[projectId]?.[name] : file.keys[name])?.value.trim();
+      return value ? fingerprint(value) : null;
+    };
+  } catch {
+    // No key file, or one that cannot be read: no key is the current one.
+    return () => null;
+  }
 }
 
 /** Today's and this month's spend per tab and per key (pure). */
 export function sumSpend(
   turns: EndedTurn[],
   windows: { dayStart: number; monthStart: number },
-  keyOf: (t: EndedTurn) => { name: string; projectId: string | null; row: KeyRow | null } | null,
-): { tabs: Map<string, { today: number; month: number }>; keys: Map<string, { name: string; projectId: string | null; row: KeyRow | null; month: number }> } {
+  keyOf: (t: EndedTurn) => ChargedKey | null,
+): { tabs: Map<string, { today: number; month: number }>; keys: Map<string, ChargedKey & { month: number }> } {
   const tabs = new Map<string, { today: number; month: number }>();
-  const keys = new Map<string, { name: string; projectId: string | null; row: KeyRow | null; month: number }>();
+  const keys = new Map<string, ChargedKey & { month: number }>();
   for (const t of turns) {
-    if (!t.costUsd || t.endedAt < windows.monthStart) continue;
+    // A turn counts in the month (and day) it started, as its prices do,
+    // never the one a restart charged it in.
+    const at = t.startedAt ?? t.endedAt;
+    if (!t.costUsd || at < windows.monthStart) continue;
     const tab = tabs.get(t.tabId) ?? { today: 0, month: 0 };
     tab.month += t.costUsd;
-    if (t.endedAt >= windows.dayStart) tab.today += t.costUsd;
+    if (at >= windows.dayStart) tab.today += t.costUsd;
     tabs.set(t.tabId, tab);
     const key = keyOf(t);
     if (!key) continue;
-    const id = `${key.name}:${key.projectId ?? ""}`;
+    // A key replaced since keeps what it paid, apart from the one there now.
+    const id = `${key.name}:${key.projectId ?? ""}${key.row ? "" : `:${key.print ?? ""}`}`;
     const k = keys.get(id) ?? { ...key, month: 0 };
     k.month += t.costUsd;
     keys.set(id, k);
@@ -91,7 +136,8 @@ export function overviewView(store: ConsoleStore, keysPath: string, now: number)
   const turns = store.endedSince(since);
   const page = keysPageView(store, keysPath);
   // Image calls count as spend; they are never problems.
-  const { tabs, keys } = sumSpend([...turns, ...store.imageSpendSince(since, IMAGE_KEY)], windows, (t) => chargedKey(t, page.keys));
+  const printAt = currentPrints(keysPath);
+  const { tabs, keys } = sumSpend([...turns, ...store.imageSpendSince(since, IMAGE_KEY)], windows, (t) => chargedKey(t, page.keys, printAt));
   const projectName = (id: string | null) => (id ? (store.project(id)?.name ?? id) : null);
   const open = store.openTurns();
   let disk: number | null = null;
@@ -123,7 +169,13 @@ export function overviewView(store: ConsoleStore, keysPath: string, now: number)
         const tab = store.tab(tabId)!;
         return { tabId, tabName: tab.name, projectId: tab.projectId, projectName: projectName(tab.projectId)!, ...s, sinceReset: tabSpend(store, tab) };
       }),
-      keys: [...keys.values()].map((k) => ({ name: k.name, label: k.row?.label ?? k.name, projectName: projectName(k.projectId), month: k.month, capUsd: k.row?.cap?.usd ?? null })),
+      keys: [...keys.values()].map((k) => ({
+        name: k.name,
+        label: k.row ? k.row.label : k.print ? `${credentialInfo(k.name)?.label ?? k.name} (a key since replaced)` : k.name,
+        projectName: projectName(k.projectId),
+        month: k.month,
+        capUsd: k.row?.cap?.usd ?? null,
+      })),
     },
     problems: problemTurns(turns, now - DAY_MS).map((t) => ({
       turnId: t.id,

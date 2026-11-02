@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { agentModel } from "../src/lib/console/agents.ts";
 import { apiKeyUsage, expectedKeySource } from "../src/lib/console/claude-session.ts";
 import { codexServerArgs } from "../src/lib/console/codex.ts";
-import { chargeTurn } from "../src/lib/console/spend.ts";
+import { chargeTurn, NO_REQUESTS, readRunning, requestGauged, requestUsage } from "../src/lib/console/spend.ts";
+import { runCommand } from "../src/lib/console/commands.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // Claude Code on an Anthropic API key and Codex on an OpenAI API key, as
@@ -162,4 +163,53 @@ test("an API-key Codex server that does not report the API key runs no turn", as
   assert.equal(h.store.turn(turn)!.status, "failed");
   assert.match(h.store.turn(turn)!.reason!, /did not sign in with the OpenAI API key/);
   assert.ok(!h.codexCalls().some((c) => c.method === "thread/start"));
+});
+
+test("a Codex API-key turn that did not complete normally is charged its reported request plus one allowance, and its tab waits", async (t) => {
+  const h = await harness(t, {}, false, { codex: {} });
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "gpt-5.6-sol@api-key", "codex");
+  await h.ready(paid.id);
+  const turn = h.send(paid.id, "partial");
+  // Its request's usage is kept with the turn while it runs.
+  const kept = () => readRunning(JSON.parse(String(h.store.get("SELECT running FROM console_turns WHERE id = ?", turn)?.running ?? "null")));
+  await h.until(() => kept().reported === 1, "usage kept");
+  runCommand(h.store, { action: "stop", agentId: paid.id });
+  await h.ended(turn);
+  const row = h.store.turn(turn)!;
+  assert.equal(row.status, "stopped", row.reason ?? "");
+  const request = { inputTokens: 40, cacheReadTokens: 10, cacheWriteTokens: 0, outputTokens: 5 };
+  const running = requestUsage(requestGauged(NO_REQUESTS, 40), request, SOL_KEY);
+  const at = new Date(row.startedAt!);
+  assert.equal(row.costBasis, "allowance");
+  assert.equal(row.costUsd, chargeTurn(SOL_KEY, request, at, running)!.usd + chargeTurn(SOL_KEY, null, at)!.usd);
+  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: .*the full allowance for a request whose usage it did not report/);
+});
+
+test("a turn a dead worker left is charged from what its client had reported, at the prices it started with, even once its model has left the catalog", async (t) => {
+  const h = await harness(t, {}, false, { codex: {} });
+  keys(h.keysFile);
+  const paid = h.agent("Paid", "edit", "gpt-5.6-sol@api-key", "codex");
+  const turn = h.send(paid.id, "hello");
+  const dead = h.store.takeLease("dead-worker", Date.now())!;
+  const billed = { id: SOL_KEY.id, label: SOL_KEY.label, model: SOL_KEY.model, paid: SOL_KEY.paid };
+  assert.ok(h.store.startTurn(dead, turn, { model: billed, key: { scope: "global", print: "abc" } }));
+  h.store.markPrompted(dead, turn);
+  // Two requests reported, a third begun (the gauge saw it), then the worker died.
+  const request = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  let running = requestUsage(requestGauged(NO_REQUESTS, 1_000), request, SOL_KEY);
+  running = requestGauged(requestUsage(requestGauged(running, 2_000), request, SOL_KEY), 3_000);
+  h.store.setRunning(dead, turn, running);
+  h.store.releaseLease(dead);
+  // The model leaves the catalog before the next start.
+  h.store.run("UPDATE console_agents SET model = 'gpt-retired@api-key' WHERE id = ?", paid.id);
+  await h.worker.start();
+  const row = h.store.turn(turn)!;
+  assert.equal(row.status, "interrupted");
+  assert.equal(row.costBasis, "allowance");
+  const at = new Date(row.startedAt!);
+  assert.equal(row.costUsd, chargeTurn(billed, null, at, running)!.usd);
+  assert.equal(row.costUsd, chargeTurn(billed, running.usage, at, running)!.usd + chargeTurn(billed, null, at)!.usd);
+  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: /);
 });

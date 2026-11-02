@@ -9,6 +9,14 @@ export const SUMMARY_PROMPT =
 export const SUMMARY_MAX = 20_000;
 
 type Queued = TurnRow & { refusedUploads: string[] };
+
+/** The paying key a turn's stored billing names (lifecycle.ts). */
+function paidBy(raw: unknown): EndedTurn["paidBy"] {
+  if (typeof raw !== "string") return undefined;
+  const b = JSON.parse(raw) as { model?: { paid?: { credential?: string } }; key?: { scope?: "project" | "global" | null; print?: string } };
+  const name = b.model?.paid?.credential;
+  return name && b.key?.print ? { name, scope: b.key.scope ?? null, print: b.key.print } : undefined;
+}
 export interface TabTurn {
   id: number;
   agentId: string;
@@ -48,6 +56,10 @@ export interface EndedTurn {
   model: string;
   /** The key it was charged to, when not its model's (an image call). */
   credential?: string;
+  /** When it started (a turn), which places it in a day and a month. */
+  startedAt?: number | null;
+  /** The key that paid, as the turn recorded it when it started (L6). */
+  paidBy?: { name: string; scope: "project" | "global" | null; print: string };
 }
 type Gauge = { tokens: number | null; contextWindow: number | null; measured: boolean; compactedFrom: number | null };
 
@@ -334,7 +346,7 @@ export const turns = {
    * problems. */
   endedSince(this: ConsoleStore, since: number): EndedTurn[] {
     return this.all(
-      "SELECT t.id, t.status, t.reason, t.ended_at, t.cost_usd, a.id AS agent_id, a.name, a.tab_id, a.project_id, a.kind, a.model FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE t.ended_at >= ? AND (t.cost_usd IS NOT NULL OR t.status IN ('failed', 'interrupted')) ORDER BY t.ended_at DESC, t.id DESC",
+      "SELECT t.id, t.status, t.reason, t.started_at, t.ended_at, t.cost_usd, t.billing, a.id AS agent_id, a.name, a.tab_id, a.project_id, a.kind, a.model FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE t.ended_at >= ? AND (t.cost_usd IS NOT NULL OR t.status IN ('failed', 'interrupted')) ORDER BY t.ended_at DESC, t.id DESC",
       since,
     ).map((r) => ({
       id: r.id as number,
@@ -348,6 +360,8 @@ export const turns = {
       projectId: r.project_id as string,
       kind: r.kind as ConsoleAgent["kind"],
       model: r.model as string,
+      startedAt: (r.started_at as number | null) ?? null,
+      paidBy: paidBy(r.billing),
     }));
   },
 
