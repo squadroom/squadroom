@@ -7,6 +7,7 @@ import { fingerprint } from "./spend.ts";
 import { credentialInfo, type KeyRow } from "./keys-page.ts";
 import { MIN_FREE_BYTES, freeBytes } from "./repos.ts";
 import type { ConsoleStore, EndedTurn } from "./store.ts";
+import type { ConsoleSpend } from "./store/pause.ts";
 import { needCount } from "./ui.ts";
 
 // The Overview: one page of what the owner checks first — health,
@@ -22,6 +23,8 @@ export interface OverviewSpend {
   /** API keys by name and where they are set (a project's own, or the
    * global one), this month, against the provider-side cap. */
   keys: { name: string; label: string; projectName: string | null; month: number; capUsd: number | null }[];
+  /** The Console-wide limit across every tab (this UTC month). */
+  console: ConsoleSpend;
 }
 
 export interface Overview {
@@ -176,6 +179,7 @@ export function overviewView(store: ConsoleStore, keysPath: string, now: number)
         month: k.month,
         capUsd: k.row?.cap?.usd ?? null,
       })),
+      console: store.consoleSpend(),
     },
     problems: problemTurns(turns, now - DAY_MS).map((t) => ({
       turnId: t.id,

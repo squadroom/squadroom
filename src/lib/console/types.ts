@@ -194,6 +194,9 @@ export const LIMITS = {
   holdMs: 30 * 60_000,
   /** Paid API spend per tab before it pauses. */
   tabSpendUsd: 5,
+  /** Paid API spend across every tab in one UTC month before all paid work
+   * pauses: a cookie alone cannot make new tabs to spend past it. */
+  consoleSpendUsd: 25,
   /** Image calls per turn, and their list prices per turn. */
   imageCallsPerTurn: 8,
   imageUsdPerTurn: 1,
@@ -211,6 +214,9 @@ export const LIMITS = {
 /** Where a pause by the tab's spend limit starts its reason; Reset spend
  * lifts it. */
 export const SPEND_PAUSE = "Spend limit: ";
+/** Where a pause by the Console-wide spend limit starts its reason: no
+ * Resume lifts it; raising or resetting that limit does. */
+export const CONSOLE_SPEND_PAUSE = "Console spend limit: ";
 /** Where a pause for a turn without trustworthy usage starts its reason;
  * Resume lifts it. */
 export const USAGE_PAUSE = "Usage not reported: ";

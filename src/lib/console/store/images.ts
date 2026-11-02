@@ -29,7 +29,7 @@ export const images = {
   /**
    * Admit one call, or say why not: at most `calls` calls and `turnUsd` of
    * list prices in its turn, and the tab's spend plus this price within its
-   * limit. Admitted, it is charged that price now, with a note in the
+   * limit, as is the Console-wide spend. Admitted, it is charged that price now, with a note in the
    * transcript whose event id is its sequence.
    */
   chargeImageCall(
@@ -49,6 +49,9 @@ export const images = {
       const spent = this.tabSpend(call.agent.tabId);
       if (micros(spent + call.priceUsd) > micros(limit))
         return { refused: `This call (${listPrice(call.priceUsd)}) would take the tab's spend (${usd(spent)}) past its limit of ${usd(limit)}. Ask the owner to raise it or reset spend.` };
+      const all = this.consoleSpend();
+      if (micros(all.usd + call.priceUsd) > micros(all.limitUsd))
+        return { refused: `This call (${listPrice(call.priceUsd)}) would take the Console's spend this month (${usd(all.usd)}) past its limit of ${usd(all.limitUsd)}. Ask the owner to raise it or reset it on the Overview.` };
       const now = this.now();
       const seq = this.insertEvent(call.turnId, call.agent, "note", { text: `${call.tool}: ${call.label}, ${listPrice(call.priceUsd)} charged (refunded if the job fails) → ${call.path}` }, now);
       const id = this.insert(

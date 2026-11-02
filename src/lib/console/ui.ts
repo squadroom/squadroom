@@ -4,7 +4,7 @@ import type { CleanupItem } from "./cleanup.ts";
 import type { ArchiveImpact, TimelineEntry } from "./views.ts";
 import type { NeedsLike } from "./notify.ts";
 import type { Overview } from "./overview.ts";
-import { SPEND_PAUSE, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
 
 // The Console page's decisions, pure and browser-safe (no DOM, no
 // React), so they are tested without a browser.
@@ -92,6 +92,7 @@ export function pauseBanner(
     return { text: project.pauseReason || "This project is paused.", spend: false, button: "Resume project", body: { action: "resume", scope: "project", id: project.id } };
   if (!tab?.paused) return null;
   const text = tab.pauseReason || "This tab is paused.";
+  if (text.startsWith(CONSOLE_SPEND_PAUSE)) return { text, spend: false, button: "Reset Console spend", body: { action: "resetConsoleSpend" } };
   return text.startsWith(SPEND_PAUSE)
     ? { text, spend: true, button: "Reset spend", body: { action: "resetSpend", tabId: tab.id } }
     : { text, spend: false, button: "Resume tab", body: { action: "resume", scope: "tab", id: tab.id } };

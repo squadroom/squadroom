@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react";
 import type { Overview } from "@/lib/console/overview";
 import { elapsed, gigabytes, healthWarnings, money } from "@/lib/console/ui";
-import { api, usePolled } from "./api";
+import { api, usePolled, type Run } from "./api";
 import { Panel } from "./Dialog";
+import { SpendLimit } from "./Settings";
 import styles from "./console.module.css";
 
 // The Overview: health, activity, spend and problems on one page, read
@@ -10,7 +11,7 @@ import styles from "./console.module.css";
 
 const when = (at: number) => (at ? `${elapsed(at)} ago` : "never");
 
-export default function OverviewDialog({ onShow }: { onShow: (agentId: string) => void }) {
+export default function OverviewDialog({ onShow, run }: { onShow: (agentId: string) => void; run: Run }) {
   const [view, setView] = useState<(Overview & { readAt: number }) | null>(null);
   const [status, setStatus] = useState("Loading…");
   const load = useCallback(async () => {
@@ -22,6 +23,12 @@ export default function OverviewDialog({ onShow }: { onShow: (agentId: string) =
     }
   }, []);
   usePolled(load, 10_000);
+  /** A spend command, then the Overview read again. */
+  const runAndLoad: Run = async (body) => {
+    const data = await run(body);
+    await load();
+    return data;
+  };
   if (!view) return <Panel title="Overview"><p className={styles.hint}>{status}</p></Panel>;
   const { health, activity, spend, problems } = view;
   const warnings = healthWarnings(health, view.readAt);
@@ -50,6 +57,12 @@ export default function OverviewDialog({ onShow }: { onShow: (agentId: string) =
         ))}
       </ul>
       <h3 className={styles.subhead}>Spend (API keys)</h3>
+      {/* The Console-wide limit: raising or resetting it needs a fresh code. */}
+      <SpendLimit key={spend.console.limitUsd} tabId={null} spend={spend.console} run={runAndLoad} since="across every tab this month (UTC)" />
+      <button title="Count the Console's spend from zero again (needs a fresh code)" onClick={() => void runAndLoad({ action: "resetConsoleSpend" })}>
+        Reset Console spend
+      </button>
+      <p className={styles.hint}>At this limit every tab with an API-key agent pauses. Each tab&apos;s own limit still applies.</p>
       {!spend.tabs.length && <p className={styles.hint}>No API-key spend this month.</p>}
       <ul>
         {spend.tabs.map((t) => (

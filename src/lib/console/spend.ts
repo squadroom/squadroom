@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AgentKind, AgentModel } from "./agents.ts";
 import { costUsd, type PricedModel } from "../shared/pricing.ts";
 import type { ProjectKey } from "./keys.ts";
-import { SPEND_PAUSE, type TurnUsage } from "./types.ts";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type TurnUsage } from "./types.ts";
 
 // Logins and spend.
 //
@@ -207,4 +207,15 @@ export function spendPauseReason(spent: number, limit: number): string {
  * spend: an ordinary pause, which Resume lifts. */
 export function spendRaisedReason(spent: number, limit: number): string {
   return `Spend limit raised to ${usd(limit)}: this tab has spent ${usd(spent)} on API-key models since its spend was last reset. Resume to let it continue.`;
+}
+
+/** Why a tab with API-key agents is paused at the Console-wide limit. */
+export function consoleSpendPauseReason(spent: number, limit: number): string {
+  return `${CONSOLE_SPEND_PAUSE}the Console has spent ${usd(spent)} on API-key models this month (UTC), and its limit is ${usd(limit)}. Raise or reset the Console's limit on the Overview to let it continue.`;
+}
+
+/** A tab paused at the Console-wide limit, after the owner raised that
+ * limit above the spend: an ordinary pause, which Resume lifts. */
+export function consoleSpendRaisedReason(spent: number, limit: number): string {
+  return `Console spend limit raised to ${usd(limit)}: the Console has spent ${usd(spent)} on API-key models this month (UTC). Resume to let this tab continue.`;
 }

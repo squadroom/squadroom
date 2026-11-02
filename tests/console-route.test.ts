@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { registerHooks } from "node:module";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { needsFreshCode } from "../src/lib/console/commands.ts";
+import { DOCUMENT_REVIEW_ID } from "../src/lib/console/templates.ts";
 import { ownerHeaders, signInState, useSignedInEnv } from "./helpers/signed-in.ts";
 
 // the Console's routes need the signed-in session; owner commands
@@ -243,9 +244,64 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   assert.equal((await limit(fresh.post, null)).status, 200);
   assert.equal(cs.tab(tabId)!.spendLimitUsd, null);
   assert.equal((await post(stale.post, { action: "setSpendLimit", tabId: "t000000000000", limitUsd: 1 })).status, 403);
+  // The Console-wide limit: a stale session may lower it, never raise or
+  // reset it, so new tabs (each with a fresh tab limit) cannot spend past it.
+  const consoleLimit = (headers: Record<string, string>, limitUsd: number | null) => post(headers, { action: "setConsoleSpendLimit", limitUsd });
+  assert.equal(cs.consoleSpend().limitUsd, 25);
+  assert.equal((await consoleLimit(stale.post, 10)).status, 200);
+  assert.equal(cs.consoleSpend().limitUsd, 10);
+  assert.equal((await consoleLimit(stale.post, 11)).status, 403);
+  assert.equal((await consoleLimit(stale.post, null)).status, 403);
+  assert.equal((await post(stale.post, { action: "resetConsoleSpend" })).status, 403);
+  assert.equal(cs.consoleSpend().limitUsd, 10);
+  assert.equal((await consoleLimit(fresh.post, null)).status, 200);
+  assert.equal((await post(fresh.post, { action: "resetConsoleSpend" })).status, 200);
+  assert.deepEqual([cs.consoleSpend().limitUsd, cs.consoleSpend().isDefault], [25, true]);
   // The gate comes after sign-in: no session, no 403 either.
   const anonymous = await post({ "x-workspace-request": "1", origin: "https://squadroom.example", "sec-fetch-site": "same-origin" }, gated[0]);
   assert.equal(anonymous.status, 401);
+});
+
+test("Ask me first: in a project that uses it, a stale session cannot make agents, teams or template tabs without it", async (t) => {
+  const restore = useSignedInEnv({ mail: true });
+  state.consoleStore = new ConsoleStore(":memory:");
+  t.after(() => {
+    state.consoleStore?.close();
+    delete state.consoleStore;
+    restore();
+  });
+  const cs = state.consoleStore;
+  const fresh = await ownerHeaders();
+  const stale = await ownerHeaders({ staleCode: 9 * 60 * 60_000 });
+  const post = (headers: Record<string, string>, body: Record<string, unknown>) =>
+    route.POST(new Request(URL_BASE, { method: "POST", headers, body: JSON.stringify(body) }));
+  const projectId = ((await (await post(stale.post, { action: "createProject", name: "Guarded", source: "folder" })).json()) as { project: { id: string } }).project.id;
+  const tabId = cs.tabs(projectId)[0].id;
+  const agent = (headers: Record<string, string>, name: string, extra: Record<string, unknown> = {}) =>
+    post(headers, { action: "createAgent", tabId, name, kind: "claude-code", model: "haiku", permission: "edit", ...extra });
+  // No agent asks first yet: no code needed.
+  assert.equal((await agent(stale.post, "Plain")).status, 200);
+  // One that asks first needs none either; from then on the project uses it.
+  const guarded = ((await (await agent(stale.post, "Guard", { askFirst: true })).json()) as { agent: { id: string } }).agent.id;
+  assert.equal(cs.askFirstInUse(projectId), true);
+  const refused = await agent(stale.post, "Loose");
+  assert.equal(refused.status, 403);
+  assert.equal(((await refused.json()) as { freshCode?: boolean }).freshCode, true);
+  assert.equal((await agent(stale.post, "Loose", { kind: "codex", model: "gpt-5.6-sol" })).status, 403);
+  assert.equal((await agent(stale.post, "Careful", { askFirst: true })).status, 200);
+  assert.equal((await post(stale.post, { action: "createTeam", tabId })).status, 403);
+  assert.equal((await post(stale.post, { action: "createTab", projectId, name: "Review", templateId: DOCUMENT_REVIEW_ID })).status, 403);
+  // An empty tab is fine; its agents are gated the same way.
+  assert.equal((await post(stale.post, { action: "createTab", projectId, name: "Empty" })).status, 200);
+  // Closing the guarded agent and making it again does not drop Ask me first.
+  assert.equal((await post(stale.post, { action: "close", agentId: guarded })).status, 200);
+  assert.equal((await agent(stale.post, "Guard")).status, 403);
+  // With a fresh code each lands.
+  assert.equal((await agent(fresh.post, "Guard")).status, 200);
+  assert.notEqual((await post(fresh.post, { action: "createTab", projectId, name: "Review", templateId: DOCUMENT_REVIEW_ID })).status, 403);
+  // Another project is not affected.
+  const other = ((await (await post(stale.post, { action: "createProject", name: "Other", source: "folder" })).json()) as { project: { id: string } }).project.id;
+  assert.equal((await post(stale.post, { action: "createAgent", tabId: cs.tabs(other)[0].id, name: "Plain", kind: "claude-code", model: "haiku", permission: "edit" })).status, 200);
 });
 
 test("without mail, commands with weight beyond the page are refused with how to enable them", async (t) => {

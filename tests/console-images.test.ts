@@ -351,5 +351,14 @@ test("a Stop during the source read submits nothing; claims are checked again be
     { calls: 8, turnUsd: 1, defaultTabUsd: 5 },
   );
   assert.deepEqual(admitted, { refused: "This call ($0.015) would take the tab's spend ($0.03) past its limit of $0.04. Ask the owner to raise it or reset spend." });
+  // The Console-wide limit holds too, whatever the tab's own limit.
+  h.store.setSpendLimit(h.tab.id, 5, 5, true);
+  h.store.setConsoleSpendLimit(0.04, false);
+  const overConsole = h.store.chargeImageCall(
+    h.worker.epoch!,
+    { turnId: second.turnId, agent: h.store.agent(lead.id)!, tool: "image_generate", model: "krea-2-turbo", label: "Krea 2 Turbo", priceUsd: 0.015, path: "design/x" },
+    { calls: 8, turnUsd: 1, defaultTabUsd: 5 },
+  );
+  assert.deepEqual(overConsole, { refused: "This call ($0.015) would take the Console's spend this month ($0.03) past its limit of $0.04. Ask the owner to raise it or reset it on the Overview." });
   await stop(second.turnId);
 });

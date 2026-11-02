@@ -231,8 +231,9 @@ test("team_reply answers exactly once; a repeated call in one turn does not send
   assert.match(h.said(lead.id).at(-1)!, /error: No teammate called "Nobody"/);
   await h.ended(h.send(lead.id, "team_send Lead hi"));
   assert.match(h.said(lead.id).at(-1)!, /error: No teammate called "Lead"/);
-  // Two teammates of one name: the name is refused, the id works.
-  const twin = h.agent("reviewer");
+  // Two teammates of one name (New agent now refuses that; a tab made
+  // before may still have them): the name is refused, the id works.
+  const twin = h.store.createAgent({ tabId: h.tab.id, name: "reviewer", role: "", kind: "claude-code", model: "haiku", effort: null, permission: "edit" });
   await h.ready(twin.id);
   await h.ended(h.send(lead.id, "team_send Reviewer hi"));
   assert.match(h.said(lead.id).at(-1)!, /error: Several teammates are called "Reviewer"; give the id/);

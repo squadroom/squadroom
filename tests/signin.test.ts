@@ -254,12 +254,16 @@ test("without mail, GitHub alone signs in, never as a fresh confirmation, and a 
   assert.equal(signIn.freshCode(signIn.full(second)!, 8 * 60 * 60_000), false);
 });
 
-test("sign-in steps are rate limited per address and in total", async (t) => {
+test("sign-in steps are rate limited per address, and in total except for start", async (t) => {
   const { signIn } = setup(t);
   for (let i = 0; i < 10; i++) assert.equal(signIn.allow("start", "203.0.113.1"), true);
   assert.equal(signIn.allow("start", "203.0.113.1"), false);
-  for (let i = 0; i < 19; i++) signIn.allow("start", `198.51.100.${i}`);
-  assert.equal(signIn.allow("start", "198.51.100.200"), false);
+  // Many addresses starting sign-ins cannot stop another address starting one.
+  for (let i = 0; i < 40; i++) signIn.allow("start", `198.51.100.${i}`);
+  assert.equal(signIn.allow("start", "198.51.100.200"), true);
+  // The checking steps keep their total limit.
+  for (let i = 0; i < 30; i++) signIn.allow("callback", `192.0.2.${i}`);
+  assert.equal(signIn.allow("callback", "192.0.2.200"), false);
   assert.equal(signIn.allow("code", "203.0.113.1"), true);
 });
 

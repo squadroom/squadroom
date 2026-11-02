@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CONSOLE_CODE_MS, KEY_ACTIONS, storeFailure, type CommandAction, currentSpendLimit, runKeysCommand, needsFreshCode, runCommand } from "@/lib/console/commands";
+import { CONSOLE_CODE_MS, KEY_ACTIONS, storeFailure, type CommandAction, freshCodeContext, runKeysCommand, needsFreshCode, runCommand } from "@/lib/console/commands";
 import { archiveImpact, keysPageView, changesView, needsView, projectView, projectsView, rolesView, searchView, templatesView, treeView, workerView } from "@/lib/console/views";
 import { consoleAccess, consoleHealth, consoleJson, consoleSignIn, consoleStore } from "@/lib/console/web";
 import { consoleKeysFile, consoleLogFile } from "@/lib/console/config";
@@ -126,8 +126,7 @@ export async function POST(request: Request) {
   try {
     const store = consoleStore();
     const action = input.action as CommandAction;
-    const spendLimit = action === "setSpendLimit" ? currentSpendLimit(store, input.tabId) : null;
-    const needsCode = needsFreshCode(input, spendLimit);
+    const needsCode = needsFreshCode(input, freshCodeContext(store, input));
     const service = consoleSignIn(serverSettings());
     if (needsCode && !service.emailCodes) return consoleJson({ error: MAIL_REQUIRED }, 403);
     if (needsCode && !service.freshCode(gate.session, CONSOLE_CODE_MS))
@@ -138,7 +137,7 @@ export async function POST(request: Request) {
       if (!service.signOutDevice(input.id)) return consoleJson({ error: "That device is no longer signed in." }, 409);
       return consoleJson({ signedOut: true });
     }
-    return consoleJson(KEY_ACTIONS.has(action) ? runKeysCommand(store, consoleKeysFile(), input) : runCommand(store, input, { mayRaiseSpend: needsCode }));
+    return consoleJson(KEY_ACTIONS.has(action) ? runKeysCommand(store, consoleKeysFile(), input) : runCommand(store, input, { freshCode: needsCode }));
   } catch (error) {
     if (!storeFailure(error)) return consoleJson({ error: (error as Error).message }, 409);
     return consoleJson({ error: "Unable to save to the Console's store." }, 500);

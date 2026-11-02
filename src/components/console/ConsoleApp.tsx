@@ -339,7 +339,7 @@ export default function ConsoleApp() {
   // Each Settings section's screen, by its address (#settings/keys).
   const settingsSection = {
     "": null,
-    overview: <OverviewDialog onShow={(agentId) => void openAgent(agentId)} />,
+    overview: <OverviewDialog onShow={(agentId) => void openAgent(agentId)} run={run} />,
     keys: <KeysDialog run={run} />,
     roles: <RolesDialog roles={roles} run={runAndList} />,
     templates: (
