@@ -366,8 +366,12 @@ export class Repos {
     if (stepFiles && since) await this.keepToStep(agent, epoch, { files: stepFiles, since });
     // An unfinished merge is left for the agent to resolve in this turn.
     const committed = await this.commit(agent, project, turnId, `Console: changes not committed before turn ${turnId}`, epoch, "skip", stepFiles && since ? { files: stepFiles, since } : null);
-    // Commits made between turns (by a program the agent left running) are
-    // recorded now, so Changes shows them and Push branch may send them.
+    // A tab with steps: the turn starts from the commit just checked (or
+    // the step's start), never from a HEAD a program the agent left running
+    // may have moved since; the turn's own check puts such a commit back.
+    if (stepFiles && since) return { head: committed ?? since, committed };
+    // Otherwise commits made between turns (by such a program) are recorded
+    // now, so Changes shows them and Push branch may send them.
     const head = await this.head(agent);
     if (head && agent.permission === "edit" && project.source !== "none" && head !== this.recordedHead(agent)) await this.refreshDiff(agent, epoch);
     return { head, committed };

@@ -198,3 +198,46 @@ for (const during of ["show", "diff"])
     assert.ok(!h.store.diff(lead.id)!.files.includes("brief.md"));
     assert.notEqual(h.store.diff(lead.id)!.head, stray);
   });
+
+test("in a tab with steps, a commit that appears while the Console records leftovers before a turn is not its baseline", async (t) => {
+  let armed = false;
+  let committed = false;
+  let stray = "";
+  const h = await harness(t, {}, false, {
+    launcher: (l) => {
+      const git = l.git.bind(l);
+      l.git = async (folder, args, ...rest) => {
+        const r = await git(folder, args, ...rest);
+        if (armed && args.includes("commit") && args.includes("--no-verify")) committed = true;
+        else if (armed && committed && args.includes("show") && args.includes("--stat")) {
+          armed = false;
+          writeFileSync(join(folder, "brief.md"), "late\n");
+          const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=x", "-c", "user.email=x@x", ...a], { cwd: folder, env: ENV, encoding: "utf8" }).trim();
+          g("add", "brief.md");
+          g("commit", "-qm", "late");
+          stray = g("rev-parse", "HEAD");
+        }
+        return r;
+      };
+      return l;
+    },
+  });
+  h.store.setTabSteps(h.tab.id, [{ name: "Notes", files: ["notes.md"] }]);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  // Left over from before the turn: committed on its own first.
+  writeFileSync(join(folder, "notes.md"), "leftover\n");
+  armed = true;
+  const turn = h.send(lead.id, "hello");
+  await h.ended(turn);
+  await h.until(() => !h.store.changing(lead.id) && !!h.store.diff(lead.id), "turn settled");
+  assert.ok(stray);
+  assert.notEqual(h.store.turn(turn)!.commitBefore, stray);
+  assert.notEqual(h.store.diff(lead.id)!.head, stray);
+  assert.ok(!h.store.diff(lead.id)!.files.includes("brief.md"));
+  // The turn's own check put the stray commit's file back.
+  assert.ok(!existsSync(join(folder, "brief.md")));
+  assert.notEqual(execFileSync("git", ["rev-parse", "HEAD"], { cwd: folder, encoding: "utf8" }).trim(), stray);
+});
