@@ -187,7 +187,9 @@ for (const during of ["show", "diff"])
     h.store.setTabSteps(h.tab.id, [{ name: "Notes", files: ["notes.md"] }]);
     await h.worker.start();
     const lead = h.agent("Lead");
-    await h.ready(lead.id);
+    const mate = h.agent("Mate");
+    await h.ready(lead.id, mate.id);
+    await h.ended(h.send(mate.id, `call team_claim ${JSON.stringify({ paths: ["notes.md"], note: "mine" })}`));
     armed = true;
     const turn = h.send(lead.id, "write notes.md");
     await h.ended(turn);
@@ -197,6 +199,8 @@ for (const during of ["show", "diff"])
     assert.equal(h.store.diff(lead.id)!.head, h.store.turn(turn)!.commitAfter);
     assert.ok(!h.store.diff(lead.id)!.files.includes("brief.md"));
     assert.notEqual(h.store.diff(lead.id)!.head, stray);
+    // The Console's own commit is still checked against a teammate's claim.
+    await h.until(() => h.store.notices().some((n) => n.text.startsWith("Lead changed notes.md, which Mate has claimed")), "claim notice");
   });
 
 test("in a tab with steps, a commit that appears while the Console records leftovers before a turn is not its baseline", async (t) => {
