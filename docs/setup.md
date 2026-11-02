@@ -322,8 +322,9 @@ Things to know while using it:
   your mirror and opens or updates its pull request; **Open pull request**
   asks the agent to write the title and description first. Push branch
   sends only the commit the Console recorded at the end of the agent's
-  last turn; a commit made after that is refused until the next turn. With
-  `CONSOLE_CODEX_REVIEW=on` in `.env.local` (off by default; restart the
+  last turn, even after a worker restart; a commit made after that is
+  refused until the next turn. With `CONSOLE_CODEX_REVIEW=on` in
+  `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.
 - **Stop** asks the agent to stop; **Force stop** ends its process.

@@ -271,3 +271,25 @@ test("a merge left open with a conflict in an allowed file: its markers are not 
   assert.doesNotMatch(git(folder, "show", `refs/heads/${branch}:notes.md`), /<<<<<<<|>>>>>>>/);
   assert.ok(h.events(lead.id).some((e) => e.turnId === turn && e.kind === "error" && /Conflict markers remain in notes\.md/.test(JSON.stringify(e.body))));
 });
+
+test("a restart while a turn was being committed: a stray outside-step commit at HEAD is not recorded, so it is never pushed", async (t) => {
+  const h = await stepped(t);
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await h.ended(h.send(lead.id, "hello"));
+  const recorded = h.store.diff(lead.id)?.head ?? null;
+  const folder = h.store.agent(lead.id)!.folder;
+  await h.worker.stop();
+  // The earlier worker died mid-commit (settling still set) while a program
+  // the agent left running committed a file outside the step.
+  writeFileSync(join(folder, "brief.md"), "forbidden\n");
+  git(folder, "add", "-A");
+  git(folder, "commit", "-q", "-m", "stray");
+  const stray = git(folder, "rev-parse", "HEAD");
+  h.store.setSettling(h.store.lease()!.epoch, lead.id, 1);
+  const next = h.newWorker();
+  await next.start();
+  assert.deepEqual(h.store.settlingAgents(), []);
+  assert.notEqual(h.store.diff(lead.id)?.head ?? null, stray);
+  assert.equal(h.store.diff(lead.id)?.head ?? null, recorded);
+});

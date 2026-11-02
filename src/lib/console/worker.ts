@@ -19,6 +19,7 @@ import { realInside, type ConsolePaths } from "./permissions.ts";
 import { Redactor } from "./redact.ts";
 import { Repos } from "./repos.ts";
 import { sweepUploadLeftovers } from "./agent-files.ts";
+import { currentStepFiles } from "./templates.ts";
 import { ConsoleStore, LEASE_LOST, NEEDS_MAIL, type TurnRow } from "./store.ts";
 import { CODEX_DISABLED, LIMITS, type ConsoleAgent } from "./types.ts";
 import type { Credential, OwnerAnswer, Runtime } from "./worker/shared.ts";
@@ -380,10 +381,14 @@ export class ConsoleWorker {
     for (const { agent, charge } of charged) this.checkSpend(agent, charge);
     await this.recoverProgress(epoch);
     // A turn an earlier worker ended but did not finish committing:
-    // its diff is read again before approval is possible.
+    // its diff is read again before approval is possible. A tab with steps
+    // keeps the head it last recorded (checked): HEAD may be a commit nobody
+    // checked (a program the agent left running), so it is left for the next
+    // turn's step check and is never pushed meanwhile.
     for (const id of this.store.settlingAgents()) {
       const agent = this.store.agent(id);
-      if (agent?.folder) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
+      const stepped = agent?.permission === "edit" && !!currentStepFiles(this.store.tabSteps(agent.tabId));
+      if (agent?.folder && !stepped) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
       this.safe(() => this.store.setSettling(epoch, id, null));
     }
     // Image calls an earlier worker left open stay charged, never resubmitted.
