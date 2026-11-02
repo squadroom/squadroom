@@ -53,3 +53,9 @@ test("the setup script looks for Homebrew's keg-only node@24 and refuses to run 
   assert.match(setup, /sudo -u \$AGENT \/usr\/bin\/env -i [^\n]*\\\n[^\n]*\\\n\s+\$NODE_BIN\/npm ci /);
   assert.doesNotMatch(setup, /npm install/);
 });
+
+test("the setup script defines every helper it calls", () => {
+  const setup = read("scripts/console/setup-agent-user.sh");
+  for (const helper of ["step", "fail", "warn"])
+    if (new RegExp(`(^\\s*|[|&;] *|\\{ *)${helper} `, "m").test(setup)) assert.match(setup, new RegExp(`^${helper}\\(\\) \\{`, "m"), helper);
+});
