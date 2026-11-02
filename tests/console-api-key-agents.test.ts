@@ -8,7 +8,6 @@ import { codexServerArgs } from "../src/lib/console/codex.ts";
 import { chargeTurn, NO_REQUESTS, readRunning, requestGauged, requestUsage } from "../src/lib/console/spend.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
-import { runCommand } from "../src/lib/console/commands.ts";
 
 // Claude Code on an Anthropic API key and Codex on an OpenAI API key, as
 // explicit model choices: each runs on its key and is charged from its
