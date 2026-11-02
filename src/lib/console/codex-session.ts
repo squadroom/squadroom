@@ -39,7 +39,8 @@ class CodexSession implements AgentSession {
   /** The owner's Force stop: no other Codex turn starts until the server
    * is ended or the interrupt lands. */
   forcing = false;
-  /** Each item's file paths (the file-change approval checks them). */
+  /** Each item's files, rename destinations included (the file-change
+   * approval checks them; none when they could not be read). */
   items = new Map<string, string[]>();
 
   constructor(driver: CodexLoginDriver, ctx: SessionContext) {
@@ -302,6 +303,12 @@ class CodexSession implements AgentSession {
       }
       case "item/fileChange/requestApproval": {
         if (!this.turn) return server.respond(id, { decision: "decline" });
+        // A request for a standing write grant under a folder is never
+        // given (the Console decides each change itself).
+        if (params.grantRoot !== undefined && params.grantRoot !== null) {
+          ctx.emit({ kind: "permission", tool: "Edit", decision: "deny", reason: "Write access to a whole folder is not granted in Console windows." });
+          return server.respond(id, { decision: "decline" });
+        }
         const paths = this.items.get(String(params.itemId ?? "")) ?? [];
         const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, { ...ctx.agent, stepFiles: ctx.stepFiles?.() }, this.driver.host.realInside));
         return server.respond(id, { decision: answer.allow ? "accept" : "decline" });
@@ -404,7 +411,7 @@ class CodexLoginDriver implements AgentDriver {
   /** The App Server, started on first use (one per login). */
   async server(): Promise<CodexServer> {
     if (this.current && !this.current.exited) {
-      if (this.ending) throw new CodexError("The Codex server is being ended.");
+      if (this.ending || this.serverRetiring()) throw new CodexError("The Codex server is being ended.");
       return this.current;
     }
     if (this.serverRetiring()) throw new CodexError("The previous Codex server has not exited yet.");
@@ -414,6 +421,7 @@ class CodexLoginDriver implements AgentDriver {
       server.onNotification = (method, params) => this.threads.get(String(params.threadId ?? ""))?.onNotification(method, params);
       server.onRequest = (id, method, params) => void this.request(server, id, method, params);
       server.onExit = (code) => this.onExit(server, code);
+      server.onOversize = () => this.oversize(server);
       try {
         await server.initialize();
         if (this.host.stopped()) throw new Error("The Console worker stopped.");
@@ -458,6 +466,16 @@ class CodexLoginDriver implements AgentDriver {
     this.ending ??= { by, reason, end: new Ending(this.host, server) };
     const collateral = [...this.sessions].filter((s) => s !== this.ending!.by && s.turn).map((s) => s.ctx.agent.id);
     return this.ending.end.done.then(() => ({ contained: true, collateral }));
+  }
+
+  /** One line this long is not the protocol: every turn on the server
+   * stops ("output limit"), and the server is ended the way any is (TERM,
+   * then KILL, through the launcher), before another starts. */
+  private oversize(server: CodexServer) {
+    if (server.exited || [...this.retired].some((e) => e.proc === server)) return;
+    this.host.log("the Codex server printed a line over the output limit; ending it");
+    if (server === this.current) for (const s of this.sessions) if (s.turn) s.ctx.emit({ kind: "oversize" });
+    this.retired.add(new Ending(this.host, server));
   }
 
   private onExit(server: CodexServer, code: number | null) {

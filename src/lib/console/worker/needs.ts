@@ -28,6 +28,17 @@ const APPROVE_TOOL = {
   },
 };
 
+/** A name of the Console's own where Claude Code asks about a tool of its
+ * own: `approve` itself (the agent calling it directly, which Claude Code
+ * asks about first), a team or image tool's bare name, or another name on
+ * the Console's server. A request the agent wrote itself can then never
+ * pass for one of the Console's own decisions (team_push, team_pr_reply). */
+export function consoleToolName(tool: string): boolean {
+  const own = /^mcp__console__(.*)$/.exec(tool);
+  if (own) return !TEAM_TOOL_NAMES.has(own[1]) && !IMAGE_TOOL_NAMES.has(own[1]);
+  return tool === APPROVE_TOOL.name || TEAM_TOOL_NAMES.has(tool) || IMAGE_TOOL_NAMES.has(tool);
+}
+
 /** A path with every existing part's links resolved (the rest appended). */
 function realPath(path: string): string {
   let probe = resolve(path);
@@ -208,6 +219,11 @@ export const needs = {
         if (name !== "approve") return text(`Unknown tool: ${name}`, true);
         const a = (args && typeof args === "object" ? args : {}) as { tool_name?: unknown; input?: unknown };
         const tool = typeof a.tool_name === "string" ? a.tool_name : "";
+        if (consoleToolName(tool)) {
+          const reason = "The Console's own tools are not decided through this tool.";
+          this.record(rt, tool, a.input, { behavior: "deny", reason });
+          return text({ behavior: "deny", message: reason });
+        }
         // A tab with steps: writes only to the current step's files.
         const stepped = this.store.tabSteps(rt.agent.tabId);
         const agent = { ...rt.agent, stepFiles: currentStepFiles(stepped) };

@@ -265,6 +265,8 @@ export abstract class ClientProcess {
   private label: string;
   private decoder = new StringDecoder("utf8");
   private pending = "";
+  /** Inside a line already found too long: dropped up to its newline. */
+  private skipping = false;
   private stderr = "";
   private stderrDecoder = new StringDecoder("utf8");
 
@@ -312,10 +314,16 @@ export abstract class ClientProcess {
     while ((at = this.pending.indexOf("\n")) >= 0) {
       const line = this.pending.slice(0, at);
       this.pending = this.pending.slice(at + 1);
-      // A whole line this long is not the protocol either: never parsed.
+      // The rest of a line already found too long ends here: dropped.
+      if (this.skipping) {
+        this.skipping = false;
+        continue;
+      }
+      // A whole line this long is not the protocol either: never parsed,
+      // and the lines after it are still read.
       if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
-        this.pending = "";
-        return this.onOversize();
+        this.onOversize();
+        continue;
       }
       if (!line.trim()) continue;
       let message: unknown;
@@ -326,9 +334,12 @@ export abstract class ClientProcess {
       }
       if (isObject(message)) this.received(message);
     }
+    // A line still unfinished past the limit is dropped as it arrives, up
+    // to its end, so no tail of it is ever read as a line of its own.
     if (Buffer.byteLength(this.pending) > MAX_LINE_BYTES) {
       this.pending = "";
-      this.onOversize();
+      if (!this.skipping) this.onOversize();
+      this.skipping = true;
     }
   }
   /** One message from the program. */

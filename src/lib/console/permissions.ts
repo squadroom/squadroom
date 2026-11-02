@@ -308,7 +308,10 @@ function boundaries(
   if (HARMLESS.has(tool)) return { behavior: "allow", reason: "No access to files outside the sandbox." };
   if (tool === "AskUserQuestion") return { behavior: "ask", question: true, reason: "A question for the owner.", summary: questionText(input) };
   if (tool.startsWith("mcp__")) return { behavior: "deny", reason: "Only the Console's own tools are available." };
-  return { behavior: "ask", reason: `${tool} needs the owner's approval.`, ruleKey: `tool:${tool}`, summary: `${tool}: ${oneLine(input)}` };
+  // A client tool's rule has its own prefix, so no name a client asks
+  // about can ever match a rule for the Console's own decisions
+  // (`tool:team_push`, `tool:team_pr_reply`).
+  return { behavior: "ask", reason: `${tool} needs the owner's approval.`, ruleKey: `client:${tool}`, summary: `${tool}: ${oneLine(input)}` };
 }
 
 /** A tool's input on one line, whole: the worker redacts every summary

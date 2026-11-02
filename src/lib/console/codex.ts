@@ -1,6 +1,6 @@
 import type { Launcher } from "./launcher.ts";
 import { Redactor } from "./redact.ts";
-import { count, oneLine as shorten, RpcProcess, str } from "./session.ts";
+import { count, isObject, oneLine as shorten, RpcProcess, str } from "./session.ts";
 import { codexPlanOp, type TaskOp } from "./tasks.ts";
 
 // The Codex driver: one `codex app-server` per login, run as
@@ -22,6 +22,8 @@ export function codexServerArgs(apiKey: boolean): string[] {
 export type CodexEvent =
   | { type: "delta"; kind: "text" | "thinking"; text: string }
   | { type: "message"; itemId: string; text: string }
+  /** `paths`: a file change's files (`changedFiles`); empty when it
+   * cannot be read, which the approval refuses. */
   | { type: "tool"; itemId: string; name: string; summary: string; paths: string[] }
   | { type: "tool_result"; itemId: string; text: string; error: boolean }
   /** One model request's usage (`last`); the thread's `total` spans every
@@ -39,14 +41,38 @@ export type CodexEvent =
   | { type: "started"; turnId: string }
   | { type: "completed"; turnId: string; status: string; error: string | null };
 
+/** The kinds of file change Codex 0.155.1 reports (`PatchChangeKind`). */
+const CHANGE_KINDS = new Set(["add", "delete", "update"]);
+
+/** Every file a file change touches: each change's path and, for a rename,
+ * where it moves to (`kind.move_path`). Null when a change cannot be read
+ * (no path, or a kind the Console does not know), so it is never approved. */
+export function changedFiles(changes: unknown): string[] | null {
+  if (!Array.isArray(changes) || !changes.length) return null;
+  const files: string[] = [];
+  for (const change of changes) {
+    if (!isObject(change)) return null;
+    const kind = isObject(change.kind) ? change.kind : null;
+    const path = str(change.path);
+    if (!path || !kind || !CHANGE_KINDS.has(str(kind.type))) return null;
+    files.push(path);
+    for (const move of [kind.move_path, change.move_path]) {
+      if (move === undefined || move === null) continue;
+      if (typeof move !== "string" || !move) return null;
+      files.push(move);
+    }
+  }
+  return files;
+}
+
 function itemTool(item: Record<string, unknown>, redactor: Redactor): { name: string; summary: string; paths: string[] } | null {
   const short = (text: string) => shorten(redactor, text);
   switch (item.type) {
     case "commandExecution":
       return { name: "Shell", summary: short(str(item.command)), paths: [] };
     case "fileChange": {
-      const paths = (Array.isArray(item.changes) ? item.changes : []).map((c) => str((c as { path?: unknown })?.path)).filter(Boolean);
-      return { name: "Edit", summary: short(paths.join(", ")), paths };
+      const files = changedFiles(item.changes);
+      return { name: "Edit", summary: short((files ?? []).join(", ")), paths: files ?? [] };
     }
     case "mcpToolCall":
       return { name: `${str(item.server)}:${str(item.tool)}`, summary: short(JSON.stringify(item.arguments ?? {})), paths: [] };
@@ -174,8 +200,6 @@ export class CodexServer extends RpcProcess {
     super(launcher.spawn(home, binary, codexServerArgs(!!apiKey), {}), home, "The Codex server");
     this.redactor = redactor;
     this.apiKey = apiKey;
-    // One line this long is not the protocol: the server is ended.
-    this.onOversize = () => this.child.kill("SIGTERM");
   }
   protected ended() {
     for (const call of this.calls.values()) {

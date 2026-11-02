@@ -134,7 +134,10 @@ toward the tab's spend limit. You can skip the logins above if you only
 want the API-key models. A window never switches between its login and
 a key: if the client reports the other one, the turn stops. Web search is
 off for the API-key models, because it is billed per search and Squadroom
-can't work out its cost from the usage the client reports.
+can't work out its cost from the usage the client reports. Each turn is
+charged once for its own usage. After the worker restarts, a Claude Code
+"(API key)" window's first turn can't be measured, so it is charged its
+full allowance and its tab pauses until you Resume.
 
 ## 5. An https address
 
@@ -523,6 +526,7 @@ needs a fresh confirmation).
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |
+| One line of a client's output | 8 MB | The line is dropped and the turn stops ("Output limit"); a Codex server that prints one is ended, with every turn on it |
 | Agent turns caused by one message of yours (through team messages) | 40 | The tab pauses; Resume continues |
 | Time one message of yours keeps the team going | 2 h | The tab pauses; Resume continues |
 | Two agents messaging with no new commit or message from you | 12 messages | The tab pauses (the circle detector) |

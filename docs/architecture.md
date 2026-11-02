@@ -76,7 +76,17 @@ sign-in's state. Events are redacted before they are written.
   (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused; in a tab with steps, only the current step's files)
   or files it in Needs you (network per host, unknown tools, pushes).
-  "Always" rules are the Console's own, never the client's. In a tab with
+  "Always" rules are the Console's own, never the client's, and a client
+  tool's rule is kept under its own prefix (`client:<tool>`), apart from the
+  Console's own decisions (`tool:team_push`, `tool:team_pr_reply`). Claude's
+  permission tool (`approve`) refuses the Console's own tool names, so an
+  agent calling it directly can't pass for, or leave a rule for, a push. A
+  Codex file change is approved only if every file it touches is in the
+  agent's folder, a rename's destination (`kind.move_path`) included;
+  unknown change kinds and `grantRoot` requests are refused. An ACP team
+  tool call skips the owner only when the client itself names the tool
+  (Grok Build's `UseTool` record); a title or a `tool_name` in the model's
+  arguments never counts. In a tab with
   steps the worker also puts back, before each commit, anything the turn
   changed outside the step's files, whichever way it was written.
 - **Only what ran counts.** Changes and commits come from the folder on
@@ -144,7 +154,11 @@ code step once when mail is down; it does not confirm weighty commands.
   limits, change keys or grant permanent permissions.
 - **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
   their spend limit; a turn whose usage cannot be trusted is charged its
-  full allowance and pauses its tab.
+  full allowance and pauses its tab. Claude Code reports `modelUsage` as a
+  running total for its session, so an API-key turn is charged the change
+  since the last result the worker saw for that session (kept across a
+  process restart and resume). A total that went down, or a session resumed
+  by a worker that never saw its totals, is charged the full allowance.
 
 **Not protected against (known limits):**
 

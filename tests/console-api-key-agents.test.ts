@@ -3,10 +3,11 @@ import { test } from "node:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentModel } from "../src/lib/console/agents.ts";
-import { apiKeyUsage, expectedKeySource } from "../src/lib/console/claude-session.ts";
+import { apiKeyTurnUsage, apiKeyUsage, expectedKeySource, turnModelUsage } from "../src/lib/console/claude-session.ts";
 import { codexServerArgs } from "../src/lib/console/codex.ts";
 import { chargeTurn } from "../src/lib/console/spend.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
+import { runCommand } from "../src/lib/console/commands.ts";
 
 // Claude Code on an Anthropic API key and Codex on an OpenAI API key, as
 // explicit model choices: each runs on its key and is charged from its
@@ -64,6 +65,77 @@ test("an API-key Claude turn is charged from every model's usage; a pricier or u
   assert.equal(apiKeyUsage(SONNET_KEY, [part("claude-sonnet-5", 10, 5, 1)]), null);
   assert.equal(apiKeyUsage(SONNET_KEY, []), null);
   assert.equal(apiKeyUsage(SONNET_KEY, [{ model: "claude-sonnet-5", usage: { outputTokens: 5 }, webSearches: 0 }]), null);
+});
+
+test("Claude Code's modelUsage is a running total: a turn is charged the change since the last result", () => {
+  const part = (model: string, input: number, output: number, webSearches = 0) => ({ model, usage: { inputTokens: input, cacheReadTokens: 1, cacheWriteTokens: 0, outputTokens: output }, webSearches });
+  const first = [part("claude-sonnet-5", 10, 5), part("claude-haiku-4-5-20251001", 20, 2)];
+  // A new session: everything so far is this turn's.
+  assert.deepEqual(apiKeyTurnUsage(SONNET_KEY, first, []), { inputTokens: 30, cacheReadTokens: 2, cacheWriteTokens: 0, outputTokens: 7 });
+  // The next turn's totals carry the first turn too: only the change counts.
+  const second = [part("claude-sonnet-5", 25, 9), part("claude-haiku-4-5-20251001", 20, 2)];
+  assert.deepEqual(turnModelUsage(second, first), [{ model: "claude-sonnet-5", usage: { inputTokens: 15, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 4 }, webSearches: 0 }]);
+  assert.deepEqual(apiKeyTurnUsage(SONNET_KEY, second, first), { inputTokens: 15, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 4 });
+  // An earlier helper on a pricier model that did not move is not this turn's.
+  const opus = [part("claude-sonnet-5", 10, 5), part("claude-opus-5-5", 1, 1)];
+  assert.deepEqual(apiKeyTurnUsage(SONNET_KEY, [part("claude-sonnet-5", 12, 6), part("claude-opus-5-5", 1, 1)], opus), { inputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 1 });
+  // Nothing moved: nothing used.
+  assert.deepEqual(apiKeyTurnUsage(SONNET_KEY, first, first), { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 });
+  // Unreadable, so the full allowance: no known starting point (a session
+  // resumed by a worker that never saw its totals), a total that went down,
+  // a model that vanished, a new web search.
+  assert.equal(apiKeyTurnUsage(SONNET_KEY, second, null), null);
+  assert.equal(apiKeyTurnUsage(SONNET_KEY, [part("claude-sonnet-5", 9, 9), part("claude-haiku-4-5-20251001", 20, 2)], first), null);
+  assert.equal(apiKeyTurnUsage(SONNET_KEY, [part("claude-sonnet-5", 25, 9)], first), null);
+  assert.equal(apiKeyTurnUsage(SONNET_KEY, [part("claude-sonnet-5", 25, 9, 1), part("claude-haiku-4-5-20251001", 20, 2)], first), null);
+});
+
+test("Claude Code on an API key: each turn is charged once, across turns, a restart and a resume, never its history", async (t) => {
+  const h = await harness(t, { tabSpendUsd: 1_000 });
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "claude-sonnet-5@api-key");
+  await h.ready(paid.id);
+  const usage = { inputTokens: 31, cacheReadTokens: 1, cacheWriteTokens: 0, outputTokens: 7 };
+  const once = chargeTurn(SONNET_KEY, usage)!.usd;
+  // A turn charged its allowance pauses the tab; each is resumed here.
+  const run = async (text: string) => {
+    const turn = h.send(paid.id, text);
+    await h.ended(turn);
+    if (h.store.turn(turn)!.costBasis === "allowance") {
+      await h.until(() => h.store.tab(h.tab.id)!.paused, "the tab waits");
+      runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+    }
+    return h.store.turn(turn)!;
+  };
+  // Two turns in one process: the second result's totals carry the first.
+  for (const text of ["hello", "again"]) {
+    const row = await run(text);
+    assert.equal(row.costBasis, "reported", text);
+    assert.equal(row.costUsd, once, text);
+  }
+  // The process ends; the next resumes the session, whose first result
+  // already carries the earlier turns.
+  assert.equal((await run("exit")).status, "failed");
+  const resumed = await run("hello");
+  assert.equal(resumed.costBasis, "reported");
+  assert.equal(resumed.costUsd, once);
+  // A zeroed report is a total that went down: the full allowance, and the
+  // next turn is charged from the totals before it.
+  assert.equal((await run("zeroed")).costBasis, "allowance");
+  const after = await run("hello");
+  assert.equal(after.costBasis, "reported");
+  assert.equal(after.costUsd, chargeTurn(SONNET_KEY, { inputTokens: 62, cacheReadTokens: 2, cacheWriteTokens: 0, outputTokens: 14 })!.usd);
+
+  // A new worker resuming the session knows none of its totals: its first
+  // turn is charged the allowance, the next only its own usage.
+  await h.worker.stop();
+  const next = h.newWorker();
+  await next.start();
+  assert.equal((await run("hello")).costBasis, "allowance");
+  const settled = await run("hello");
+  assert.equal(settled.costBasis, "reported");
+  assert.equal(settled.costUsd, once);
 });
 
 test("Claude Code on an API key: only its key crosses, it must report that key, web search is off, and the turn is charged", async (t) => {
