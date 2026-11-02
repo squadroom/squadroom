@@ -48,7 +48,7 @@ test("each path line the setup script replaces in the launcher is there exactly 
 test("the setup script looks for Homebrew's keg-only node@24 and refuses to run over live agents without --force", () => {
   const setup = read("scripts/console/setup-agent-user.sh");
   assert.match(setup, /\/opt\/homebrew\/opt\/node@24\/bin\/node \/usr\/local\/opt\/node@24\/bin\/node \$owner_node/);
-  assert.match(setup, /pgrep -U \$AGENT\); then\n\s+\(\( force \)\) \|\| fail/);
+  assert.match(setup, /running=\$\(agent_programs\) && \[\[ -n \$running \]\]; then\n\s+\(\( force \)\) \|\| fail/);
   // The clients install as the agent user, from their lockfiles, never as root.
   assert.match(setup, /sudo -u \$AGENT \/usr\/bin\/env -i [^\n]*\\\n[^\n]*\\\n\s+\$NODE_BIN\/npm ci /);
   assert.doesNotMatch(setup, /npm install/);
@@ -58,4 +58,26 @@ test("the setup script defines every helper it calls", () => {
   const setup = read("scripts/console/setup-agent-user.sh");
   for (const helper of ["step", "fail", "warn"])
     if (new RegExp(`(^\\s*|[|&;] *|\\{ *)${helper} `, "m").test(setup)) assert.match(setup, new RegExp(`^${helper}\\(\\) \\{`, "m"), helper);
+});
+
+test("setup stops the Console worker before installing and starts it again on exit, even on failure", () => {
+  const script = read("scripts/console/setup-agent-user.sh");
+  const stop = script.indexOf("/bin/launchctl bootout $WORKER");
+  const trap = script.indexOf("trap restart_worker EXIT");
+  const install = script.indexOf("npm ci --no-audit");
+  assert.ok(stop > 0 && trap > 0 && install > 0);
+  // The trap is set before the worker stops, and both before any install:
+  // a running worker ends every agent process each time it stops.
+  assert.ok(trap < stop && stop < install);
+  assert.match(script, /restart_worker\(\) \{[^}]*launchctl bootstrap gui\/\$OWNER_UID \$WORKER_PLIST/);
+});
+
+test("the running-programs check ignores macOS's own processes for the agent account", () => {
+  const script = read("scripts/console/setup-agent-user.sh");
+  const pattern = script.match(/agent_programs\(\) \{[^}]*grep -Ev '([^']+)'/)?.[1];
+  assert.ok(pattern, "the filter is found");
+  const ignored = new RegExp(pattern);
+  for (const system of ["/usr/sbin/distnoted", "/usr/sbin/cfprefsd", "/usr/libexec/secd", "/System/Library/Frameworks/x"]) assert.ok(ignored.test(system), system);
+  for (const agent of ["/usr/local/bin/node", "/opt/console-clients/codex-0.155.1/node_modules/.bin/codex", "/bin/zsh"]) assert.ok(!ignored.test(agent), agent);
+  assert.doesNotMatch(script, /running=\$\(\/usr\/bin\/pgrep -U \$AGENT\)/);
 });

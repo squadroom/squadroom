@@ -94,13 +94,12 @@ move one, pass the same name to the script
 bakes it into the launcher, and set it in the worker's environment too.
 
 When an update changes the launcher or the pinned agent programs,
-`npm run update` says so. Stop the worker, run the setup script again,
-and start the worker:
+`npm run update` says so. Run the setup script again; it stops the
+worker while it runs (a stopping worker ends every `agent` process, installs
+included) and starts it again when it ends, even on failure:
 
 ```bash
-launchctl kill TERM gui/$(id -u)/io.squadroom.console-worker
 sudo zsh scripts/console/setup-agent-user.sh
-launchctl kickstart gui/$(id -u)/io.squadroom.console-worker
 ```
 
 The launcher has a version number, and the worker refuses to start with

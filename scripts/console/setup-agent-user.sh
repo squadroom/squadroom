@@ -43,10 +43,35 @@ for dir in $AGENT_HOME $CLIENTS $LAUNCHER $SHARED; do
   [[ $dir =~ '^/[A-Za-z0-9._/-]+$' ]] || fail "$dir: use a plain absolute path (letters, digits, . _ - /)"
 done
 
+# The Console worker restarts itself (its LaunchAgent) and, each time it
+# stops, ends every '$AGENT' process: that would kill the installs below.
+# It is stopped for the length of setup and started again on exit, even when
+# setup fails, so a failed run never leaves it off.
+readonly OWNER_UID=$(/usr/bin/id -u $OWNER)
+readonly WORKER=gui/$OWNER_UID/io.squadroom.console-worker
+readonly WORKER_PLIST=$(/usr/bin/dscl . -read /Users/$OWNER NFSHomeDirectory | /usr/bin/awk '{print $2}')/Library/LaunchAgents/io.squadroom.console-worker.plist
+worker_was_on=0
+/bin/launchctl print $WORKER >/dev/null 2>&1 && worker_was_on=1
+restart_worker() {
+  (( worker_was_on )) && [[ -f $WORKER_PLIST ]] || return 0
+  /bin/launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST 2>/dev/null || /bin/launchctl kickstart $WORKER 2>/dev/null || true
+  print "  the Console worker is started again"
+}
+
 # Agent programs running now would lose their files and folders mid-turn.
-if /usr/bin/id $AGENT >/dev/null 2>&1 && running=$(/usr/bin/pgrep -U $AGENT); then
-  (( force )) || fail "${#${(f)running}} '$AGENT' processes are running. Stop the Console worker first (Ctrl-C, or launchctl kill TERM gui/$(/usr/bin/id -u $OWNER)/io.squadroom.console-worker), wait for its agents to end, then run this again. --force stops them all now, ending their turns."
-  warn "--force: stopping ${#${(f)running}} running '$AGENT' processes"
+# Only the agents' own programs count: macOS runs a few of its own for any
+# account in use (distnoted, cfprefsd and the like, from /usr or /System).
+agent_programs() {
+  /bin/ps -U $AGENT -o comm= 2>/dev/null | /usr/bin/grep -Ev '^(/usr/(sbin|libexec|bin)/|/System/)' || true
+}
+if /usr/bin/id $AGENT >/dev/null 2>&1 && running=$(agent_programs) && [[ -n $running ]]; then
+  (( force )) || fail "${#${(f)running}} '$AGENT' programs are running (Console turns). Let them finish, then run this again. --force stops them all now, ending their turns."
+  warn "--force: stopping ${#${(f)running}} running '$AGENT' programs"
+fi
+if (( worker_was_on )); then
+  step "Stopping the Console worker until setup ends"
+  trap restart_worker EXIT
+  /bin/launchctl bootout $WORKER 2>/dev/null || true
 fi
 
 # Node 24 or newer: it reads the pinned versions, installs the clients, and
