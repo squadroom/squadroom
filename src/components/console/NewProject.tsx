@@ -4,6 +4,7 @@ import { useState } from "react";
 import { NAME_MAX } from "@/lib/console/types";
 import { templateSummary } from "@/lib/console/ui";
 import Dialog from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 export function NewProject({ onClose, onCreate }: { onClose: () => void; onCreate: (fields: CommandFields<"createProject">) => Promise<void> }) {
@@ -11,6 +12,7 @@ export function NewProject({ onClose, onCreate }: { onClose: () => void; onCreat
   const [source, setSource] = useState<"github" | "folder" | "none">("github");
   const [repo, setRepo] = useState("");
   const [base, setBase] = useState("main");
+  const { busy, guard } = useBusy();
   return (
     <Dialog title="New project" onClose={onClose}>
       <label>
@@ -50,8 +52,8 @@ export function NewProject({ onClose, onCreate }: { onClose: () => void; onCreat
         <button onClick={onClose}>Cancel</button>
         <button
           className={styles.primary}
-          disabled={!name.trim() || (source === "github" && !repo.trim())}
-          onClick={() => void onCreate(source === "github" ? { name, source, repo, baseBranch: base } : { name, source })}
+          disabled={busy || !name.trim() || (source === "github" && !repo.trim())}
+          onClick={() => guard(() => onCreate(source === "github" ? { name, source, repo, baseBranch: base } : { name, source }))}
         >
           Create
         </button>
@@ -79,6 +81,7 @@ export function NewTab({
   const [name, setName] = useState(templates.find((t) => t.id === template)?.name ?? "");
   const [templateId, setTemplateId] = useState(template ?? "");
   const chosen = templates.find((t) => t.id === templateId);
+  const { busy, guard } = useBusy();
   return (
     <Dialog title={template ? "New tab from a template" : "New tab"} onClose={onClose}>
       <label>
@@ -105,7 +108,7 @@ export function NewTab({
       )}
       <div className={styles.dialogButtons}>
         <button onClick={onClose}>Cancel</button>
-        <button className={styles.primary} disabled={!name.trim()} onClick={() => void onCreate(name, templateId || undefined)}>
+        <button className={styles.primary} disabled={busy || !name.trim()} onClick={() => guard(() => onCreate(name, templateId || undefined))}>
           Create
         </button>
       </div>

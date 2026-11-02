@@ -5,6 +5,7 @@ import { NAME_MAX, PERMISSION_LABELS } from "@/lib/console/types";
 import { firstModel, offeredKinds, roleKind } from "@/lib/console/ui";
 import AiPicker, { type Ai } from "./AiPicker";
 import Dialog from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 export default function NewAgent({
@@ -27,6 +28,7 @@ export default function NewAgent({
     return { kind, model: firstModel(kind), effort: "default" };
   });
   const { kind, model, effort } = ai;
+  const { busy, guard } = useBusy();
   const [permission, setPermission] = useState<"edit" | "look">(talkOnly ? "look" : "edit");
   const [askFirst, setAskFirst] = useState(false);
   const [name, setName] = useState("");
@@ -90,8 +92,8 @@ export default function NewAgent({
         <button onClick={onClose}>Cancel</button>
         <button
           className={styles.primary}
-          disabled={!name.trim()}
-          onClick={() => void onCreate({ name, kind, model, effort, permission, askFirst: askFirst && kind === "claude-code", role })}
+          disabled={busy || !name.trim()}
+          onClick={() => guard(() => onCreate({ name, kind, model, effort, permission, askFirst: askFirst && kind === "claude-code", role }))}
         >
           Create
         </button>

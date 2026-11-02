@@ -16,7 +16,7 @@ import Icon from "./Icon";
 import InlineRename from "./InlineRename";
 import KindBadge from "./KindBadge";
 import { MenuButton, type MenuItem } from "./Menu";
-import { useUploads } from "./useUploads";
+import { useComposer } from "./useComposer";
 import styles from "./console.module.css";
 
 /** What a window's status pill says: the tree's words, and Closed. */
@@ -45,8 +45,8 @@ export default function AgentWindow({
   onOpenHelper: (helperId: number, name: string) => void;
   run: Run;
 }) {
-  const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  // The composer lives with the page, not the window.
+  const { draft, editing, sending, setDraft, setSending, edit, clearDraft, sent, uploads, uploadIds, uploading, uploadAll, clearUploads } = useComposer(agent);
   /** A command sent once the owner confirms it. */
   const confirmed = (question: string, body: ConsoleCommand) => () => {
     if (window.confirm(question)) void run(body);
@@ -142,15 +142,9 @@ export default function AgentWindow({
   // text blocks skip re-rendering their Markdown on every poll.
   const openFile = useCallback((path: string) => onOpenFile(agent.id, path), [onOpenFile, agent.id]);
   const onLink = useMemo(() => fileLinks((href) => resolveAgentPath(agent.folder, href), openFile), [agent.folder, openFile]);
-  const { uploads, uploadIds, uploading, uploadAll, sent, clear: clearUploads } = useUploads(agent);
-  // Queued-message controls: the message being edited, and the
-  // one whose Delete waits for a second click.
-  const [editing, setEditing] = useState<number | null>(null);
+  // Queued-message controls: the one whose Delete waits for a
+  // second click (the one being edited is the composer's).
   const [deleting, setDeleting] = useState<number | null>(null);
-  const clearDraft = () => {
-    setEditing(null);
-    setDraft("");
-  };
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   // The message box starts at two rows and grows with its text (its CSS
@@ -182,16 +176,19 @@ export default function AgentWindow({
     setSending(true);
     // An edit replaces the queued message in place; refused (it already
     // went to the agent), the text stays here. Files attached while editing
-    // go with the edited message.
+    // go with the edited message. What was typed while it was on its way
+    // stays in the box.
+    const text = draft;
+    const ids = uploadIds;
+    const wasEditing = editing !== null;
     const done = (await run(
-      editing !== null ? { action: "editQueued", turnId: editing, text: draft, uploadIds } : { action: "send", agentId: agent.id, text: draft, uploadIds },
+      editing !== null ? { action: "editQueued", turnId: editing, text, uploadIds: ids } : { action: "send", agentId: agent.id, text, uploadIds: ids },
     )) as { refusedUploads?: string[] } | null;
     setSending(false);
     if (!done) return;
-    clearDraft();
-    sent(uploadIds);
+    sent(text, ids);
     if (done.refusedUploads?.length)
-      window.alert(`Already announced with an earlier message, so not ${editing !== null ? "added" : "sent again"}: ${done.refusedUploads.join(", ")}.`);
+      window.alert(`Already announced with an earlier message, so not ${wasEditing ? "added" : "sent again"}: ${done.refusedUploads.join(", ")}.`);
   };
   return (
     <section
@@ -330,8 +327,9 @@ export default function AgentWindow({
         <div className={styles.transcript} ref={scroller} onScroll={onScroll}>
           <div className={styles.transcriptBody} ref={body}>
             {blocks.length === 0 && <p className={styles.hint}>{agent.role ? agent.role : "Send this agent a message to start."}</p>}
-            {blocks.map((b) => (
-              <BlockView key={b.key} block={b} onLink={onLink} onOpenFile={openFile} />
+            {blocks.map((b, i) => (
+              // The last text of a running turn is still streaming.
+              <BlockView key={b.key} block={b} live={agent.status === "working" && i === blocks.length - 1} onLink={onLink} onOpenFile={openFile} />
             ))}
           </div>
         </div>
@@ -378,8 +376,7 @@ export default function AgentWindow({
                   // The summary request's text is fixed.
                   hidden={q.summary}
                   onClick={() => {
-                    setEditing(q.id);
-                    setDraft(q.text);
+                    edit(q.id, q.text);
                     box.current?.focus();
                   }}
                 >

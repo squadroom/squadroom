@@ -8,7 +8,8 @@ import styles from "./console.module.css";
  * by name, with a status dot and kind badge, one click to any of them.
  * Projects and tabs collapse; a project's ⋯ opens its menu (a tab's menu is
  * on the tab strip). The open project and tab are highlighted, and the agent
- * last shown in that tab with them. */
+ * last shown in that tab with them. A plain list of buttons, reached with
+ * Tab: it does not claim the tree role, whose arrow keys it does not offer. */
 export default function NavTree({
   tree,
   collapsed,
@@ -38,14 +39,17 @@ export default function NavTree({
   if (!tree.length) return <p className={styles.hint}>No projects yet.</p>;
   return (
     <nav aria-label="Projects, tabs and agents">
-      <ul className={styles.tree} role="tree">
+      <ul className={styles.tree}>
         {rows.map((row) => {
           const indent = { paddingLeft: `${row.depth * 14}px` };
           if (row.kind === "agent") {
             const selected = row.id === agentId && row.tabId === tabId && row.projectId === projectId;
             return (
-              <li key={row.key} role="treeitem" aria-level={3} aria-selected={selected} style={indent}>
-                <button className={selected ? `${styles.treeAgent} ${styles.treeOn}` : styles.treeAgent} onClick={() => onAgent(row.id)} title={`${row.name}: ${STATUS_TEXT[row.status]}`}>
+              <li key={row.key} style={indent}>
+                <button
+                  className={selected ? `${styles.treeAgent} ${styles.treeOn}` : styles.treeAgent}
+                  aria-current={selected ? "true" : undefined}
+                  onClick={() => onAgent(row.id)} title={`${row.name}: ${STATUS_TEXT[row.status]}`}>
                   <span className={`${styles.dot} ${styles[`dot_${row.status}`] ?? ""}`} aria-hidden="true" />
                   {row.agentKind && <KindBadge kind={row.agentKind} small />}
                   <span className={styles.treeName}>{row.name}</span>
@@ -57,7 +61,7 @@ export default function NavTree({
           const key = row.kind === "project" ? projectKey(row.id) : tabKey(row.id);
           const active = row.kind === "project" ? row.id === projectId : row.id === tabId && row.projectId === projectId;
           return (
-            <li key={row.key} role="treeitem" aria-level={row.depth + 1} aria-expanded={row.expanded} aria-selected={active} style={indent}>
+            <li key={row.key} style={indent}>
               <span className={styles.treeRow}>
                 <button
                   className={styles.treeToggle}
@@ -69,6 +73,7 @@ export default function NavTree({
                 </button>
                 <button
                   className={`${row.kind === "project" ? styles.treeProject : styles.treeTab} ${active ? styles.treeOn : ""}`}
+                  aria-current={active ? "true" : undefined}
                   onClick={() => (row.kind === "project" ? onProject(row.id) : onTab(row.projectId, row.id))}
                 >
                   {row.kind === "project" && <span className={`${styles.dot} ${styles[`dot_${row.status}`] ?? ""}`} aria-hidden="true" />}

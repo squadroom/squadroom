@@ -2,19 +2,51 @@ import { memo } from "react";
 import Markdown from "@/components/shared/Markdown";
 import { formatSize, toolPaths } from "@/lib/console/files";
 import type { Block } from "@/lib/console/transcript";
+import { markdownPieces } from "@/lib/shared/markdown-stream";
 import styles from "./console.module.css";
 
+/** One finished piece of a streaming reply: rendered once. */
+const Piece = memo(function Piece({ text, onLink, highlight }: { text: string; onLink: (href: string) => boolean; highlight: boolean }) {
+  return (
+    <Markdown onLink={onLink} highlight={highlight}>
+      {text}
+    </Markdown>
+  );
+});
+
 /** An agent's text: its Markdown is parsed and highlighted again only when
- * the text (or the link handler) changes, not on every poll. */
-const TextBlock = memo(function TextBlock({ text, onLink }: { text: string; onLink: (href: string) => boolean }) {
+ * the text (or the link handler) changes, not on every poll.
+ * While it streams (`live`), only its last piece is parsed again on each
+ * update, unhighlighted; final, it is rendered whole. */
+const TextBlock = memo(function TextBlock({ text, live, onLink }: { text: string; live: boolean; onLink: (href: string) => boolean }) {
+  if (!live)
+    return (
+      <div className={styles.text}>
+        <Markdown onLink={onLink}>{text}</Markdown>
+      </div>
+    );
+  const pieces = markdownPieces(text);
   return (
     <div className={styles.text}>
-      <Markdown onLink={onLink}>{text}</Markdown>
+      {pieces.map((piece, i) => (
+        <Piece key={i} text={piece} onLink={onLink} highlight={i < pieces.length - 1} />
+      ))}
     </div>
   );
 });
 
-export default function BlockView({ block, onLink, onOpenFile }: { block: Block; onLink: (href: string) => boolean; onOpenFile: (path: string) => void }) {
+/** `live`: the block is the reply still streaming. */
+export default function BlockView({
+  block,
+  live = false,
+  onLink,
+  onOpenFile,
+}: {
+  block: Block;
+  live?: boolean;
+  onLink: (href: string) => boolean;
+  onOpenFile: (path: string) => void;
+}) {
   switch (block.type) {
     case "owner":
       return (
@@ -29,7 +61,7 @@ export default function BlockView({ block, onLink, onOpenFile }: { block: Block;
         </div>
       );
     case "text":
-      return <TextBlock text={block.text} onLink={onLink} />;
+      return <TextBlock text={block.text} live={live} onLink={onLink} />;
     case "upload":
       return (
         <p className={styles.statusLine}>

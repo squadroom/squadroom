@@ -11,7 +11,9 @@ export function reload(path: "/console" | "/login") {
   window.location.assign(new URL(path, window.location.origin));
 }
 
-export async function signInAction(body: Record<string, unknown>) {
+/** A sign-in step (the login page and the fresh-code dialog share it);
+ * `failed` is the error when the server gives none. */
+export async function signInAction(body: Record<string, unknown>, failed = "The request failed.") {
   const response = await fetch("/api/auth", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-workspace-request": "1" },
@@ -19,7 +21,7 @@ export async function signInAction(body: Record<string, unknown>) {
     cache: "no-store",
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error ?? "The request failed.");
+  if (!response.ok) throw new Error(data.error ?? failed);
   return data;
 }
 
