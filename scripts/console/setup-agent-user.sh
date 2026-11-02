@@ -45,33 +45,59 @@ done
 
 # The Console worker restarts itself (its LaunchAgent) and, each time it
 # stops, ends every '$AGENT' process: that would kill the installs below.
-# It is stopped for the length of setup and started again on exit, even when
-# setup fails, so a failed run never leaves it off.
+# It is stopped for the length of setup (its own stop also ends the App
+# Servers it keeps between turns) and started again on exit, even when setup
+# fails, so a failed run never leaves it off.
 readonly OWNER_UID=$(/usr/bin/id -u $OWNER)
+readonly OWNER_HOME=$(/usr/bin/dscl . -read /Users/$OWNER NFSHomeDirectory | /usr/bin/awk '{print $2}')
 readonly WORKER=gui/$OWNER_UID/io.squadroom.console-worker
-readonly WORKER_PLIST=$(/usr/bin/dscl . -read /Users/$OWNER NFSHomeDirectory | /usr/bin/awk '{print $2}')/Library/LaunchAgents/io.squadroom.console-worker.plist
+readonly WORKER_PLIST=$OWNER_HOME/Library/LaunchAgents/io.squadroom.console-worker.plist
+worker_loaded() { /bin/launchctl print $WORKER >/dev/null 2>&1 }
 worker_was_on=0
-/bin/launchctl print $WORKER >/dev/null 2>&1 && worker_was_on=1
+worker_loaded && worker_was_on=1
 restart_worker() {
   (( worker_was_on )) && [[ -f $WORKER_PLIST ]] || return 0
-  /bin/launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST 2>/dev/null || /bin/launchctl kickstart $WORKER 2>/dev/null || true
-  print "  the Console worker is started again"
+  local try
+  for try in {1..10}; do
+    worker_loaded && { print "  the Console worker is started again"; return 0 }
+    /bin/launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST 2>/dev/null || /bin/sleep 1
+  done
+  worker_loaded && print "  the Console worker is started again" ||
+    warn "the Console worker did not start again; start it: launchctl bootstrap gui/$OWNER_UID $WORKER_PLIST"
 }
 
-# Agent programs running now would lose their files and folders mid-turn.
-# Only the agents' own programs count: macOS runs a few of its own for any
-# account in use (distnoted, cfprefsd and the like, from /usr or /System).
-agent_programs() {
-  /bin/ps -U $AGENT -o comm= 2>/dev/null | /usr/bin/grep -Ev '^(/usr/(sbin|libexec|bin)/|/System/)' || true
-}
-if /usr/bin/id $AGENT >/dev/null 2>&1 && running=$(agent_programs) && [[ -n $running ]]; then
-  (( force )) || fail "${#${(f)running}} '$AGENT' programs are running (Console turns). Let them finish, then run this again. --force stops them all now, ending their turns."
-  warn "--force: stopping ${#${(f)running}} running '$AGENT' programs"
+# A Console turn running now (or waiting for your answer) would be ended.
+# The store says which are; a store moved with CONSOLE_STORE is passed the
+# same way as the other paths (sudo CONSOLE_STORE=… zsh …).
+readonly STORE=${CONSOLE_STORE:-$OWNER_HOME/.squadroom/console.sqlite}
+turns=0
+if [[ -f $STORE ]]; then
+  turns=$(/usr/bin/sqlite3 -readonly "$STORE" "select count(*) from console_turns where status in ('running', 'waiting_for_owner')" 2>/dev/null) || turns=""
+  [[ $turns == <-> ]] || { (( force )) || fail "could not read running turns from $STORE; let any turn finish, then run this again with --force"; turns=0 }
+fi
+if (( turns > 0 )); then
+  (( force )) || fail "$turns Console turn(s) are running or waiting for you. Let them finish, then run this again. --force ends them now."
+  warn "--force: ending $turns Console turn(s)"
 fi
 if (( worker_was_on )); then
   step "Stopping the Console worker until setup ends"
   trap restart_worker EXIT
   /bin/launchctl bootout $WORKER 2>/dev/null || true
+  for try in {1..60}; do worker_loaded || break; /bin/sleep 1; done
+  worker_loaded && fail "the Console worker did not stop within a minute; stop it (launchctl bootout $WORKER), then run this again"
+  print "  stopped"
+fi
+
+# What is left running as '$AGENT' after that is a program the worker did
+# not end (one an agent left behind, or a worker run by hand). macOS runs a
+# few of its own for any account in use (distnoted, cfprefsd and the like,
+# from /usr or /System); those do not count.
+agent_programs() {
+  /bin/ps -U $AGENT -o comm= 2>/dev/null | /usr/bin/grep -Ev '^(/usr/(sbin|libexec|bin)/|/System/)' || true
+}
+if /usr/bin/id $AGENT >/dev/null 2>&1 && running=$(agent_programs) && [[ -n $running ]]; then
+  (( force )) || fail "${#${(f)running}} '$AGENT' programs are still running (an agent's leftovers, or a worker run by hand: stop it with Ctrl-C). --force stops them all now."
+  warn "--force: stopping ${#${(f)running}} running '$AGENT' programs"
 fi
 
 # Node 24 or newer: it reads the pinned versions, installs the clients, and

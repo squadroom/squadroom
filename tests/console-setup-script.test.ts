@@ -69,7 +69,16 @@ test("setup stops the Console worker before installing and starts it again on ex
   // The trap is set before the worker stops, and both before any install:
   // a running worker ends every agent process each time it stops.
   assert.ok(trap < stop && stop < install);
-  assert.match(script, /restart_worker\(\) \{[^}]*launchctl bootstrap gui\/\$OWNER_UID \$WORKER_PLIST/);
+  const restart = script.slice(script.indexOf("restart_worker() {"), script.indexOf("\n}\n", script.indexOf("restart_worker() {")));
+  assert.match(restart, /launchctl bootstrap gui\/\$OWNER_UID \$WORKER_PLIST/);
+  // A failed restart says so rather than claiming success.
+  assert.match(restart, /warn "the Console worker did not start again/);
+  // Running turns are checked in the store before the worker is stopped,
+  // and setup waits for the old worker to unload before going on.
+  const turns = script.indexOf("from console_turns where status in ('running', 'waiting_for_owner')");
+  assert.ok(turns > 0 && turns < stop);
+  assert.match(script, /readonly STORE=\$\{CONSOLE_STORE:-/);
+  assert.match(script.slice(stop, install), /for try in \{1\.\.60\}; do worker_loaded \|\| break/);
 });
 
 test("the running-programs check ignores macOS's own processes for the agent account", () => {

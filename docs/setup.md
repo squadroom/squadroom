@@ -96,7 +96,8 @@ bakes it into the launcher, and set it in the worker's environment too.
 When an update changes the launcher or the pinned agent programs,
 `npm run update` says so. Run the setup script again; it stops the
 worker while it runs (a stopping worker ends every `agent` process, installs
-included) and starts it again when it ends, even on failure:
+included) and starts it again when it ends, even on failure. It refuses
+while a Squadroom turn is running (`--force` ends them):
 
 ```bash
 sudo zsh scripts/console/setup-agent-user.sh
