@@ -91,8 +91,8 @@ const safePattern = (f: string) =>
   f.split("/").every((part) => part && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
 
 /** Steps from a request (untrusted): problems as plain sentences, none
- * dropped. Each step has a unique name and at least one file pattern;
- * parking-lot.md is added to each. */
+ * dropped. Each step has a unique name and at least one file pattern
+ * besides parking-lot.md, which is added to each (last). */
 export function checkSteps(raw: unknown): { ok: true; steps: TemplateStep[] } | { ok: false; errors: string[] } {
   if (raw === undefined || raw === null) return { ok: true, steps: [] };
   if (!Array.isArray(raw)) return { ok: false, errors: ["Steps must be a list."] };
@@ -106,11 +106,13 @@ export function checkSteps(raw: unknown): { ok: true; steps: TemplateStep[] } | 
     if (!name || name.length > STEP_NAME_MAX) errors.push(`${who}: give it a name of at most ${STEP_NAME_MAX} characters.`);
     else if (seen.has(name.toLowerCase())) errors.push(`${who}: two steps share that name.`);
     seen.add(name.toLowerCase());
+    // parking-lot.md is implicit: it is added here and hidden in the
+    // editor, so it does not count as one of the step's files.
     const files = Array.isArray(step.files) ? step.files : [];
-    if (!files.length || files.length > STEP_FILES_MAX) errors.push(`${who}: name from 1 to ${STEP_FILES_MAX} files it may change.`);
-    const paths = files.map((f) => (typeof f === "string" ? f.trim() : ""));
+    const paths = [...new Set(files.map((f) => (typeof f === "string" ? f.trim() : "")))].filter((f) => f !== PARKING_LOT);
+    if (!paths.length || paths.length > STEP_FILES_MAX) errors.push(`${who}: name from 1 to ${STEP_FILES_MAX} files it may change, besides ${PARKING_LOT}.`);
     for (const f of paths) if (!safePattern(f)) errors.push(`${who}: "${f.slice(0, 40)}" is not a path inside the agent's folder.`);
-    return { name, files: [...new Set([...paths, PARKING_LOT])] };
+    return { name, files: [...paths, PARKING_LOT] };
   });
   return errors.length ? { ok: false, errors } : { ok: true, steps };
 }

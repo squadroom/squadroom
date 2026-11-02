@@ -37,7 +37,15 @@ test("the steps editor: rows to steps and back, and only safe relative patterns"
   const checked = checkSteps(steps);
   assert.ok(checked.ok);
   assert.deepEqual(checked.steps[0].files, ["brief.md", "docs/*.md", "parking-lot.md"]);
-  assert.deepEqual(checkSteps([{ name: "A", files: ["parking-lot.md", "a.md"] }]), { ok: true, steps: [{ name: "A", files: ["parking-lot.md", "a.md"] }] });
+  assert.deepEqual(checkSteps([{ name: "A", files: ["parking-lot.md", "a.md", "a.md"] }]), { ok: true, steps: [{ name: "A", files: ["a.md", "parking-lot.md"] }] });
+  // parking-lot.md is implicit: it is not a step's file of its own, so
+  // every accepted step comes back unchanged through the editor.
+  assert.equal(checkSteps([{ name: "Notes", files: ["parking-lot.md"] }]).ok, false);
+  for (const input of [steps, DOCUMENT_REVIEW.steps, [{ name: "A", files: ["parking-lot.md", "a.md"] }]]) {
+    const accepted = checkSteps(input);
+    assert.ok(accepted.ok);
+    assert.deepEqual(checkSteps(rowsToSteps(stepRows(accepted.steps))), accepted);
+  }
   assert.deepEqual(stepRows(checked.steps), [{ name: "Draft", files: "brief.md, docs/*.md" }, { name: "Review", files: "review.md" }]);
   assert.deepEqual(checkSteps(undefined), { ok: true, steps: [] });
   assert.deepEqual(checkSteps([]), { ok: true, steps: [] });
@@ -56,6 +64,7 @@ test("the steps editor: rows to steps and back, and only safe relative patterns"
     [[{ name: "", files: ["a.md"] }], /give it a name/],
     [[{ name: "X".repeat(61), files: ["a.md"] }], /give it a name/],
     [[{ name: "X", files: [] }], /from 1 to 50 files/],
+    [[{ name: "X", files: ["parking-lot.md"] }], /besides parking-lot\.md/],
     [[{ name: "X", files: Array.from({ length: 51 }, (_, i) => `f${i}.md`) }], /from 1 to 50 files/],
     [[{ name: "Draft", files: ["a.md"] }, { name: "draft", files: ["b.md"] }], /two steps share that name/],
     [Array.from({ length: STEPS_MAX + 1 }, (_, i) => ({ name: `S${i}`, files: ["a.md"] })), /at most 20 steps/],
@@ -217,6 +226,11 @@ test("a step template with an Orchestrator and three members, saved and restored
   assert.deepEqual(store.waitFor(agents[0].id), agents.slice(1).map((a) => a.id));
   assert.deepEqual(store.routes(tab.id).map((r) => [r.fromName, r.toName, r.phrase]), [["Writer A", "Critic", "READY"], ["Critic", "Orchestrator", "DONE"]]);
   assert.equal(store.tabSteps(tab.id)!.steps[0].name, "Draft");
+  // A member named Orchestrator beside a renamed Orchestrator: refused,
+  // since the template's Orchestrator (and Boss's routes) take that name.
+  const other = runCommand(store, { action: "createAgent", tabId, name: "Orchestrator", kind: "claude-code", model: "haiku", permission: "look" }).agent as { id: string };
+  assert.throws(() => runCommand(store, { action: "saveTemplate", tabId, name: "Clash" }), /keeps the name Orchestrator/);
+  runCommand(store, { action: "close", agentId: other.id });
   // Saved again from the restored tab: the same template.
   const again = runCommand(store, { action: "saveTemplate", tabId: tab.id, name: "Squad 2" }).templateId as string;
   const bodies = store.templates().filter((t) => t.id === templateId || t.id === again).map((t) => JSON.stringify(t.body));

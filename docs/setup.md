@@ -314,12 +314,14 @@ Things to know while using it:
   allowed. Under **Settings**, **Templates**, **Edit steps** changes a
   saved template's name and steps, and **Copy and edit steps** on Document
   review saves a copy under a new name. Steps are checked when you save:
-  each needs a unique name and at least one file, files must be relative
+  each needs a unique name and at least one file besides `parking-lot.md`,
+  files must be relative
   paths inside the agent's folder (no `..`, no leading `/`, nothing in
   `.git`), and a template has at most 20 steps.
 - **Any team can have steps**: an Orchestrator with up to seven members,
   several editing agents and several reviewers, with any routes. Saving
-  such a tab keeps its Orchestrator. You move to the next step from the
+  such a tab keeps its Orchestrator (so no other agent in it may be named
+  Orchestrator). You move to the next step from the
   tab's menu once each editing agent's current commit is approved in
   Changes (an agent that changed nothing has nothing to approve), after a
   reviewer's review when the tab has a Code analysis agent other than the

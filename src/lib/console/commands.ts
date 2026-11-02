@@ -216,9 +216,14 @@ function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes
  * (an AI turned off since, a role's limits) and its routes name members. */
 function checkTemplate(store: ConsoleStore, t: TabTemplate) {
   const checked = checkTeamSetup(t.setup, { takenNames: [], codexOff: store.flag(CODEX_DISABLED) !== null, roles: rolesView(store), exactPrompts: true });
-  const errors = checked.ok
-    ? checkRoutes(t.routes, templateNames(t))
-    : checked.errors;
+  // A template names its Orchestrator "Orchestrator" (its routes too), so
+  // no member may have that name: the routes would reach the wrong agent.
+  const clash = t.setup.orchestrated !== false && t.setup.members.find((m) => m.name.trim().toLowerCase() === "orchestrator");
+  const errors = !checked.ok
+    ? checked.errors
+    : clash
+      ? [`${clash.name}: a template keeps the name Orchestrator for its Orchestrator. Rename this agent first.`]
+      : checkRoutes(t.routes, templateNames(t));
   if (errors.length) throw new CommandError(errors.join(" "));
 }
 
