@@ -12,6 +12,7 @@
 //   ask        asks the owner a question (request_user_input)
 //   elicit     asks to call a tool on the console server and on another one
 //   hang       waits; an interrupt ends the turn
+//   partial    reports one request's usage, then waits; an interrupt ends it
 //   deaf       waits and ignores interrupts
 //   lateack    accepts the turn but never answers turn/start: after a
 //              moment it reports usage, streams, asks to write a file
@@ -219,6 +220,10 @@ async function runTurn(threadId, turnId, text) {
     const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now() });
     if (answer.decision === "accept") fs.writeFileSync(arg, "written late by codex\n");
     note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: answer.decision === "accept" ? "completed" : "declined" } });
+    return; // waits for the interrupt
+  }
+  if (word === "partial") {
+    usage(threadId, note, { inputTokens: 40, cachedInputTokens: 10, outputTokens: 5 });
     return; // waits for the interrupt
   }
   if (word === "deaf") turns.get(threadId).deaf = true;

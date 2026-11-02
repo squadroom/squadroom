@@ -526,7 +526,7 @@ needs a fresh confirmation).
 | Running turns per login (one token, API key or ChatGPT account) | 3 | Others wait; a rate limit pauses that login's queue only |
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
-| A paid turn whose usage was not reported or does not add up | — | Charged its full allowance; the tab pauses until you Resume that pause |
+| A paid turn whose usage was not reported, does not add up, or never came (stopped mid-request, a crash, a restart) | — | Charged what it did report plus the full allowance (the model's whole context window in, its maximum output out) for each request it started without reporting usage; the tab pauses until you Resume that pause |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |

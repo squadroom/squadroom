@@ -57,6 +57,33 @@ it; every worker write is fenced by its lease epoch, so a worker that lost
 its lease cannot write. `signin.sqlite` is separate and holds only the
 sign-in's state. Events are redacted before they are written.
 
+The schema has a version (`PRAGMA user_version`). A store from an earlier
+version gains the columns it lacks when it is opened (each only if it is
+missing); one that still lacks a column after that is refused and left as
+it was.
+
+### How a paid turn is charged
+
+A paid turn is charged the usage its client reported times the model's
+catalog prices, cache included. A model's long-context rates apply per
+request: where each request reports its own usage (Codex), only the
+requests above the threshold get them; where only the turn's total is
+reported (ACP clients), the whole turn does when the largest request the
+context gauge saw was above the threshold.
+
+A turn whose usage is missing, does not add up, or never comes (stopped
+mid-request, its program died, the worker restarted) is charged what its
+requests did report plus the model's full allowance (its whole context
+window as input and its maximum output) for each request it was seen to
+start without reporting it, and at least one. Requests are counted from
+what the clients already send: Claude Code's request starts, Codex's
+usage per request, and context-gauge changes. While a turn runs, what its
+client has reported so far, the prices it started with and the paying
+key's fingerprint are kept on its row (`running`, `billing`), so a restart
+charges it the same way even if its model has left the catalog. The
+Overview counts each turn in the UTC day and month it started, against the
+key that paid for it.
+
 ## Agents
 
 - **One user.** Every agent runs as the macOS user `agent` (no login, its
@@ -167,12 +194,14 @@ code step once when mail is down; it does not confirm weighty commands.
   (and are refused when mail is off), so a cookie alone cannot raise
   limits, change keys or grant permanent permissions.
 - **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
-  their spend limit; a turn whose usage cannot be trusted is charged its
-  full allowance and pauses its tab. Claude Code reports `modelUsage` as a
-  running total for its session, so an API-key turn is charged the change
-  since the last result the worker saw for that session (kept across a
-  process restart and resume). A total that went down, or a session resumed
-  by a worker that never saw its totals, is charged the full allowance.
+  their spend limit; a turn whose usage cannot be trusted is charged the
+  full allowance for each request it started without reporting usage, and
+  pauses its tab. Claude Code reports `modelUsage` as a running total for
+  its session, so an API-key turn is charged the change since the last
+  result the worker saw for that session (kept across a process restart
+  and resume). A total that went down, or a session resumed by a worker
+  that never saw its totals, is charged the full allowance for each
+  request it started.
 
 **Not protected against (known limits):**
 

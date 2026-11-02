@@ -3,7 +3,7 @@ import { TurnEvents } from "../events.ts";
 import { uploadsNote } from "../files.ts";
 import { keyFor } from "../keys.ts";
 import { errorMessage as message } from "../session.ts";
-import { fingerprint, loginKey } from "../spend.ts";
+import { fingerprint, loginKey, NO_REQUESTS } from "../spend.ts";
 import type { TurnRow } from "../store.ts";
 import { MESSAGE_MAX, resendNote } from "../team.ts";
 import type { ConsoleAgent, TurnStatus, TurnUsage } from "../types.ts";
@@ -25,12 +25,16 @@ export const turns = {
     if (!name) return { credentials: {}, print: "", login: loginKey(agent.kind, model, null) };
     const key = keyFor(this.options.keysFile, name, agent.projectId);
     this.redactor.add(key.value);
-    return { credentials: { [name]: key.value }, print: fingerprint(key.value), login: loginKey(agent.kind, model, key) };
+    return { credentials: { [name]: key.value }, print: fingerprint(key.value), login: loginKey(agent.kind, model, key), scope: key.scope };
   },
 
   startTurn(this: ConsoleWorker, agent: ConsoleAgent, model: AgentModel, queued: TurnRow, credential: Credential): void {
     const epoch = this.epoch!;
-    if (!this.safe(() => this.store.startTurn(epoch, queued.id))) return;
+    // What it is priced as and the key that pays for it are kept with it:
+    // a restart charges it, and the Overview counts it against that key,
+    // whatever the catalog or the key file say later.
+    const billing = { model: { id: model.id, label: model.label, model: model.model, paid: model.paid }, key: { scope: credential.scope ?? null, print: credential.print } };
+    if (!this.safe(() => this.store.startTurn(epoch, queued.id, billing))) return;
     // Read again after the claim: an Edit that committed first is what
     // runs, never the text the schedule saw.
     const row = this.store.turn(queued.id) ?? queued;
@@ -59,7 +63,7 @@ export const turns = {
       stopping: null,
       waitedMs: 0,
       waitingSince: null,
-      usage: null,
+      running: NO_REQUESTS,
       lastText: null,
       resendOf: row.resendOf,
     };
@@ -202,7 +206,13 @@ export const turns = {
 
   /** End a turn: pending owner requests close, the store records it, and
    * the folder's changes are committed (before the agent's next turn). */
-  finish(this: ConsoleWorker, rt: Runtime, status: TurnStatus, reason: string | null, options: { usage?: TurnUsage | null; commit?: boolean } = {}): void {
+  finish(
+    this: ConsoleWorker,
+    rt: Runtime,
+    status: TurnStatus,
+    reason: string | null,
+    options: { usage?: TurnUsage | null; completed?: boolean; commit?: boolean } = {},
+  ): void {
     const t = rt.turn;
     if (!t || this.epoch === null) return;
     // The session settles its turn first: a start never acknowledged
@@ -216,9 +226,14 @@ export const turns = {
     // request began; Codex marks no request start, so its gauge is
     // unmeasured only when no request reported usage.
     const unmeasured = !t.gaugeSeen || t.gaugePending;
-    // A paid turn whose prompt reached the client is charged: its reported
-    // usage at catalog prices, or its full allowance.
-    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, options.usage ?? t.usage) : null;
+    // A paid turn whose prompt reached the client is charged from the whole
+    // turn's usage its client reported at its end, or, for a client that
+    // reports each request's (Codex), their sum once the turn completed
+    // normally. A turn that ended any other way may have had a request
+    // under way whose usage never came: it is charged the allowance for it
+    // (spend.ts).
+    const usage = options.usage !== undefined ? options.usage : options.completed ? t.running.usage : null;
+    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, usage, t.running) : null;
     if (unmeasured && t.validated) this.safe(() => this.store.setGauge(this.epoch!, rt.agent.id, { measured: false }));
     this.releaseWaits(t.id, "The turn ended.");
     const epoch = this.epoch;
@@ -236,7 +251,7 @@ export const turns = {
       // routes and answers carry its start and their recipient reads the
       // rest with team_read.
       const final = status === "done" && t.lastText ? this.redactor.text(t.lastText) : null;
-      this.store.finishTurn(epoch, t.id, status, reason, options.usage ?? t.usage, final, charge);
+      this.store.finishTurn(epoch, t.id, status, reason, usage ?? t.running.usage, final, charge);
     });
     if (charge) this.checkSpend(rt.agent, charge);
     // No repository, no commits: checked, never progress, even for a turn

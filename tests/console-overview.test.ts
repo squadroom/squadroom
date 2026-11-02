@@ -34,9 +34,37 @@ const ended = (over: Partial<EndedTurn>): EndedTurn => ({
   ...over,
 });
 
-test("spend windows: local midnight and the first of the month", () => {
-  const now = new Date(2026, 9, 25, 15, 30).getTime();
-  assert.deepEqual(spendWindows(now), { dayStart: new Date(2026, 9, 25).getTime(), monthStart: new Date(2026, 9, 1).getTime() });
+test("spend windows: UTC midnight and the first of the month in UTC, as providers bill", () => {
+  const now = Date.UTC(2026, 9, 1, 0, 30);
+  assert.deepEqual(spendWindows(now), { dayStart: Date.UTC(2026, 9, 1), monthStart: Date.UTC(2026, 9, 1) });
+  assert.deepEqual(spendWindows(Date.UTC(2026, 9, 31, 23, 59)), { dayStart: Date.UTC(2026, 9, 31), monthStart: Date.UTC(2026, 9, 1) });
+});
+
+test("a turn counts in the month it started, not the month a restart charged it in", () => {
+  const windows = spendWindows(Date.UTC(2026, 10, 2, 12));
+  // Started on 31 October, charged at a restart on 1 November.
+  const late = ended({ id: 1, startedAt: Date.UTC(2026, 9, 31, 23), endedAt: Date.UTC(2026, 10, 1, 1), costUsd: 3 });
+  const now = ended({ id: 2, startedAt: Date.UTC(2026, 10, 2, 1), endedAt: Date.UTC(2026, 10, 2, 2), costUsd: 1 });
+  const { tabs } = sumSpend([late, now], windows, () => null);
+  assert.deepEqual(tabs.get("t000000000001"), { today: 1, month: 1 });
+});
+
+test("spend stays with the key that paid it: a key replaced since keeps its own sum, apart from the one there now", () => {
+  const keys = { global: [key("OPENAI_API_KEY", 50)], projects: {} };
+  const printAt = (name: string, projectId: string | null) => (name === "OPENAI_API_KEY" && projectId === null ? "new0000000000" : null);
+  const paid = (print: string, id: number, costUsd: number) => ended({ id, endedAt: 1_500, costUsd, paidBy: { name: "OPENAI_API_KEY", scope: "global", print } });
+  const old = chargedKey(paid("old0000000000", 1, 2), keys, printAt)!;
+  assert.deepEqual([old.projectId, old.row, old.print], [null, null, "old0000000000"]);
+  assert.equal(chargedKey(paid("new0000000000", 2, 1), keys, printAt)!.row!.cap!.usd, 50);
+  const { keys: byKey } = sumSpend([paid("old0000000000", 1, 2), paid("new0000000000", 2, 1), ended({ id: 3, endedAt: 1_500, costUsd: 0.5 })], { dayStart: 1_000, monthStart: 100 }, (t) =>
+    chargedKey(t, keys, printAt),
+  );
+  // The current key: its own turn and a turn from before keys were recorded.
+  assert.equal(byKey.get("OPENAI_API_KEY:")!.month, 1.5);
+  assert.equal(byKey.get("OPENAI_API_KEY::old0000000000")!.month, 2);
+  // A project's key that paid stays the project's, even once the project's entry is gone.
+  const project = chargedKey(ended({ projectId: "p000000000002", paidBy: { name: "OPENAI_API_KEY", scope: "project", print: "prj0000000000" } }), keys, printAt)!;
+  assert.deepEqual([project.projectId, project.row], ["p000000000002", null]);
 });
 
 test("a turn is charged to its project's own key when it has one, else the global key; a subscription to none", () => {
@@ -96,7 +124,7 @@ test("health warnings: worker down, backups missing, failed or stale, e-mails no
 });
 
 test("the store's view: a paid turn counts toward its tab, a failed one is listed with its agent", () => {
-  let clock = new Date(2026, 9, 25, 12).getTime();
+  let clock = Date.UTC(2026, 9, 25, 12);
   const store = new ConsoleStore(":memory:", () => clock);
   const project = store.createProject("Site", "folder");
   const tab = store.tabs(project.id)[0];

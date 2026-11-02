@@ -1,5 +1,4 @@
-import type { AgentModel } from "../agents.ts";
-import { chargeTurn, pricedAt, spendPauseReason, usd, type Charge } from "../spend.ts";
+import { chargeTurn, pricedAt, spendPauseReason, usd, type BilledModel, type Charge, type RunningUsage } from "../spend.ts";
 import { USAGE_PAUSE, type TurnRow } from "../store.ts";
 import type { ConsoleAgent, TurnUsage } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -30,16 +29,26 @@ export const holds = {
     if (charge.basis === "allowance") return;
     this.overSpend(agent.tabId);
   },
-  /** A paid turn's charge; an allowance carries the tab's hold, which the
-   * store writes in the same transaction. */
-  charge(this: ConsoleWorker, agent: ConsoleAgent, model: AgentModel, turnId: number, usage: TurnUsage | null | undefined): (Charge & { hold?: string }) | null {
+  /** A paid turn's charge (spend.ts: `usage` is the client's whole-turn
+   * usage once it ended normally, or null); an allowance carries the tab's
+   * hold, which the store writes in the same transaction. */
+  charge(
+    this: ConsoleWorker,
+    agent: ConsoleAgent,
+    model: BilledModel,
+    turnId: number,
+    usage: TurnUsage | null | undefined,
+    running?: RunningUsage,
+  ): (Charge & { hold?: string }) | null {
     // Priced at the rates of when the turn started, never when it ended or
     // a later restart charged it (a scheduled price change, pricing.ts).
-    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()));
+    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()), running);
     if (!charge || charge.basis !== "allowance") return charge;
+    const n = charge.allowances ?? 1;
+    const what = n === 1 ? "the full allowance for a request" : `the full allowance for each of ${n} requests`;
     return {
       ...charge,
-      hold: `${USAGE_PAUSE}${agent.name}'s turn ${turnId} did not report usage the Console can trust, so it was charged its full allowance (${usd(charge.usd)}). Resume to let the tab continue.`,
+      hold: `${USAGE_PAUSE}${agent.name}'s turn ${turnId} did not report usage the Console can trust, so it was charged ${what} whose usage it did not report (${usd(charge.usd)} in all). Resume to let the tab continue.`,
     };
   },
   /** A tab at its spend limit pauses, from the costs stored with its turns,
