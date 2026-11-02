@@ -249,9 +249,10 @@ The longer version, with the threat model, is in
   profile. File writes are limited to the agent's own clone.
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,
-  only to repositories whose base branch is protected by a ruleset, and
-  only after every new object is checked for credentials the Console
-  handed out.
+  only to repositories whose base branch is protected by a ruleset the
+  token cannot bypass, only the commit the Console recorded at the end of
+  the agent's last turn, and only after every new object is checked for
+  credentials the Console handed out.
 - **Credentials are redacted** from everything stored, and paid keys are
   bounded by the provider-side caps you set.
 

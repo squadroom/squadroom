@@ -96,7 +96,21 @@ mirror; a push goes the other way. Before any clone the worker checks that
 the base branch exists and is protected by a ruleset that names it; it only
 ever pushes `console/` branches, and before a push it reads every object
 GitHub does not have yet, raw, and refuses the push if any holds a
-credential the Console handed out. It opens or updates the branch's pull request
+credential the Console handed out. It pushes only the commit it recorded
+at the end of the agent's last turn, so a commit made later by a program
+the agent left running waits for the next turn.
+
+The agent owns its clone's `.git`, so the worker trusts nothing in it that
+changes how objects read. Every Git command it runs there reads objects as
+stored: `--no-replace-objects`, `core.commitGraph=false`, and in the
+launcher `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE=/dev/null`.
+Without that, a replace ref could make a commit look like it holds another
+tree, and a file outside a step would look unchanged. Before the step
+check and the uncommitted-changes check it also clears skip-worktree and
+assume-unchanged flags. A step commit is checked again against where the
+step began before it is recorded. Bundles the worker copies out of an
+agent's folder are opened without following links and must be regular
+files owned by the agent user. It opens or updates the branch's pull request
 with the same token and, only when `CONSOLE_CODEX_REVIEW` is on, comments
 `@codex review` on it.
 

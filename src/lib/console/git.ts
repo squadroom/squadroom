@@ -91,13 +91,16 @@ interface Ruleset {
   target?: string;
   conditions?: { ref_name?: { include?: string[]; exclude?: string[] } };
   rules?: { type?: string }[];
+  /** Whether the token's own user may bypass it ("never" is the only safe
+   * answer: an "always" bypass lets the token push to the base). */
+  current_user_can_bypass?: string;
 }
 
 /**
  * Before the Console touches a repository: its base branch must exist on
  * GitHub, and an active ruleset must name it exactly (`refs/heads/<base>`,
  * never "the default branch") and block deleting it, force-pushing it and
- * updating it directly.
+ * updating it directly, with no bypass for the token's own user.
  */
 export async function checkGitHub(repo: string, base: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com") {
   const get = async (path: string) => {
@@ -128,6 +131,8 @@ export async function checkGitHub(repo: string, base: string, token: string, fet
   for (const summary of listed) {
     const ruleset = (await get(`/rulesets/${summary.id}`)) as Ruleset | null;
     if (!ruleset || ruleset.enforcement !== "active" || (ruleset.target ?? "branch") !== "branch") continue;
+    // A ruleset the token's own user may bypass protects nothing from it.
+    if (ruleset.current_user_can_bypass !== "never") continue;
     if (!ruleset.conditions?.ref_name?.include?.includes(`refs/heads/${base}`)) continue;
     // An exclusion that matches wins on GitHub, so it must not touch the base.
     if ((ruleset.conditions.ref_name.exclude ?? []).some((p) => mayMatchRef(p, `refs/heads/${base}`))) continue;
@@ -135,7 +140,7 @@ export async function checkGitHub(repo: string, base: string, token: string, fet
     if (types.has("deletion") && types.has("non_fast_forward") && (types.has("update") || types.has("pull_request"))) return;
   }
   throw new GitError(
-    `The base branch ${base} is not protected by a ruleset that names it exactly (refs/heads/${base}) and blocks deleting it, force pushes and direct updates. Add one on GitHub first.`,
+    `The base branch ${base} is not protected by a ruleset that names it exactly (refs/heads/${base}) and blocks deleting it, force pushes and direct updates, with no bypass for the token's user. Add one on GitHub first.`,
   );
 }
 
@@ -413,6 +418,8 @@ function ownerSpawn(args: string[], token: string | null, cwd: string | undefine
     ["core.hooksPath", "/dev/null"],
     ["core.fsmonitor", "false"],
     ["credential.helper", ""],
+    ["core.commitGraph", "false"],
+    ["core.useReplaceRefs", "false"],
     ...(token ? ([["http.https://github.com/.extraheader", authHeader(token)]] as [string, string][]) : []),
   ];
   const env: Record<string, string> = {
@@ -422,6 +429,9 @@ function ownerSpawn(args: string[], token: string | null, cwd: string | undefine
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_TERMINAL_PROMPT: "0",
     GIT_PAGER: "cat",
+    // Objects as they are stored: no replace refs and no grafts.
+    GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_GRAFT_FILE: "/dev/null",
     GIT_CONFIG_COUNT: String(config.length),
   };
   config.forEach(([key, value], i) => {
@@ -633,6 +643,17 @@ export class Mirror {
 
 // ── The agent's clone (as `agent`, through the launcher) ──────────────────
 
+/**
+ * Before every Git command on an agent's repository: objects are read as
+ * they are stored. The agent can write `refs/replace/*` and a commit-graph
+ * file, either of which makes a commit seem to hold another tree, so a
+ * file outside a step could look unchanged and the Changes view could hide
+ * it. (Grafts, the third way, only ever change parents; the launcher drops
+ * them with GIT_GRAFT_FILE.) Index flags that hide a change from status are
+ * cleared where it matters (`reveal`).
+ */
+export const STORED_OBJECTS = ["--no-replace-objects", "-c", "core.useReplaceRefs=false", "-c", "core.commitGraph=false"];
+
 const author = (name: string, agentId: string) => [
   "-c",
   `user.name=${name.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 60) || "Console agent"}`,
@@ -647,10 +668,30 @@ export class Clone {
     this.launcher = launcher;
     this.folder = folder;
   }
+  /** Git in this clone, objects as stored (`init` is the launcher's own
+   * action, recognised by its first argument, and has none to read). */
+  private run(args: string[], maxStdout: number): Promise<RunResult> {
+    return this.launcher.git(this.folder, args[0] === "init" ? args : [...STORED_OBJECTS, ...args], maxStdout);
+  }
   private async git(args: string[], what: string, maxStdout = 1024 * 1024): Promise<RunResult> {
-    const r = await this.launcher.git(this.folder, args, maxStdout);
+    const r = await this.run(args, maxStdout);
     if (r.code !== 0) throw fail(what, r);
     return r;
+  }
+  /** Index entries the agent marked skip-worktree or assume-unchanged
+   * (which hide a change from status) are unmarked, so every check sees
+   * the files as they are. */
+  private async reveal() {
+    const r = await this.git(["ls-files", "-z", "-v"], "Reading the index", 64 * 1024 * 1024);
+    if (r.truncated) throw new GitError("The folder's index is too large to check.");
+    // `-v` tags: "S" skip-worktree, lower case assume-unchanged.
+    const hidden = r.stdout
+      .split("\0")
+      .filter((e) => e.length > 2 && (e[0] === "S" || (e[0] >= "a" && e[0] <= "z")))
+      .map((e) => e.slice(2));
+    // One flag per command: update-index applies only the last one given.
+    for (const flag of ["--no-skip-worktree", "--no-assume-unchanged"])
+      for (let i = 0; i < hidden.length; i += 100) await this.git(["update-index", flag, "--", ...hidden.slice(i, i + 100)], "Clearing hidden index entries");
   }
   /** A new empty project's folder: a repository with one empty commit on
    * `main`, so every turn's changes have something to be compared with. */
@@ -672,7 +713,7 @@ export class Clone {
     return (await this.head())!;
   }
   async head(): Promise<string | null> {
-    const r = await this.launcher.git(this.folder, ["rev-parse", "--verify", "--quiet", "HEAD"], 4096);
+    const r = await this.run(["rev-parse", "--verify", "--quiet", "HEAD"], 4096);
     return r.code === 0 && /^[0-9a-f]{40,64}$/.test(r.stdout.trim()) ? r.stdout.trim() : null;
   }
   /** Commit whatever the turn changed (its own temporary folder aside);
@@ -682,7 +723,7 @@ export class Clone {
     message: string,
     name: string,
     agentId: string,
-    options: { unresolved?: "skip" | "throw"; conflicts?: string[]; only?: (path: string) => boolean } = {},
+    options: { unresolved?: "skip" | "throw"; conflicts?: string[]; only?: (path: string) => boolean; since?: string } = {},
   ): Promise<string | null> {
     // A merge from team_pull is committed only once no conflict marker is
     // left in its conflicted files: every file the pull reported,
@@ -718,7 +759,19 @@ export class Clone {
       for (let i = 0; i < paths.length; i += 100) await this.git(["add", "--all", "--", ...paths.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Adding the changes");
     } else await this.git(["add", "--all", "--", ...EXCLUDE], "Adding the changes");
     await this.git([...author(name, agentId), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
-    return this.head();
+    const sha = await this.head();
+    // A tab with steps: the commit is checked against where the step's
+    // check began, tree to tree, before anything records or pushes it. One
+    // that carries a file outside the step is undone (its files stay on
+    // disk, to be put back by the next check) and refused.
+    if (options.only && options.since && sha && !merging) {
+      const outside = (await this.diffPaths(options.since, sha)).filter((p) => !options.only!(p));
+      if (outside.length) {
+        await this.git(["reset", "--quiet", "--soft", options.since], "Undoing the commit");
+        throw new GitError(`The commit would have changed ${outside.slice(0, 5).join(", ")}${outside.length > 5 ? ` and ${outside.length - 5} more` : ""} outside this step, so it was undone.`);
+      }
+    }
+    return sha;
   }
   /** Every path that differs from HEAD, in the index or on disk (the
    * excluded folders aside), with its two-letter status. */
@@ -743,6 +796,7 @@ export class Clone {
     // Console's commit carry its commit as a parent: forgotten, its files
     // kept as changes (a tab with steps has no team_pull merge to finish).
     for (const op of ["merge", "cherry-pick", "revert"]) await this.git([op, "--quit"], "Clearing an unfinished Git operation");
+    await this.reveal();
     if (branch) {
       await this.git(["update-ref", `refs/heads/${branch}`, since], "Undoing the agent's own commits");
       await this.git(["symbolic-ref", "HEAD", `refs/heads/${branch}`], "Returning to the agent's branch");
@@ -798,12 +852,13 @@ export class Clone {
     const r = await this.git(["show", "--no-renames", "--name-only", "-z", "--format=", sha], "Reading the commit", 16 * 1024 * 1024);
     return r.stdout.split("\0").filter(Boolean);
   }
-  /** The branch against its base, for the changes view. */
-  async diff(base: string, maxBytes: number): Promise<{ stat: string; patch: string; files: string[] }> {
-    const stat = await this.git(["diff", "--no-color", "--stat", base, "HEAD"], "Comparing with the base", 64 * 1024);
-    const patch = await this.git(["diff", "--no-color", "--no-ext-diff", "--no-textconv", base, "HEAD"], "Comparing with the base", maxBytes);
+  /** The branch (at `head`, the commit recorded with it) against its
+   * base, for the changes view. */
+  async diff(base: string, maxBytes: number, head = "HEAD"): Promise<{ stat: string; patch: string; files: string[] }> {
+    const stat = await this.git(["diff", "--no-color", "--stat", base, head], "Comparing with the base", 64 * 1024);
+    const patch = await this.git(["diff", "--no-color", "--no-ext-diff", "--no-textconv", base, head], "Comparing with the base", maxBytes);
     // Exact, untruncated names (the stat abbreviates long paths and renames).
-    const names = await this.git(["diff", "--no-renames", "--name-only", "-z", "--diff-filter=d", base, "HEAD"], "Comparing with the base", 256 * 1024);
+    const names = await this.git(["diff", "--no-renames", "--name-only", "-z", "--diff-filter=d", base, head], "Comparing with the base", 256 * 1024);
     return { stat: stat.stdout.trim(), patch: patch.truncated ? `${patch.stdout}\n… truncated` : patch.stdout, files: nulList(names.stdout) };
   }
   /** Two commits' differences under one claim-style pattern (team_diff,
@@ -831,7 +886,7 @@ export class Clone {
   }
   async hasCommit(sha: string): Promise<boolean> {
     if (!/^[0-9a-f]{40,64}$/.test(sha)) return false;
-    return (await this.launcher.git(this.folder, ["cat-file", "-e", `${sha}^{commit}`], 4096)).code === 0;
+    return (await this.run(["cat-file", "-e", `${sha}^{commit}`], 4096)).code === 0;
   }
   /** Fetch a bundle's ref into a ref of this clone. */
   async fetchBundle(bundle: string, ref: string, into: string) {
@@ -839,7 +894,7 @@ export class Clone {
   }
   /** A merge (from team_pull) is in progress. */
   async merging(): Promise<boolean> {
-    return (await this.launcher.git(this.folder, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], 4096)).code === 0;
+    return (await this.run(["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], 4096)).code === 0;
   }
   /** Files the merge left unmerged in the index. */
   async unmerged(): Promise<string[]> {
@@ -865,7 +920,7 @@ export class Clone {
   /** Merge a fetched ref into the current branch (a fast-forward when it
    * can). False when it stopped with conflicts. */
   async merge(ref: string, message: string, name: string, agentId: string): Promise<boolean> {
-    const r = await this.launcher.git(this.folder, [...author(name, agentId), "merge", "--no-edit", "--no-verify", "-m", message, ref], 64 * 1024);
+    const r = await this.run([...author(name, agentId), "merge", "--no-edit", "--no-verify", "-m", message, ref], 64 * 1024);
     if (r.code === 0) return true;
     if (await this.merging()) return false;
     throw fail("Merging", r);
@@ -888,6 +943,7 @@ export class Clone {
   /** Changes in the folder that are not committed (its temporary folder
    * aside). */
   async dirty(): Promise<boolean> {
+    await this.reveal();
     const status = await this.git(["status", "--porcelain", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 64 * 1024);
     return !!status.stdout.trim();
   }
