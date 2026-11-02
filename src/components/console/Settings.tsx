@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ArchiveImpact, ProjectView, TabSpend } from "@/lib/console/views";
 import type { ConsoleProject } from "@/lib/console/types";
 import { archiveReady, money, parseDollars, plural } from "@/lib/console/ui";
-import { TEMPLATE_NAME_MAX, parseSteps } from "@/lib/console/templates";
+import { DOCUMENT_REVIEW, PARKING_LOT, STEPS_MAX, TEMPLATE_NAME_MAX, checkSteps, rowsToSteps, stepRows, type StepRow, type TemplateStep } from "@/lib/console/templates";
 import { api, type Run } from "./api";
 import Dialog from "./Dialog";
 import styles from "./console.module.css";
@@ -196,7 +196,10 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
       <h3 className={styles.subhead}>
         Step {steps.index + 1} of {steps.steps.length}: {step?.name}
       </h3>
-      <p className={styles.hint}>Its lead may change only {step?.files.join(", ")}. Moving forward needs the lead&apos;s current commit approved (after the reviewer&apos;s review) in Changes.</p>
+      <p className={styles.hint}>
+        Its editing agents may change only {step?.files.join(", ")}. Moving forward needs each editing agent&apos;s current commit approved in Changes (after a
+        reviewer&apos;s review, when the tab has a reviewer). An agent with no changes has nothing to approve.
+      </p>
       <p>
         <select aria-label="Step" value={target} onChange={(e) => setTarget(Number(e.target.value))}>
           {steps.steps.map((s, i) => (
@@ -213,35 +216,110 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
   );
 }
 
-/** Save the tab as a template, from its menu: its agents, roles, models,
- * thinking, access and routes, and optional steps. */
-export function SaveTemplateDialog({ tab, run, onClose }: { tab: { id: string; name: string }; run: Run; onClose: () => void }) {
-  const [name, setName] = useState(tab.name);
-  const [steps, setSteps] = useState("");
+/** A template's steps: in order, each with a name and the
+ * files it may change, comma separated (patterns like adrs/*.md). */
+function StepsEditor({ rows, setRows }: { rows: StepRow[]; setRows: (rows: StepRow[]) => void }) {
+  const row = (i: number, change: Partial<StepRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...change } : r)));
+  const move = (i: number, by: number) => {
+    const next = [...rows];
+    [next[i], next[i + by]] = [next[i + by], next[i]];
+    setRows(next);
+  };
   return (
-    <Dialog title="Save as template" onClose={onClose}>
+    <>
+      <h3 className={styles.subhead}>Steps (optional)</h3>
+      <p className={styles.hint}>
+        In a tab with steps, agents may change only the current step&apos;s files, and you move to the next step once each editing agent&apos;s work is
+        approved. {PARKING_LOT} is always allowed.
+      </p>
+      {rows.map((r, i) => (
+        <div key={i} className={styles.teamRow}>
+          <input aria-label={`Step ${i + 1}: name`} value={r.name} placeholder="Name" onChange={(e) => row(i, { name: e.target.value })} />
+          <input aria-label={`Step ${i + 1}: files`} value={r.files} placeholder="brief.md, docs/*.md" onChange={(e) => row(i, { files: e.target.value })} />
+          <button aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
+            ↑
+          </button>
+          <button aria-label={`Move step ${i + 1} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
+            ↓
+          </button>
+          <button aria-label={`Remove step ${i + 1}`} onClick={() => setRows(rows.filter((_, j) => j !== i))}>
+            Remove
+          </button>
+        </div>
+      ))}
+      <div className={styles.dialogButtons}>
+        {rows.length < STEPS_MAX && <button onClick={() => setRows([...rows, { name: "", files: "" }])}>+ Add step</button>}
+        <button onClick={() => setRows(stepRows(DOCUMENT_REVIEW.steps))}>Use Document review&apos;s steps</button>
+      </div>
+    </>
+  );
+}
+
+/** A template's name and steps, as the dialogs below collect them. */
+function TemplateForm(props: { title: string; name: string; steps: TemplateStep[]; hint: string; save: string; onClose: () => void; onSave: (name: string, steps: TemplateStep[]) => Promise<unknown> }) {
+  const [name, setName] = useState(props.name);
+  const [rows, setRows] = useState(() => stepRows(props.steps));
+  const steps = rowsToSteps(rows);
+  const checked = checkSteps(steps);
+  return (
+    <Dialog title={props.title} onClose={props.onClose}>
       <label>
         Template name
         <input value={name} maxLength={TEMPLATE_NAME_MAX} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
-      <label>
-        Steps (optional), one per line: <code>Step name: file, docs/*.md</code>
-        <textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} />
-      </label>
-      <p className={styles.hint}>A template of the same name is replaced. Add › From a template offers it.</p>
+      <StepsEditor rows={rows} setRows={setRows} />
+      {!checked.ok && <p className={styles.errorLine}>{checked.errors.join(" ")}</p>}
+      <p className={styles.hint}>{props.hint}</p>
       <div className={styles.dialogButtons}>
-        <button onClick={onClose}>Cancel</button>
+        <button onClick={props.onClose}>Cancel</button>
         <button
           className={styles.primary}
-          disabled={!name.trim()}
+          disabled={!name.trim() || !checked.ok}
           onClick={async () => {
-            if (await run({ action: "saveTemplate", tabId: tab.id, name, steps: parseSteps(steps) })) onClose();
+            if (await props.onSave(name, steps)) props.onClose();
           }}
         >
-          Save template
+          {props.save}
         </button>
       </div>
     </Dialog>
+  );
+}
+
+/** Save the tab as a template, from its menu: its agents, roles, models,
+ * thinking, access and routes, and optional steps (a tab with steps
+ * starts from its own). */
+export function SaveTemplateDialog({ tab, run, onClose }: { tab: { id: string; name: string; steps?: { steps: TemplateStep[] } | null }; run: Run; onClose: () => void }) {
+  return (
+    <TemplateForm
+      title="Save as template"
+      name={tab.name}
+      steps={tab.steps?.steps ?? []}
+      hint="A template of the same name is replaced. Add › From a template offers it."
+      save="Save template"
+      onClose={onClose}
+      onSave={(name, steps) => run({ action: "saveTemplate", tabId: tab.id, name, steps })}
+    />
+  );
+}
+
+/** Edit a template's name and steps, from Settings ›
+ * Templates; a built-in one is saved as a copy under a new name. */
+export function EditTemplateDialog({ template, run, onClose }: { template: { id: string; name: string; builtIn: boolean; steps: TemplateStep[] }; run: Run; onClose: () => void }) {
+  return (
+    <TemplateForm
+      title={template.builtIn ? `Copy ${template.name}` : `Edit ${template.name}`}
+      name={template.builtIn ? `${template.name} (copy)` : template.name}
+      steps={template.steps}
+      hint={
+        template.builtIn
+          ? "The copy keeps the built-in template's agents, roles and routes, with your steps."
+          : "Its agents, roles and routes stay as saved. Tabs already made from it keep their steps."
+      }
+      save={template.builtIn ? "Save copy" : "Save"}
+      onClose={onClose}
+      onSave={(name, steps) => run({ action: "editTemplate", id: template.id, name, steps })}
+    />
   );
 }
 

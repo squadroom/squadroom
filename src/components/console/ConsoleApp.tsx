@@ -346,7 +346,7 @@ export default function ConsoleApp() {
       <TemplatesPanel
         templates={templates}
         onUse={view && withFiles ? (id) => (goSettings(null), setModal({ kind: "newTab", template: id })) : null}
-        onDelete={(id) => void runAndList({ action: "deleteTemplate", id })}
+        run={runAndList}
       />
     ),
     notifications: (

@@ -1,7 +1,9 @@
 import type { templatesView } from "@/lib/console/views";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { APPEARANCES, SETTINGS_SECTIONS, settingsHash, templateSummary, type Appearance, type SettingsSection } from "@/lib/console/ui";
+import type { Run } from "./api";
 import { Panel } from "./Dialog";
+import { EditTemplateDialog } from "./Settings";
 import Icon from "./Icon";
 import styles from "./console.module.css";
 
@@ -76,9 +78,11 @@ export default function SettingsView({
   );
 }
 
-/** Templates: what each creates; the owner's own can be deleted. Saving one
- * is in a tab's menu; using one is Add › From a template. */
-export function TemplatesPanel({ templates, onUse, onDelete }: { templates: Templates; onUse: ((id: string) => void) | null; onDelete: (id: string) => void }) {
+/** Templates: what each creates; your own can be edited (name and
+ * steps) and deleted, and a built-in one copied.
+ * Saving one is in a tab's menu; using one is Add › From a template. */
+export function TemplatesPanel({ templates, onUse, run }: { templates: Templates; onUse: ((id: string) => void) | null; run: Run }) {
+  const [editing, setEditing] = useState<Templates[number] | null>(null);
   return (
     <Panel title="Templates">
       <p className={styles.hint}>A template sets up a new tab with its agents, roles and routes, and optional steps. Save one from a tab&apos;s menu (Save as template).</p>
@@ -90,7 +94,8 @@ export function TemplatesPanel({ templates, onUse, onDelete }: { templates: Temp
               {templateSummary(t)}
             </div>
             <div className={styles.dialogButtons}>
-              {!t.builtIn && <button onClick={() => confirm(`Delete the template ${t.name}?`) && onDelete(t.id)}>Delete</button>}
+              {!t.builtIn && <button onClick={() => confirm(`Delete the template ${t.name}?`) && void run({ action: "deleteTemplate", id: t.id })}>Delete</button>}
+              <button onClick={() => setEditing(t)}>{t.builtIn ? "Copy and edit steps" : "Edit steps"}</button>
               <button disabled={!onUse} title={onUse ? undefined : "Open a project with files first"} onClick={() => onUse?.(t.id)}>
                 Use in a new tab
               </button>
@@ -98,6 +103,7 @@ export function TemplatesPanel({ templates, onUse, onDelete }: { templates: Temp
           </li>
         ))}
       </ul>
+      {editing && <EditTemplateDialog key={editing.id} template={editing} run={run} onClose={() => setEditing(null)} />}
     </Panel>
   );
 }
