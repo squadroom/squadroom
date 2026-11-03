@@ -248,8 +248,8 @@ database, the key file, uploads, mirrors and logs.
 
 ## Security model in brief
 
-The longer version, with the threat model, is in
-[docs/architecture.md](docs/architecture.md).
+The longer version is in [docs/threat-model.md](docs/threat-model.md),
+and how each part works in [docs/architecture.md](docs/architecture.md).
 
 - **One owner.** Only the configured GitHub account can sign in. With mail
   configured, sign-in also needs an 8-digit code e-mailed to you, and
@@ -269,7 +269,7 @@ The longer version, with the threat model, is in
   credential an agent needs. Claude Code runs in its sandbox, Codex under
   per-thread permission profiles, and ACP agents inside a macOS sandbox
   profile. File writes are limited to the agent's own clone (see the known
-  limits in [docs/architecture.md](docs/architecture.md)).
+  limits in [docs/threat-model.md](docs/threat-model.md)).
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,
   only to repositories whose base branch is protected by a ruleset the

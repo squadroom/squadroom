@@ -200,7 +200,7 @@ export function outsideStep(folder: string, paths: string[], stepFiles: string[]
  * `realInside` confirms, on disk, that the path's nearest existing part
  * (or the file itself) resolves inside the agent's folder, so a link
  * planted in the folder cannot lead a write elsewhere. A link swapped in
- * after this check is not caught here (docs/architecture.md, known
+ * after this check is not caught here (docs/threat-model.md, known
  * limits).
  */
 export function decide(
