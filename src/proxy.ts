@@ -17,8 +17,8 @@ export async function proxy(request: NextRequest) {
   return servedPath(path) ? NextResponse.next({ request }) : new NextResponse("Not found", { status: 404 });
 }
 
+// Every path but the build's own files and the icon passes the gate, so
+// Next's image optimizer (`/_next/image`) is 404 like any other path.
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|ico|webp)$).*)",
-  ],
+  matcher: ["/((?!_next/static/|favicon\\.ico$).*)"],
 };

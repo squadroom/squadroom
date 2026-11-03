@@ -518,25 +518,86 @@ export function claimPattern(raw: unknown): string | { error: string } {
   if (/[[\]]/.test(p)) return { error: `"${String(raw).slice(0, 60)}": use * and ** instead of [ ] in a claim.` };
   return p;
 }
-const regex = (pattern: string) =>
-  new RegExp(
-    `^${pattern
-      .split("/")
-      .map((seg) =>
-        seg === "**"
-          ? "\u0000"
-          : seg.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]"),
-      )
-      .join("/")
-      .replace(/\u0000\//g, "(?:.*/)?")
-      .replace(/\/\u0000/g, "(?:/.*)?")
-      .replace(/\u0000/g, ".*")}(?:/.*)?$`,
-  );
+/** A claim pattern's tokens: one per character it spells, `?`, `*`, and
+ * the three places a `**` segment can stand: `A` before a "/" (any
+ * folders or none), `B` after one (the same, below), `S` alone
+ * (anything). A last `B` lets a pattern cover what is below it. */
+function claimTokens(pattern: string): string[] {
+  const parts: string[] = [];
+  pattern.split("/").forEach((seg, k) => {
+    if (k) parts.push("=/");
+    if (seg === "**") parts.push("**");
+    else for (let i = 0; i < seg.length; i++) parts.push(seg[i] === "*" || seg[i] === "?" ? seg[i] : `=${seg[i]}`);
+  });
+  const pair = (list: string[], first: string, second: string, into: string) => {
+    const out: string[] = [];
+    for (let i = 0; i < list.length; i++)
+      if (list[i] === first && list[i + 1] === second) {
+        out.push(into);
+        i++;
+      } else out.push(list[i]);
+    return out;
+  };
+  return [...pair(pair(parts, "**", "=/", "A"), "=/", "**", "B").map((t) => (t === "**" ? "S" : t)), "B"];
+}
+const LINE_END = /[\n\r\u2028\u2029]/;
+/** Whether `path` matches `pattern` (both lower case), stepping through
+ * the path once with every place in the pattern it could be at, so the
+ * time grows with the pattern times the path. (A regular expression, one
+ * nested optional group per `**` and a `[^/]*` per `*`, backtracked for
+ * seconds on a deep path or a long name, and the worker waited.) */
+function claimMatches(pattern: string, path: string): boolean {
+  const tokens = claimTokens(pattern);
+  // A place: token index times 2, plus 1 inside an `A` or `B` token's
+  // "anything" part.
+  const size = (tokens.length + 1) * 2;
+  const enter = (seen: Uint8Array, list: number[], start: number) => {
+    const stack = [start];
+    while (stack.length) {
+      const at = stack.pop()!;
+      if (seen[at]) continue;
+      seen[at] = 1;
+      list.push(at);
+      const t = tokens[at >> 1];
+      const inside = at & 1;
+      if (!inside && (t === "*" || t === "A" || t === "B" || t === "S")) stack.push(at + 2);
+      if (!inside && t === "A") stack.push(at + 1);
+      if (inside && t === "B") stack.push(at + 1);
+    }
+  };
+  let list: number[] = [];
+  enter(new Uint8Array(size), list, 0);
+  for (let i = 0; i < path.length && list.length; i++) {
+    const c = path[i];
+    const any = !LINE_END.test(c);
+    const seen = new Uint8Array(size);
+    const next: number[] = [];
+    for (const at of list) {
+      const t = tokens[at >> 1];
+      const after = (at | 1) + 1;
+      if (t === undefined) continue;
+      if (at & 1) {
+        if (any) enter(seen, next, at);
+        if (t === "A" && c === "/") enter(seen, next, after);
+      } else if (t[0] === "=") {
+        if (t[1] === c) enter(seen, next, after);
+      } else if (t === "?") {
+        if (c !== "/") enter(seen, next, after);
+      } else if (t === "*") {
+        if (c !== "/") enter(seen, next, at);
+      } else if (t === "B") {
+        if (c === "/") enter(seen, next, at + 1);
+      } else if (t === "S" && any) enter(seen, next, at);
+    }
+    list = next;
+  }
+  return list.includes(tokens.length * 2);
+}
 /** Whether a claim covers a path (relative to the folder). A pattern
  * without wildcards covers the path and anything below it. */
 export function claimCovers(pattern: string, path: string): boolean {
   // The Mac's file system ignores case: src/A.ts and SRC/a.ts are one file.
-  return regex(pattern.toLowerCase()).test(path.replace(/^\.\//, "").toLowerCase());
+  return claimMatches(pattern.toLowerCase(), path.replace(/^\.\//, "").toLowerCase());
 }
 /** Whether two claims may overlap. Conservative: patterns whose fixed
  * leading folders nest count as overlapping. */

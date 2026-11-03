@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "/*": TRACE_EXCLUDES,
   },
+  // No image optimizer: the pages use none, and it would decode images for
+  // anyone, signed in or not (src/proxy.ts also answers its path with 404).
+  images: { unoptimized: true },
+  poweredByHeader: false,
   // Every page: a Content-Security-Policy that keeps the browser to the
   // page's own origin, and no referrer (src/lib/security/csp.ts says why
   // each directive is as it is).

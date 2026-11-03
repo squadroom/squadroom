@@ -39,6 +39,37 @@ test("claim patterns and hold cycles", () => {
   assert.equal(holdCycle([{ holder: "a", held: "b" }], "a", "c"), null);
 });
 
+test("review N1: a pattern full of ** or * is matched fast, with the same meaning", () => {
+  const deep = "a/b/c/d/e/f/g/h/i/j/k.ts";
+  const started = performance.now();
+  // Within the 200-character limit; each took seconds as a regular expression.
+  assert.equal(claimCovers(`${"**/".repeat(66)}zz`, deep), false);
+  assert.equal(claimCovers(`${"**/".repeat(66)}k.ts`, deep), true);
+  assert.equal(claimCovers("**/a/".repeat(40), `${Array(60).fill("a").join("/")}/x`), false);
+  assert.equal(claimCovers(`${"*a".repeat(99)}b`, "a".repeat(255)), false);
+  assert.ok(performance.now() - started < 200, `${performance.now() - started} ms`);
+  // What each form of ** meant before.
+  for (const [pattern, path, covered] of [
+    ["**", "a/b/c", true],
+    ["**/x.ts", "x.ts", true],
+    ["**/x.ts", "a/b/x.ts", true],
+    ["**/x.ts", "a/bx.ts", false],
+    ["src/**", "src", true],
+    ["src/**", "src/a/b", true],
+    ["src/**", "srcx/a", false],
+    ["src/**/a.ts", "src/a.ts", true],
+    ["src/**/a.ts", "src/x/y/a.ts", true],
+    ["src/**/**", "src/x", true],
+    ["src/**/**", "src", false],
+    ["s?c/*.ts", "src/a.ts", true],
+    ["s?c/*.ts", "s/c/a.ts", false],
+    ["docs/*.md", "docs/a.md/old", true],
+    ["a.b", "axb", false],
+    ["**/x", "a\nb/x", false],
+  ] as const)
+    assert.equal(claimCovers(pattern, path), covered, `${pattern} ${JSON.stringify(path)}`);
+});
+
 test("team_pull: a clean merge, never the teammate's uncommitted work; conflicts resolved in a later turn; abort", async (t) => {
   const h = await harness(t);
   await h.worker.start();

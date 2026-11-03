@@ -26,9 +26,9 @@ export async function GET(request: Request) {
   const expected = jar.get(STATE_COOKIE)?.value;
   const params = new URL(request.url).searchParams;
   let response: NextResponse;
-  // Without this browser's own `state`, nothing is asked of GitHub and no
-  // limit is used up.
-  if (!expected || params.get("state") !== expected) response = login("failed");
+  // Without this browser's own `state`, one this server issued and not
+  // expired, nothing is asked of GitHub and no limit is used up.
+  if (!service.stateValid(params.get("state"), expected)) response = login("failed");
   else if (!service.allow("callback", clientAddress(request.headers))) response = login("limited");
   else
     try {
