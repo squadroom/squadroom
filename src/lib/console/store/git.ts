@@ -268,7 +268,8 @@ export const git = {
     });
   },
   /** Whether the owner asked this turn to open a pull request: its
-   * team_push needs no second approval. */
+   * team_push also asks Codex to review (the owner still approves the
+   * text). */
   pushApproved(this: ConsoleStore, turnId: number): boolean {
     return !!this.get("SELECT push_approved FROM console_turns WHERE id = ?", turnId)?.push_approved;
   },

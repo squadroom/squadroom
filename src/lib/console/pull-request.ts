@@ -80,6 +80,18 @@ export function pullRequestText(input: {
   return { title: title.slice(0, PR_TITLE_MAX), body: parts.join("\n").trim() };
 }
 
+/** The most of a description the approval card shows; the request's input
+ * keeps all of it. */
+export const PUSH_SUMMARY_BODY = 1_200;
+/** What the owner approves for team_push: the push, and the title and
+ * description that will be posted from their account, as given. */
+export function pushSummary(branch: string, request: PushRequest): string {
+  const head = `Push ${branch} to GitHub and open its pull request${request.title ? `: "${request.title}"` : ""}`;
+  if (!request.body) return `${head}\n\nNo description given: a new pull request is described by the agent's final message and its commits.`;
+  const body = request.body.length > PUSH_SUMMARY_BODY ? `${request.body.slice(0, PUSH_SUMMARY_BODY)}\n… (cut here; the full description is in the request's input)` : request.body;
+  return `${head}\n\nDescription:\n${body}`;
+}
+
 /** Whether to ask Codex to review after this push, when Codex reviews are
  * switched on: when the pull request is new, or when whoever pushed asked
  * again (the owner's Push branch always does: new code to look at). */

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { UPLOADS_DIR } from "./files.ts";
 import type { Launcher, RunResult } from "./launcher.ts";
 
 // Git for the Console.
@@ -49,6 +50,7 @@ export const CONSOLE_BRANCH = /^console\/[a-z0-9][a-z0-9-]{0,80}$/;
 export const SCAN_BYTES = 100 * 1024 * 1024;
 export const SCAN_OBJECTS = 200_000;
 export const CREDENTIAL_IN_BRANCH = "The branch contains a credential the Console handed to an agent, so it was not pushed. Remove it from the branch's history first.";
+export const CONSOLE_FILES_IN_BRANCH = `The branch's commits add files under ${UPLOADS_DIR} (the owner's uploads) or .console-tmp, so it was not pushed. Remove them from the branch's history first.`;
 /** An editing agent's branch: by id, so renaming changes nothing. */
 export function consoleBranch(agentId: string, name: string): string {
   const slug = name
@@ -62,9 +64,17 @@ export function consoleBranch(agentId: string, name: string): string {
 const nulList = (out: string) => out.split("\0").filter(Boolean).slice(0, 500);
 /** Where a turn's temporary files go inside a Codex clone. */
 export const CLONE_TMP = ".console-tmp";
-/** Never committed: a Codex thread's temporary folder and the owner's
- * uploads. */
-const EXCLUDE = [".", `:(exclude)${CLONE_TMP}`, ":(exclude).console-uploads"];
+/** Never committed or pushed: a Codex thread's temporary folder and the
+ * owner's uploads. */
+const CONSOLE_DIRS = [CLONE_TMP, UPLOADS_DIR];
+const EXCLUDE = [".", ...CONSOLE_DIRS.map((d) => `:(exclude)${d}`)];
+/** Adds the lines given that the file (a clone's `info/exclude`) lacks. */
+const EXCLUDE_SCRIPT = `my ($path, @want) = @ARGV; my $text = "";
+if (open my $in, "<", $path) { local $/; $text = <$in> // ""; close $in }
+my %have = map { $_ => 1 } split /\\r?\\n/, $text; my @add = grep { !$have{$_} } @want; exit 0 unless @add;
+(my $dir = $path) =~ s{/[^/]*$}{}; mkdir $dir if length $dir && !-d $dir;
+open my $out, ">>", $path or die "$path: $!\\n";
+print $out (($text eq "" || $text =~ /\\n$/) ? "" : "\\n"), map { "$_\\n" } @add; close $out or die "$path: $!\\n";`;
 
 /** GitHub's basic-auth header for a token, kept out of every command line. */
 function authHeader(token: string) {
@@ -470,6 +480,23 @@ const fail = (what: string, r: RunResult, token?: string | null) => {
   return new GitError(`${what} failed${detail ? `: ${detail}` : ` (exit ${r.code})`}`);
 };
 
+/** Whether a file starts as a Git bundle does (version 2 or 3). */
+function isBundle(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const head = Buffer.alloc(16);
+    const n = readSync(fd, head, 0, 16, 0);
+    return /^# v[23] git bundle\n$/.test(head.subarray(0, n).toString("latin1"));
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export class Mirror {
   readonly dir: string;
   readonly repo: string;
@@ -520,8 +547,16 @@ export class Mirror {
    * bound here, on the owner's side, to what is pushed. */
   async stage(bundle: string, branch: string, sha: string | null = null): Promise<string> {
     if (!CONSOLE_BRANCH.test(branch)) throw new GitError(`Only console/ branches are pushed, not ${branch}.`);
+    // A bundle, never a file Git would read another way (a `gitdir:` file
+    // makes a fetch read that repository), holding the branch alone.
+    if (!isBundle(bundle)) throw new GitError("The agent's bundle is not a Git bundle, so nothing was pushed.");
+    const heads = await ownerGit(["bundle", "list-heads", bundle], null, this.dir);
+    const listed = heads.stdout.split("\n").filter(Boolean);
+    if (heads.code !== 0 || heads.truncated || listed.length !== 1 || listed[0].split(" ")[1] !== `refs/heads/${branch}`)
+      throw new GitError("The agent's bundle does not hold its branch alone, so nothing was pushed.");
     const incoming = `refs/console/incoming/${branch}`;
-    const r = await ownerGit(["fetch", "--quiet", bundle, `+refs/heads/${branch}:${incoming}`], null, this.dir);
+    // No tags: nothing of the agent's may join what counts as GitHub's.
+    const r = await ownerGit(["fetch", "--quiet", "--no-tags", bundle, `+refs/heads/${branch}:${incoming}`], null, this.dir);
     if (r.code !== 0) throw fail("Reading the agent's branch", r);
     const at = await ownerGit(["rev-parse", "--verify", "--quiet", `${incoming}^{commit}`], null, this.dir);
     const staged = at.stdout.trim();
@@ -531,7 +566,7 @@ export class Mirror {
   }
   /**
    * The credential check before a push: every object reachable from `sha`
-   * that the mirror's branches and tags (what GitHub already has) do not
+   * that the mirror's branches (fetched from GitHub, or pushed there) do not
    * reach is read whole and given to `holds`. That is commits with their
    * messages, trees with their names, and blobs as raw bytes, whatever a
    * patch would show of them. The
@@ -541,7 +576,7 @@ export class Mirror {
   async scanNew(sha: string, holds: (bytes: Buffer) => boolean, bounds = { bytes: SCAN_BYTES, objects: SCAN_OBJECTS }) {
     if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new GitError("Not a commit.");
     const tooLarge = new GitError("The branch is too large to check for credentials before a push.");
-    const list = await ownerGit(["rev-list", "--objects", sha, "--not", "--branches", "--tags"], null, this.dir, 300_000, 32 * 1024 * 1024);
+    const list = await ownerGit(["rev-list", "--objects", sha, "--not", "--branches"], null, this.dir, 300_000, 32 * 1024 * 1024);
     if (list.code !== 0) throw fail("Listing the branch's objects", list);
     if (list.truncated) throw tooLarge;
     const ids = list.stdout
@@ -625,6 +660,22 @@ export class Mirror {
       child.stdin!.end(`${ids.join("\n")}\n`);
     });
   }
+  /** Whether a commit GitHub does not have yet (by the mirror's branches)
+   * adds or changes a file in the folders never pushed: the owner's
+   * uploads and a Codex thread's temporary files, which an agent's own
+   * `git add -f` could commit. */
+  async addsConsoleFiles(sha: string): Promise<boolean> {
+    if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new GitError("Not a commit.");
+    const r = await ownerGit(
+      ["log", "-m", "--no-renames", "--diff-filter=d", "--name-only", "-z", "--format=", sha, "--not", "--branches", "--", ...CONSOLE_DIRS],
+      null,
+      this.dir,
+      300_000,
+      4096,
+    );
+    if (r.code !== 0) throw fail("Reading the branch's files", r);
+    return r.truncated || !!r.stdout.replace(/\0/g, "").trim();
+  }
   /** Push the staged commit, by its exact id, as the branch. */
   async pushStaged(branch: string, sha: string, token: string) {
     if (!CONSOLE_BRANCH.test(branch)) throw new GitError(`Only console/ branches are pushed, not ${branch}.`);
@@ -678,6 +729,21 @@ export class Clone {
     if (r.code !== 0) throw fail(what, r);
     return r;
   }
+  /** Git whose whole output a check depends on: cut short is an error,
+   * never a shorter list. */
+  private async gitAll(args: string[], what: string, maxStdout: number): Promise<RunResult> {
+    const r = await this.git(args, what, maxStdout);
+    if (r.truncated) throw new GitError(`${what} failed: too much output to check.`);
+    return r;
+  }
+  /** The clone's `info/exclude` names the folders never committed, so an
+   * agent's own `git add -A` leaves them out too. The agent owns `.git`, so
+   * this is written again before every commit. */
+  private async excludeConsoleDirs() {
+    const path = (await this.git(["rev-parse", "--git-path", "info/exclude"], "Finding the clone's exclude file", 4096)).stdout.trim();
+    const r = await this.launcher.runIn(this.folder, "/usr/bin/perl", ["-e", EXCLUDE_SCRIPT, path, ...CONSOLE_DIRS.map((d) => `/${d}/`)]);
+    if (r.code !== 0) throw new GitError(`Writing the clone's exclude file failed: ${r.stderr.trim().slice(0, 200) || `exit ${r.code}`}`);
+  }
   /** Index entries the agent marked skip-worktree or assume-unchanged
    * (which hide a change from status) are unmarked, so every check sees
    * the files as they are. */
@@ -698,6 +764,7 @@ export class Clone {
   async createEmpty(name: string, agentId: string): Promise<string> {
     await this.git(["init", "--quiet", "-b", "main"], "Creating the agent folder");
     await this.git([...author(name, agentId), "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "Start"], "The first commit");
+    await this.excludeConsoleDirs();
     return (await this.head())!;
   }
   /** A GitHub project's clone, filled from the mirror's bundle. An editing
@@ -710,6 +777,7 @@ export class Clone {
     await this.git(["fetch", "--quiet", bundle, `refs/heads/${base}:refs/heads/${base}`], "Filling the clone");
     if (branch) await this.git(["checkout", "--quiet", "-b", branch, base], "Creating the agent's branch");
     else await this.git(["checkout", "--quiet", "--detach", base], "Checking out the base branch");
+    await this.excludeConsoleDirs();
     return (await this.head())!;
   }
   async head(): Promise<string | null> {
@@ -725,10 +793,12 @@ export class Clone {
     agentId: string,
     options: { unresolved?: "skip" | "throw"; conflicts?: string[]; only?: (path: string) => boolean; since?: string } = {},
   ): Promise<string | null> {
+    await this.excludeConsoleDirs();
     // A merge from team_pull is committed only once no conflict marker is
     // left in its conflicted files: every file the pull reported,
-    // even one the agent has staged since, and any still unmerged.
-    const merging = await this.merging();
+    // even one the agent has staged since, and any still unmerged. A tab
+    // with steps has no team_pull, so there a merge state is ignored.
+    const merging = !options.only && (await this.merging());
     if (merging) {
       const marked = await this.markers([...new Set([...(options.conflicts ?? []), ...(await this.unmerged())])]);
       if (marked.length) {
@@ -738,11 +808,7 @@ export class Clone {
     }
     const status = await this.git(["status", "--porcelain", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 64 * 1024);
     if (!status.stdout.trim() && !merging) return null;
-    // The excluded folders' index entries go back to the last commit: what
-    // the agent staged there itself is unstaged (the files stay on disk),
-    // and files the repository already tracks there are kept, never deleted.
-    await this.git(["reset", "--quiet", "--", CLONE_TMP, ".console-uploads"], "Clearing the index");
-    if (options.only && !merging) {
+    if (options.only) {
       // A tab with steps: a merge the step check forgot (`merge --quit`)
       // leaves its conflicted paths unmerged in the index; an allowed one
       // still holding conflict markers is refused as an unfinished merge is.
@@ -752,19 +818,31 @@ export class Clone {
         throw new GitError(`Conflict markers remain in ${marked.slice(0, 10).join(", ")}. Resolve them, and the Console commits the turn's changes.`);
       }
       // The index goes back to HEAD and only the paths the step allows are
-      // staged, so nothing else is ever committed.
+      // staged, so nothing else is ever committed (nor a merge's parent).
+      await this.git(["merge", "--quit"], "Clearing an unfinished merge");
       await this.git(["reset", "--quiet"], "Clearing the index");
       const paths = (await this.changes()).map((c) => c.path).filter(options.only);
-      if (!paths.length && !merging) return null;
+      if (!paths.length) return null;
       for (let i = 0; i < paths.length; i += 100) await this.git(["add", "--all", "--", ...paths.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Adding the changes");
-    } else await this.git(["add", "--all", "--", ...EXCLUDE], "Adding the changes");
+    } else await this.git(["add", "--all", "--", "."], "Adding the changes");
+    // The excluded folders' index entries go back to the last commit (an
+    // exclude pathspec would make `add` fail on them once ignored): what
+    // the agent staged there is unstaged (the files stay on disk), and
+    // files the repository already tracks there are kept, never deleted.
+    await this.git(["reset", "--quiet", "--", ...CONSOLE_DIRS], "Clearing the index");
     await this.git([...author(name, agentId), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
     const sha = await this.head();
     // A tab with steps: the commit is checked against where the step's
     // check began, tree to tree, before anything records or pushes it. One
     // that carries a file outside the step is undone (its files stay on
-    // disk, to be put back by the next check) and refused.
-    if (options.only && options.since && sha && !merging) {
+    // disk, to be put back by the next check) and refused. So is a merge
+    // commit (a merge the agent opened again after the check).
+    if (options.only && sha && (await this.run(["rev-parse", "--verify", "--quiet", `${sha}^2`], 4096)).code === 0) {
+      await this.git(["reset", "--quiet", "--soft", `${sha}^1`], "Undoing the commit");
+      await this.git(["merge", "--quit"], "Clearing an unfinished merge");
+      throw new GitError("The commit would have merged another commit, which a tab with steps never does, so it was undone.");
+    }
+    if (options.only && options.since && sha) {
       const outside = (await this.diffPaths(options.since, sha)).filter((p) => !options.only!(p));
       if (outside.length) {
         await this.git(["reset", "--quiet", "--soft", options.since], "Undoing the commit");
@@ -776,7 +854,7 @@ export class Clone {
   /** Every path that differs from HEAD, in the index or on disk (the
    * excluded folders aside), with its two-letter status. */
   private async changes(): Promise<{ code: string; path: string }[]> {
-    const status = await this.git(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
+    const status = await this.gitAll(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
     return status.stdout
       .split("\0")
       .filter(Boolean)
@@ -814,7 +892,7 @@ export class Clone {
    * (from the index and the disk) where it does not. */
   private async putBack(since: string, paths: string[]) {
     const literal = (list: string[]) => list.map((p) => `:(literal)${p}`);
-    const known = new Set((await this.git(["ls-tree", "-r", "-z", "--name-only", since, "--", ...literal(paths)], "Reading the step's start", 16 * 1024 * 1024)).stdout.split("\0").filter(Boolean));
+    const known = new Set((await this.gitAll(["ls-tree", "-r", "-z", "--name-only", since, "--", ...literal(paths)], "Reading the step's start", 16 * 1024 * 1024)).stdout.split("\0").filter(Boolean));
     const there = paths.filter((p) => known.has(p));
     const added = paths.filter((p) => !known.has(p));
     if (there.length) await this.git(["restore", `--source=${since}`, "--staged", "--worktree", "--", ...literal(there)], "Putting back files outside the step");
@@ -826,7 +904,9 @@ export class Clone {
   /** One commit's summary and patch, for the changes view. */
   async show(sha: string, maxBytes: number): Promise<{ stat: string; patch: string; files: string[] }> {
     const stat = await this.git(["show", "--no-color", "--stat", "--format=", sha], "Reading the commit", 64 * 1024);
-    const patch = await this.git(["show", "--no-color", "--no-ext-diff", "--no-textconv", "--format=", "--patch", sha], "Reading the commit", maxBytes);
+    // `--text`: every file as text, whatever attributes the agent wrote
+    // (`-diff` would show a change as "Binary files differ").
+    const patch = await this.git(["show", "--no-color", "--text", "--no-ext-diff", "--no-textconv", "--format=", "--patch", sha], "Reading the commit", maxBytes);
     const names = await this.git(["show", "--no-renames", "--name-only", "-z", "--format=", sha], "Reading the commit", 256 * 1024);
     return { stat: stat.stdout.trim(), patch: patch.truncated ? `${patch.stdout}\n… truncated` : patch.stdout, files: nulList(names.stdout) };
   }
@@ -844,19 +924,19 @@ export class Clone {
   }
   /** Every path that differs between two commits (uncapped). */
   async diffPaths(from: string, to: string): Promise<string[]> {
-    const r = await this.git(["diff", "--no-renames", "--name-only", "-z", from, to], "Comparing commits", 16 * 1024 * 1024);
+    const r = await this.gitAll(["diff", "--no-renames", "--name-only", "-z", from, to], "Comparing commits", 16 * 1024 * 1024);
     return r.stdout.split("\0").filter(Boolean);
   }
   /** Every path a commit changed (uncapped, for the claim check). */
   async changedPaths(sha: string): Promise<string[]> {
-    const r = await this.git(["show", "--no-renames", "--name-only", "-z", "--format=", sha], "Reading the commit", 16 * 1024 * 1024);
+    const r = await this.gitAll(["show", "--no-renames", "--name-only", "-z", "--format=", sha], "Reading the commit", 16 * 1024 * 1024);
     return r.stdout.split("\0").filter(Boolean);
   }
   /** The branch (at `head`, the commit recorded with it) against its
    * base, for the changes view. */
   async diff(base: string, maxBytes: number, head = "HEAD"): Promise<{ stat: string; patch: string; files: string[] }> {
     const stat = await this.git(["diff", "--no-color", "--stat", base, head], "Comparing with the base", 64 * 1024);
-    const patch = await this.git(["diff", "--no-color", "--no-ext-diff", "--no-textconv", base, head], "Comparing with the base", maxBytes);
+    const patch = await this.git(["diff", "--no-color", "--text", "--no-ext-diff", "--no-textconv", base, head], "Comparing with the base", maxBytes);
     // Exact, untruncated names (the stat abbreviates long paths and renames).
     const names = await this.git(["diff", "--no-renames", "--name-only", "-z", "--diff-filter=d", base, head], "Comparing with the base", 256 * 1024);
     return { stat: stat.stdout.trim(), patch: patch.truncated ? `${patch.stdout}\n… truncated` : patch.stdout, files: nulList(names.stdout) };
@@ -865,7 +945,7 @@ export class Clone {
    * for files past the kept patch's bound): a glob, matched ignoring case. */
   async diffUnder(from: string, to: string, pattern: string, maxBytes: number): Promise<string> {
     const r = await this.git(
-      ["diff", "--no-color", "--no-ext-diff", "--no-textconv", from, to, "--", `:(glob,icase)${pattern}`, ...(pattern.includes("*") ? [] : [`:(glob,icase)${pattern}/**`])],
+      ["diff", "--no-color", "--text", "--no-ext-diff", "--no-textconv", from, to, "--", `:(glob,icase)${pattern}`, ...(pattern.includes("*") ? [] : [`:(glob,icase)${pattern}/**`])],
       "Comparing commits",
       maxBytes,
     );
@@ -892,14 +972,16 @@ export class Clone {
   async fetchBundle(bundle: string, ref: string, into: string) {
     await this.git(["fetch", "--quiet", bundle, `+${ref}:${into}`], "Fetching the commit");
   }
-  /** A merge (from team_pull) is in progress. */
+  /** A merge (from team_pull) is in progress: Git's own MERGE_HEAD file is
+   * there (not a branch or tag of that name). */
   async merging(): Promise<boolean> {
-    return (await this.run(["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], 4096)).code === 0;
+    const r = await this.run(["rev-parse", "--git-path", "MERGE_HEAD"], 4096);
+    return r.code === 0 && !!r.stdout.trim() && existsSync(resolve(this.folder, r.stdout.trim()));
   }
   /** Files the merge left unmerged in the index. */
   async unmerged(): Promise<string[]> {
     // Uncapped: every conflicted file is checked for markers.
-    const r = await this.git(["diff", "--name-only", "-z", "--diff-filter=U"], "Reading the conflicts", 16 * 1024 * 1024);
+    const r = await this.gitAll(["diff", "--name-only", "-z", "--diff-filter=U"], "Reading the conflicts", 16 * 1024 * 1024);
     return [...new Set(r.stdout.split("\0").filter(Boolean))];
   }
   /** Which of these files still hold a conflict marker (read as `agent`). */
@@ -912,6 +994,7 @@ export class Clone {
       ["-l", "-s", "-E", "^(<{7,}( |$)|={7,}$|>{7,}( |$))", "--", ...files.map((f) => `./${f}`)],
       256 * 1024,
     );
+    if (r.truncated) throw new GitError("Reading the conflict markers failed: too much output to check.");
     return r.stdout
       .split("\n")
       .filter(Boolean)
