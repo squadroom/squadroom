@@ -2,6 +2,6 @@
   "name": "console-client-codex",
   "private": true,
   "dependencies": {
-    "@openai/codex": "0.155.1"
+    "@openai/codex": "0.166.0"
   }
 }
