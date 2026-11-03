@@ -77,8 +77,13 @@ and left as it was.
 ### How a paid turn is charged
 
 A paid turn is charged the usage its client reported times the model's
-catalog prices, cache included. A model's long-context rates apply per
-request: where each request reports its own usage (Codex), only the
+catalog prices, cache included. Claude Code reports a running total for its
+session, so its turn is that total less the one before it. The totals are
+kept in the store (`console_session_totals`) in the same transaction as the
+turn's charge, so a restarted worker resuming the session charges its next
+turn only what came after. A crash before the charge is written leaves the
+older totals, so the next turn can be charged too much but never too little.
+A model's long-context rates apply per request: where each request reports its own usage (Codex), only the
 requests above the threshold get them; where only the turn's total is
 reported (ACP clients), the whole turn does when the largest request the
 context gauge saw was above the threshold.
