@@ -13,6 +13,15 @@ updates:
         patterns: ["react", "react-dom"]
       next:
         patterns: ["next", "@next/env", "eslint-config-next"]
+    ignore:
+      # typescript-eslint (through eslint-config-next) supports TypeScript
+      # below 6.1 only.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # Squadroom runs on Node 24 (.nvmrc, engines); newer types allow APIs
+      # it doesn't have.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
   # Each agent client's pin, one folder per client. The pin in
   # src/lib/console/clients.ts has to move with each of these.
   - package-ecosystem: npm
