@@ -242,7 +242,8 @@ step "Installing Claude Code $CLAUDE_VERSION, Codex $CODEX_VERSION and the ACP c
 # <name>, kept equal to clients.ts by a test), so every dependency is the
 # one reviewed. npm and the clients' own install scripts run as '$AGENT', in
 # a staging folder, never as root. Root then copies the result into place:
-# fresh root-owned files, read-only, with no set-id bits.
+# fresh root-owned files, read-only, with no set-id bits, access lists or
+# extended attributes (an access list would grant writes past the mode).
 /bin/mkdir -p $CLIENTS/bin
 for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai/codex $CODEX_VERSION codex ${=acp_clients}; do
   src=$HERE/clients/$name prefix=$CLIENTS/$name-$version
@@ -260,9 +261,10 @@ for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai
     # Anything an install script left running goes before root reads it.
     /usr/bin/pkill -KILL -U $AGENT 2>/dev/null || true
     /bin/rm -rf $prefix.new
-    /usr/bin/ditto $stage/pkg $prefix.new
+    /usr/bin/ditto --noacl --noextattr $stage/pkg $prefix.new
     /bin/rm -rf $stage
     /usr/sbin/chown -R root:wheel $prefix.new
+    /bin/chmod -R -N $prefix.new
     /bin/chmod -R a-w,ug-s $prefix.new
     [[ -z $(/usr/bin/find $prefix.new -perm +6000 -print -quit) ]] || fail "$prefix.new has set-id files"
     [[ -x $prefix.new/node_modules/.bin/$name ]] || fail "the $name install has no $name program"
@@ -271,6 +273,12 @@ for pkg version name in @anthropic-ai/claude-code $CLAUDE_VERSION claude @openai
   }
   /bin/ln -sfh $prefix/node_modules/.bin/$name $CLIENTS/bin/$name
 done
+# Gemini CLI's system settings (the launcher points it here): they win
+# over the user's and a repository's own, so usage statistics stay off.
+gemini_tmp=$(/usr/bin/mktemp)
+print -r -- '{ "privacy": { "usageStatisticsEnabled": false } }' > $gemini_tmp
+/usr/bin/install -o root -g wheel -m 644 $gemini_tmp $CLIENTS/gemini-system-settings.json
+/bin/rm -f $gemini_tmp
 /usr/sbin/chown -h root:wheel $CLIENTS $CLIENTS/bin $CLIENTS/bin/*
 /bin/chmod -h go-w $CLIENTS $CLIENTS/bin
 # From /: the agent user cannot read the owner's folder this runs in, and
@@ -316,14 +324,19 @@ EOF
 step "Checking the boundary: '$AGENT' must not read the owner's files"
 owner_home=$(/usr/bin/dscl . -read /Users/$OWNER NFSHomeDirectory | /usr/bin/awk '{print $2}')
 failed=0
-for target in $owner_home $owner_home/.ssh $owner_home/.squadroom $owner_home/GitHub; do
-  if sudo -u $AGENT /bin/ls $target >/dev/null 2>&1; then
+# This checkout too (it may be outside your home folder) and its .env.local,
+# which holds the sign-in's secrets: a folder is listed, a file read.
+readonly CHECKOUT=${HERE:h:h}
+for target in $owner_home $owner_home/.ssh $owner_home/.squadroom $owner_home/GitHub $CHECKOUT $CHECKOUT/.env.local; do
+  [[ $target == $CHECKOUT/.env.local && ! -e $target ]] && continue
+  [[ -f $target ]] && reader=(/usr/bin/head -c 1) || reader=(/bin/ls)
+  if sudo -u $AGENT $reader $target >/dev/null 2>&1; then
     print -P "  %F{red}READABLE%f  $target"; failed=1
   else
     print -P "  %F{green}blocked%f   $target"
   fi
 done
-(( failed == 0 )) || fail "the agent user can read owner files; do not continue"
+(( failed == 0 )) || fail "the agent user can read owner files; do not continue (a folder: chmod o-rx it; .env.local: chmod 600 it)"
 
 step "Checking the launcher"
 sudo -u $OWNER /usr/bin/sudo -n -u $AGENT $LAUNCHER spawn $AGENT_HOME /usr/bin/id -un | /usr/bin/grep -qx $AGENT ||
