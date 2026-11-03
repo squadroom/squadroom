@@ -4,7 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { UPLOADS_DIR } from "./files.ts";
 import type { Launcher, RunResult } from "./launcher.ts";
 
-// Git for the Console.
+// Git for the Console, and its GitHub client: the checks a repository must
+// pass, pull requests and their review threads (the worker only, with the
+// owner's token).
 //
 // Two sides that never mix:
 // - Owner side: one mirror per GitHub project in
@@ -76,6 +78,15 @@ function authHeader(token: string) {
 
 // ── GitHub checks ───────────────────────────────────────────────────
 
+const GITHUB_API = "https://api.github.com";
+/** The owner's GitHub token, and the `fetch` and API address its calls
+ * use (tests pass their own). */
+export interface GitHubApi {
+  token: string;
+  fetch?: typeof fetch;
+  url?: string;
+}
+
 /** Whether a ruleset ref pattern may match a ref. Conservative: `~ALL` and
  * `~DEFAULT_BRANCH` (which can be the base) match, and `*` is allowed to
  * cross `/`, so an exclusion is never underestimated. */
@@ -105,26 +116,13 @@ interface Ruleset {
  * never "the default branch") and block deleting it, force-pushing it and
  * updating it directly, with no bypass for the token's own user.
  */
-export async function checkGitHub(repo: string, base: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com") {
+export async function checkGitHub(repo: string, base: string, gh: GitHubApi) {
   const get = async (path: string) => {
-    let response: Response;
-    try {
-      response = await fetcher(`${api}/repos/${repo}${path}`, {
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${token}`,
-          "x-github-api-version": "2022-11-28",
-        },
-        signal: AbortSignal.timeout(20_000),
-      });
-    } catch {
-      throw new GitError("GitHub could not be reached. Try again in a minute.");
-    }
-    if (response.status === 404) return null;
-    if (response.status === 401 || response.status === 403)
-      throw new GitError(`The GitHub token cannot read ${repo} (${response.status}). It needs access to this repository.`);
-    if (!response.ok) throw new GitError(`GitHub answered ${response.status} for ${repo}.`);
-    return response.json();
+    const r = await githubCall(gh, "GET", `/repos/${repo}${path}`);
+    if (r.status === 404) return null;
+    if (r.status === 401 || r.status === 403) throw new GitError(`The GitHub token cannot read ${repo} (${r.status}). It needs access to this repository.`);
+    if (r.status < 200 || r.status > 299) throw new GitError(`GitHub answered ${r.status} for ${repo}.`);
+    return r.json;
   };
   if (!(await get("")))
     throw new GitError(`The repository ${repo} was not found, or the GitHub token cannot see it.`);
@@ -150,21 +148,14 @@ export async function checkGitHub(repo: string, base: string, token: string, fet
 // ── Pull requests ─────────────────────────────────────────────
 
 /** One GitHub API call with the owner's token (the worker only). */
-async function githubCall(
-  method: "GET" | "POST" | "PATCH",
-  path: string,
-  token: string,
-  fetcher: typeof fetch,
-  api: string,
-  body?: unknown,
-): Promise<{ status: number; json: unknown }> {
+async function githubCall(gh: GitHubApi, method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
   let response: Response;
   try {
-    response = await fetcher(`${api}${path}`, {
+    response = await (gh.fetch ?? fetch)(`${gh.url ?? GITHUB_API}${path}`, {
       method,
       headers: {
         accept: "application/vnd.github+json",
-        authorization: `Bearer ${token}`,
+        authorization: `Bearer ${gh.token}`,
         "x-github-api-version": "2022-11-28",
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
@@ -172,12 +163,19 @@ async function githubCall(
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
-    throw new GitError("GitHub could not be reached.");
+    throw new GitError("GitHub could not be reached. Try again in a minute.");
   }
   const json = await response.json().catch(() => null);
   return { status: response.status, json };
 }
 const NEEDS_PR_WRITE = "The GitHub token cannot open pull requests here. Give it Pull requests: Read and write for this repository (Settings → Developer settings → Fine-grained tokens).";
+/** A pull request call: refused (401, 403, or 404 for a repository the
+ * token cannot see), it says what the token needs. */
+async function pullRequestCall(gh: GitHubApi, method: "GET" | "POST" | "PATCH", path: string, body?: unknown) {
+  const r = await githubCall(gh, method, path, body);
+  if (r.status === 401 || r.status === 403 || r.status === 404) throw new GitError(NEEDS_PR_WRITE);
+  return r;
+}
 
 /**
  * The open pull request from `branch` into `base`, opened now if there is
@@ -188,26 +186,17 @@ const NEEDS_PR_WRITE = "The GitHub token cannot open pull requests here. Give it
 export async function openPullRequest(
   repo: string,
   pr: { branch: string; base: string; title: string; body: string },
-  token: string,
-  fetcher: typeof fetch = fetch,
-  api = "https://api.github.com",
+  gh: GitHubApi,
   update: { title?: string; body?: string } = {},
 ): Promise<{ number: number; url: string; created: boolean; updated: boolean }> {
-  if (!CONSOLE_BRANCH.test(pr.branch)) throw new GitError(`Only console/ branches get pull requests, not ${pr.branch}.`);
-  const owner = repo.split("/")[0];
-  const found = await githubCall("GET", `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${pr.branch}`)}&base=${encodeURIComponent(pr.base)}`, token, fetcher, api);
-  if (found.status === 401 || found.status === 403 || found.status === 404) throw new GitError(NEEDS_PR_WRITE);
-  if (found.status !== 200) throw new GitError(`GitHub answered ${found.status} when looking for the pull request.`);
-  const open = Array.isArray(found.json) ? (found.json[0] as { number?: unknown; html_url?: unknown } | undefined) : undefined;
-  if (open && typeof open.number === "number" && typeof open.html_url === "string") {
-    if (!update.title && !update.body) return { number: open.number, url: open.html_url, created: false, updated: false };
-    const patched = await githubCall("PATCH", `/repos/${repo}/pulls/${open.number}`, token, fetcher, api, update);
-    if (patched.status === 401 || patched.status === 403 || patched.status === 404) throw new GitError(NEEDS_PR_WRITE);
+  const open = await findPullRequest(repo, pr.branch, pr.base, gh);
+  if (open) {
+    if (!update.title && !update.body) return { ...open, created: false, updated: false };
+    const patched = await pullRequestCall(gh, "PATCH", `/repos/${repo}/pulls/${open.number}`, update);
     if (patched.status !== 200) throw new GitError(`GitHub answered ${patched.status} when updating pull request #${open.number}.`);
-    return { number: open.number, url: open.html_url, created: false, updated: true };
+    return { ...open, created: false, updated: true };
   }
-  const made = await githubCall("POST", `/repos/${repo}/pulls`, token, fetcher, api, { title: pr.title, head: pr.branch, base: pr.base, body: pr.body });
-  if (made.status === 401 || made.status === 403 || made.status === 404) throw new GitError(NEEDS_PR_WRITE);
+  const made = await pullRequestCall(gh, "POST", `/repos/${repo}/pulls`, { title: pr.title, head: pr.branch, base: pr.base, body: pr.body });
   const created = made.json as { number?: unknown; html_url?: unknown; message?: unknown } | null;
   if (made.status !== 201 || typeof created?.number !== "number" || typeof created.html_url !== "string")
     throw new GitError(`GitHub did not open the pull request (${made.status}${typeof created?.message === "string" ? `: ${created.message.slice(0, 200)}` : ""}).`);
@@ -215,8 +204,8 @@ export async function openPullRequest(
 }
 
 /** A GitHub GraphQL call (review threads: their state, replies, resolving). */
-async function githubGraphql(query: string, variables: Record<string, unknown>, token: string, fetcher: typeof fetch, api: string): Promise<Record<string, unknown>> {
-  const r = await githubCall("POST", "/graphql", token, fetcher, api, { query, variables });
+async function githubGraphql(gh: GitHubApi, query: string, variables: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const r = await githubCall(gh, "POST", "/graphql", { query, variables });
   if (r.status === 401 || r.status === 403) throw new GitError(NEEDS_PR_WRITE);
   const json = r.json as { data?: Record<string, unknown>; errors?: { message?: string }[] } | null;
   if (r.status !== 200 || !json?.data || json.errors?.length)
@@ -252,11 +241,10 @@ export interface PullRequestReview {
 }
 
 /** The open pull request for a console/ branch, or null. */
-export async function findPullRequest(repo: string, branch: string, base: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com") {
+export async function findPullRequest(repo: string, branch: string, base: string, gh: GitHubApi): Promise<{ number: number; url: string } | null> {
   if (!CONSOLE_BRANCH.test(branch)) throw new GitError(`Only console/ branches have pull requests here, not ${branch}.`);
   const owner = repo.split("/")[0];
-  const found = await githubCall("GET", `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(base)}`, token, fetcher, api);
-  if (found.status === 401 || found.status === 403 || found.status === 404) throw new GitError(NEEDS_PR_WRITE);
+  const found = await pullRequestCall(gh, "GET", `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}&base=${encodeURIComponent(base)}`);
   if (found.status !== 200) throw new GitError(`GitHub answered ${found.status} when looking for the pull request.`);
   const open = Array.isArray(found.json) ? (found.json[0] as { number?: unknown; html_url?: unknown } | undefined) : undefined;
   return open && typeof open.number === "number" && typeof open.html_url === "string" ? { number: open.number, url: open.html_url } : null;
@@ -313,7 +301,7 @@ async function allPages(page: (after: string | null) => Promise<Conn>, max: numb
 /** A pull request's review threads and whole conversation (read only).
  * Conversation comments are in order from the first, so their numbers
  * stay the same from one read to the next. */
-export async function readPullRequest(repo: string, number: number, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com"): Promise<PullRequestReview> {
+export async function readPullRequest(repo: string, number: number, gh: GitHubApi): Promise<PullRequestReview> {
   const [owner, name] = repo.split("/");
   let pr: Record<string, unknown> | undefined;
   const pull = (data: Record<string, unknown>) => {
@@ -322,11 +310,11 @@ export async function readPullRequest(repo: string, number: number, token: strin
     return got;
   };
   const threadPages = await allPages(async (after) => {
-    const got = pull(await githubGraphql(THREADS_QUERY, { owner, name, number, after }, token, fetcher, api));
+    const got = pull(await githubGraphql(gh, THREADS_QUERY, { owner, name, number, after }));
     pr ??= got;
     return got.reviewThreads as Conn;
   }, THREAD_PAGES);
-  const talk = await allPages(async (after) => pull(await githubGraphql(CONVERSATION_QUERY, { owner, name, number, after }, token, fetcher, api)).comments as Conn, CONVERSATION_PAGES);
+  const talk = await allPages(async (after) => pull(await githubGraphql(gh, CONVERSATION_QUERY, { owner, name, number, after })).comments as Conn, CONVERSATION_PAGES);
   if (!pr) throw new GitError(`Pull request #${number} was not found in ${repo}.`);
   const threads = threadPages.nodes.map((t) => {
     const c = t.comments as { nodes?: Node[]; totalCount?: number } | undefined;
@@ -356,23 +344,19 @@ export async function readPullRequest(repo: string, number: number, token: strin
 }
 
 /** Every reply in one review thread (team_pr(thread: id)). */
-export async function readReviewThreadComments(threadId: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com") {
+export async function readReviewThreadComments(threadId: string, gh: GitHubApi) {
   const got = await allPages(async (after) => {
-    const data = await githubGraphql(THREAD_COMMENTS_QUERY, { id: threadId, after }, token, fetcher, api);
+    const data = await githubGraphql(gh, THREAD_COMMENTS_QUERY, { id: threadId, after });
     return (data.node as { comments?: Conn } | null)?.comments;
   }, REPLY_PAGES);
   return { comments: (got.nodes as Node[]).map(comment), more: got.more };
 }
 
 /** The pull request a review thread belongs to, as `owner/name#number`. */
-export async function reviewThreadOwner(threadId: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com"): Promise<string | null> {
-  const data = await githubGraphql(
-    "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } } }",
-    { id: threadId },
-    token,
-    fetcher,
-    api,
-  );
+export async function reviewThreadOwner(threadId: string, gh: GitHubApi): Promise<string | null> {
+  const data = await githubGraphql(gh, "query($id: ID!) { node(id: $id) { ... on PullRequestReviewThread { pullRequest { number repository { nameWithOwner } } } } }", {
+    id: threadId,
+  });
   const pr = (data.node as { pullRequest?: { number?: number; repository?: { nameWithOwner?: string } } } | null)?.pullRequest;
   return pr?.number && pr.repository?.nameWithOwner ? `${pr.repository.nameWithOwner.toLowerCase()}#${pr.number}` : null;
 }
@@ -380,24 +364,15 @@ export async function reviewThreadOwner(threadId: string, token: string, fetcher
 /** Reply in a review thread, and resolve it when asked. A failed resolve
  * after a posted reply is reported, not thrown, so a retry never posts the
  * reply twice. */
-export async function replyToReviewThread(
-  threadId: string,
-  body: string,
-  resolve: boolean,
-  token: string,
-  fetcher: typeof fetch = fetch,
-  api = "https://api.github.com",
-): Promise<{ resolveError: string | null }> {
+export async function replyToReviewThread(threadId: string, body: string, resolve: boolean, gh: GitHubApi): Promise<{ resolveError: string | null }> {
   await githubGraphql(
+    gh,
     "mutation($id: ID!, $body: String!) { addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $id, body: $body }) { comment { id } } }",
     { id: threadId, body },
-    token,
-    fetcher,
-    api,
   );
   if (!resolve) return { resolveError: null };
   try {
-    await githubGraphql("mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }", { id: threadId }, token, fetcher, api);
+    await githubGraphql(gh, "mutation($id: ID!) { resolveReviewThread(input: { threadId: $id }) { thread { isResolved } } }", { id: threadId });
     return { resolveError: null };
   } catch (error) {
     return { resolveError: error instanceof Error ? error.message : String(error) };
@@ -405,9 +380,8 @@ export async function replyToReviewThread(
 }
 
 /** A comment on a pull request (the Codex review request). */
-export async function commentOnPullRequest(repo: string, number: number, text: string, token: string, fetcher: typeof fetch = fetch, api = "https://api.github.com") {
-  const r = await githubCall("POST", `/repos/${repo}/issues/${number}/comments`, token, fetcher, api, { body: text });
-  if (r.status === 401 || r.status === 403 || r.status === 404) throw new GitError(NEEDS_PR_WRITE);
+export async function commentOnPullRequest(repo: string, number: number, text: string, gh: GitHubApi) {
+  const r = await pullRequestCall(gh, "POST", `/repos/${repo}/issues/${number}/comments`, { body: text });
   if (r.status !== 201) throw new GitError(`GitHub answered ${r.status} to the comment.`);
 }
 

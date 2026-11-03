@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +9,7 @@ import { TurnEvents } from "../src/lib/console/events.ts";
 import { claudeSettings, decide, decideControl, inside, inStep, realInside } from "../src/lib/console/permissions.ts";
 import { ConsoleStore, LEASE_LOST } from "../src/lib/console/store.ts";
 import { backupDue, consoleBackupName, expiredConsoleBackups } from "../src/lib/console/backup.ts";
-import { CommandError, runCommand } from "../src/lib/console/commands.ts";
+import { CommandError, runCommand, storeFailure } from "../src/lib/console/commands.ts";
 import { projectView } from "../src/lib/console/views.ts";
 import { transcript, gridShape } from "../src/lib/console/transcript.ts";
 import { agentModel, reportsExpectedModel } from "../src/lib/console/agents.ts";
@@ -676,6 +676,46 @@ test("delivering no messages is no turn", () => {
   const agent = store.createAgent({ tabId: store.tabs(project.id)[0].id, name: "A", role: "", kind: "claude-code", model: "claude-sonnet-5", effort: null, permission: "look" });
   store.setAgentFolder(epoch, agent.id, "/tmp/a");
   assert.equal(store.deliver(epoch, agent.id, [], "nothing"), null);
+  store.close();
+});
+
+test("a store failure is told by its error code, whatever its message says", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE t (a PRIMARY KEY); INSERT INTO t VALUES (1)");
+  const thrown = (work: () => unknown) => {
+    try {
+      work();
+    } catch (error) {
+      return error;
+    }
+    assert.fail("expected an error");
+  };
+  // node:sqlite's messages never say "sqlite": the code does.
+  for (const error of [thrown(() => db.exec("INSERT INTO t VALUES (1)")), thrown(() => db.prepare("SELECT nope FROM t").all())]) {
+    assert.doesNotMatch((error as Error).message, /sqlite/i);
+    assert.ok(storeFailure(error), (error as Error).message);
+  }
+  db.close();
+  assert.ok(storeFailure(thrown(() => readFileSync(join(tmpdir(), "console-no-such-file", "x")))));
+  assert.ok(!storeFailure(new CommandError("That tab is closed.")));
+  assert.ok(!storeFailure(new Error("That template no longer exists.")));
+});
+
+test("a tab from a template is made with its steps and team, or not at all", () => {
+  const store = new ConsoleStore(":memory:");
+  const project = store.createProject("P", "folder");
+  const addRoute = store.addRoute;
+  store.addRoute = () => {
+    throw new Error("route refused");
+  };
+  assert.throws(() => runCommand(store, { action: "createTab", projectId: project.id, name: "Docs", templateId: "document-review" }), /route refused/);
+  assert.equal(store.tabs(project.id).length, 1);
+  assert.equal(store.agents(project.id).length, 0);
+  store.addRoute = addRoute;
+  const made = runCommand(store, { action: "createTab", projectId: project.id, name: "Docs", templateId: "document-review" }) as { tab: { id: string } };
+  assert.equal(store.agents(project.id).length, 2);
+  assert.equal(store.routes(made.tab.id).length, 2);
+  assert.ok(store.tabSteps(made.tab.id));
   store.close();
 });
 

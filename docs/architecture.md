@@ -72,7 +72,8 @@ it is still masked, and still refused by the push check, after a restart.
 The schema has a version (`PRAGMA user_version`). A store from an earlier
 version gains the columns and indexes it lacks when it is opened (each
 only if it is missing); one that still lacks a column after that is refused
-and left as it was.
+and left as it was. A store from a newer version than the build is refused
+too, never stamped back down.
 
 ### How a paid turn is charged
 
