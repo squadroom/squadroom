@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { agentKind, agentModel } from "../agents.ts";
-import { callSummary, claimPattern, findTeammate, holdCycle, HoldCycleError, MESSAGE_MAX, REPORT_MAX, TeamError, TEAM_DIFF_CHARS, teamDiffMissing, teamDiffText, teamPrompt } from "../team.ts";
+import { claimPattern, holdCycle } from "../claims.ts";
+import { callSummary, findTeammate, HoldCycleError, MESSAGE_MAX, REPORT_MAX, TeamError, teamPrompt } from "../team.ts";
+import { TEAM_DIFF_CHARS, teamDiffMissing, teamDiffText } from "../team-diff.ts";
 import { agentStatus, PERMISSION_LABELS, type ConsoleAgent } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import type { ActiveTurn, Runtime } from "./shared.ts";

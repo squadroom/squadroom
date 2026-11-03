@@ -5,7 +5,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPEN_PR_PROMPT, runCommand } from "../src/lib/console/commands.ts";
-import { commentOnPullRequest, openPullRequest } from "../src/lib/console/git.ts";
+import { commentOnPullRequest, openPullRequest } from "../src/lib/console/github-api.ts";
 import { CODEX_REVIEW, codexReviewSetting, PUSH_SUMMARY_BODY, pullRequestText, pushRequest, pushSummary, wantsReview } from "../src/lib/console/pull-request.ts";
 import { harness, TOKEN } from "./helpers/console-harness.ts";
 

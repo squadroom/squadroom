@@ -1,5 +1,5 @@
 import { errorMessage as message } from "../session.ts";
-import { claimCovers } from "../team.ts";
+import { claimCovers } from "../claims.ts";
 import type { ConsoleAgent } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 
