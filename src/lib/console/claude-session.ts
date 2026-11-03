@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { agentKind, reportsExpectedModel, type AgentModel } from "./agents.ts";
 import { claudeArgs, ClaudeProcess, PERMISSION_TOOL, toolSummary, type ClaudeEvent } from "./claude.ts";
 import { claudeSettings, decideControl } from "./permissions.ts";
-import { errorMessage, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type SessionTotals, type TurnRequest } from "./session.ts";
+import { errorMessage, guarded, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type SessionTotals, type TurnRequest } from "./session.ts";
 import { claudeTaskOp, unfollowable } from "./tasks.ts";
 import type { ConsoleAgent, TurnUsage } from "./types.ts";
 
@@ -164,13 +164,9 @@ class ClaudeSession implements AgentSession {
     this.askFirst = !!agent.askFirst;
     this.proc = new ClaudeProcess(host.launcher, agent.folder, host.binary(agent.kind), args, ctx.credentials);
     driver.track(this.proc, ctx);
-    this.proc.onEvent = (events) => {
-      try {
-        for (const ev of events) this.onEvent(ev);
-      } catch (error) {
-        host.log(`event handling failed: ${errorMessage(error)}`);
-      }
-    };
+    this.proc.onEvent = (events) => guarded(host.log, () => {
+      for (const ev of events) this.onEvent(ev);
+    });
     this.proc.onOversize = () => this.active && ctx.emit({ kind: "oversize" });
   }
   get exited() {

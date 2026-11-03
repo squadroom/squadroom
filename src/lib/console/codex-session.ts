@@ -5,7 +5,7 @@ import { CodexError, CodexServer, readCodexNotification, type CodexEvent, type L
 import { CLONE_TMP } from "./git.ts";
 import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand } from "./permissions.ts";
 import { CODEX_DISABLED, type ConsoleAgent } from "./types.ts";
-import { Ending, endProcesses, errorMessage as message, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
+import { Ending, endProcesses, errorMessage as message, guarded, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 
 // The Codex driver behind the session seam: one App Server per login (the
 // ChatGPT one, and one per OpenAI API key), a thread per window. That the server is shared is this driver's
@@ -224,11 +224,9 @@ class CodexSession implements AgentSession {
     // An unacknowledged start learns its turn's id from the thread's
     // first notification about a turn other than its previous one.
     if (!this.started && this.unknown && turnId && turnId !== this.thread?.lastTurnId) this.start(turnId);
-    try {
+    guarded(this.driver.host.log, () => {
       for (const ev of readCodexNotification(method, params, this.driver.host.redactor)) this.onEvent(ev);
-    } catch (error) {
-      this.driver.host.log(`event handling failed: ${message(error)}`);
-    }
+    });
   }
 
   private onEvent(ev: CodexEvent) {
@@ -240,8 +238,6 @@ class CodexSession implements AgentSession {
       return;
     }
     switch (ev.type) {
-      case "started":
-        return;
       case "completed": {
         if (this.turnId && ev.turnId && ev.turnId !== this.turnId) return;
         const outcome = ev.status === "completed" ? "done" : ev.status === "interrupted" ? "stopped" : "failed";
@@ -394,11 +390,11 @@ class CodexLoginDriver implements AgentDriver {
   refusal() {
     return this.host.flag(CODEX_DISABLED);
   }
-  /** A folder being made is not in a thread's profile yet; a retired server
-   * must have exited before another starts, and so must one that was
-   * signalled to end: no turn starts on a dying server. */
-  waiting(agent: ConsoleAgent) {
-    return this.host.creatingFolders(agent.projectId) || this.serverRetiring() || !!this.ending || [...this.sessions].some((s) => s.forcing && s.turn);
+  /** A retired server must have exited before another starts, and so must
+   * one that was signalled to end: no turn starts on a dying server. Nor
+   * while a Force stop holds the server. */
+  waiting() {
+    return this.serverRetiring() || !!this.ending || [...this.sessions].some((s) => s.forcing && s.turn);
   }
   retiring() {
     return 0;
@@ -568,11 +564,15 @@ export class CodexDriver implements AgentDriver {
   refusal() {
     return this.chatgpt.refusal();
   }
-  /** Turns wait while their own login's server is in the way: the ChatGPT
-   * one for a subscription model, any API-key one for an API-key model. */
-  waiting(agent: ConsoleAgent) {
-    const paid = !!agentModel(agent.kind, agent.model)?.paid;
-    return (paid ? [...this.keyed.values()] : [this.chatgpt]).some((d) => d.waiting(agent)) || this.host.creatingFolders(agent.projectId);
+  /** Turns wait while a folder is being made (it is not in a thread's
+   * profile yet), and while their own login's server is in the way: the
+   * ChatGPT one for a subscription model, their key's for an API-key model. */
+  waiting(agent: ConsoleAgent, credentials: Record<string, string>) {
+    if (this.host.creatingFolders(agent.projectId)) return true;
+    const paid = agentModel(agent.kind, agent.model)?.paid;
+    const key = paid ? credentials[paid.credential] : undefined;
+    const server = paid ? (key ? this.keyed.get(fingerprint(key)) : undefined) : this.chatgpt;
+    return !!server?.waiting();
   }
   retiring() {
     return 0;

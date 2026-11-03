@@ -68,7 +68,7 @@ export const turns = {
       resendOf: row.resendOf,
     };
     rt.turn = turn;
-    turn.events.onFull = () => this.stopTurn(rt, `Output limit: this turn stored ${this.limits.turnBytes / (1024 * 1024)} MB.`, "stopped", false);
+    turn.events.onFull = () => this.stopTurn(rt, `Output limit: this turn stored ${this.limits.turnBytes / (1024 * 1024)} MB.`, false);
     void this.begin(rt, turn).catch((error: unknown) => {
       if (rt.turn === turn) this.finish(rt, turn.stopping?.status ?? "failed", turn.stopping?.reason ?? this.redactor.text(message(error)));
     });
@@ -276,6 +276,8 @@ export const turns = {
         if (sha && merge && !this.store.merging(agent.id)) this.mergeSources.set(sha, merge.from);
         // Everything this turn added to the branch is checked: the worker's
         // commit and any the agent made itself (git commit in a command).
+        // Read again, not `since`: a stop can end the turn while its commit
+        // before the turn still runs, and that commit is recorded meanwhile.
         const before = this.store.turn(t.id)?.commitBefore ?? null;
         const head = await this.repos.head(agent).catch(() => null);
         // Either is progress for the circle detector; recorded before busy
@@ -325,8 +327,8 @@ export const turns = {
         if (row.epoch === epoch) this.safe(() => this.store.finishTurn(epoch, row.id, "stopped", "Stopped by the owner."));
         continue;
       }
-      if (row.stopRequested === "force" && !rt.turn.stopping?.force) this.stopTurn(rt, "Force stopped by the owner.", "stopped", true);
-      else if (!rt.turn.stopping) this.stopTurn(rt, "Stopped by the owner.", "stopped", false);
+      if (row.stopRequested === "force" && !rt.turn.stopping?.force) this.stopTurn(rt, "Force stopped by the owner.", true);
+      else if (!rt.turn.stopping) this.stopTurn(rt, "Stopped by the owner.", false);
     }
     // Escalation: an interrupt that did not end the turn in time becomes
     // the session's terminate, which the driver escalates until execution is
@@ -351,22 +353,22 @@ export const turns = {
       if (!t || t.stopping) continue;
       const waiting = t.waitingSince === null ? 0 : now - t.waitingSince;
       if (now - t.startedAt - t.waitedMs - waiting > this.limits.turnMs)
-        this.stopTurn(rt, `Deadline: the turn ran for ${Math.round(this.limits.turnMs / 60_000)} minutes.`, "stopped", false);
+        this.stopTurn(rt, `Deadline: the turn ran for ${Math.round(this.limits.turnMs / 60_000)} minutes.`, false);
       else if (t.waitingSince === null && now - t.lastActivity > this.limits.inactivityMs)
-        this.stopTurn(rt, `No output for ${Math.round(this.limits.inactivityMs / 60_000)} minutes.`, "stopped", false);
+        this.stopTurn(rt, `No output for ${Math.round(this.limits.inactivityMs / 60_000)} minutes.`, false);
     }
   },
 
   /** Stop the running turn: the client is asked to interrupt, and its
    * session is terminated if the turn has not ended by its driver's grace
-   * (Force stop: shortly, or at once for a process of its own). */
-  stopTurn(this: ConsoleWorker, rt: Runtime, reason: string, status: TurnStatus, force: boolean): void {
+   * (Force stop: shortly, or at once for a process of its own). The turn
+   * ends `stopped`; one that broke a rule goes through `failTurn`. */
+  stopTurn(this: ConsoleWorker, rt: Runtime, reason: string, force: boolean): void {
     const t = rt.turn;
     if (!t) return;
     const stop = this.driver(rt.agent.kind).stopMs;
     const now = this.now();
-    if (!t.stopping) t.stopping = { reason, status, at: now, terminateAt: now + stop.grace };
-    else if (status === "failed") Object.assign(t.stopping, { reason, status });
+    t.stopping ??= { reason, status: "stopped", at: now, terminateAt: now + stop.grace };
     // Nothing more is allowed once a turn is being stopped.
     this.releaseWaits(t.id, "The turn is being stopped.");
     if (force) {

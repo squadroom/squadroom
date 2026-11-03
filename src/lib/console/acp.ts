@@ -190,44 +190,29 @@ export const AUTH_REQUIRED = -32000;
 /** One ACP agent program and its JSON-RPC traffic. */
 export class AcpProcess extends RpcProcess {
   protected envelope = { jsonrpc: "2.0" };
-  private nextId = 1;
-  private calls = new Map<
-    number,
-    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: () => void }
-  >();
   private redactor: Redactor;
 
   constructor(launcher: Launcher, folder: string, binary: string, args: string[], credentials: Record<string, string>, sandbox: SandboxSpec, redactor: Redactor = new Redactor()) {
     super(launcher.spawn(folder, binary, args, credentials, sandbox), folder, "The agent program");
     this.redactor = redactor;
   }
-  protected ended() {
-    for (const call of this.calls.values()) {
-      if (call.timer) clearTimeout(call.timer);
-      call.reject(new AcpError("The agent program ended."));
-    }
-    this.calls.clear();
+  protected gone() {
+    return new AcpError("The agent program ended.");
   }
-  protected reply(message: Record<string, unknown>) {
-    const id = message.id;
-    const call = typeof id === "number" ? this.calls.get(id) : undefined;
-    if (!call) return;
-    this.calls.delete(id as number);
-    if (call.timer) clearTimeout(call.timer);
-    // Told at once, before the next line is read (a promise settles only
-    // after this read), so what the agent says later is not this call's.
-    call.answered?.();
-    if (isObject(message.error)) {
-      const error = message.error;
-      call.reject(new AcpError(`The agent refused: ${this.redactor.shorten(str(error.message) || "an error", 300)}`, typeof error.code === "number" ? error.code : null));
-    } else call.resolve((isObject(message.result) ? message.result : {}) as Record<string, unknown>);
+  protected timedOut(method: string) {
+    return new AcpError(`The agent did not answer ${method} in time.`);
+  }
+  protected refusal(message: Record<string, unknown>) {
+    if (!isObject(message.error)) return null;
+    const error = message.error;
+    return new AcpError(`The agent refused: ${this.redactor.shorten(str(error.message) || "an error", 300)}`, typeof error.code === "number" ? error.code : null);
   }
   /**
    * One request. `timeoutMs` 0: no timeout (session/prompt, which answers
    * at the end of the turn). `onWritten` is told whether the request reached
    * the program's input: false when the program is gone, an error when the
    * write failed with the program still running (then whether it read the
-   * request cannot be known).
+   * request cannot be known). `answered` is told as the reply is read.
    */
   call(
     method: string,
@@ -236,21 +221,6 @@ export class AcpProcess extends RpcProcess {
     onWritten?: (outcome: "written" | "gone" | "unknown") => void,
     answered?: () => void,
   ): Promise<Record<string, unknown>> {
-    if (this.exited) {
-      onWritten?.("gone");
-      return Promise.reject(new AcpError("The agent program ended."));
-    }
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = timeoutMs ? setTimeout(() => {
-        this.calls.delete(id);
-        reject(new AcpError(`The agent did not answer ${method} in time.`));
-      }, timeoutMs) : null;
-      this.calls.set(id, { resolve, reject, timer, answered });
-      this.write({ ...this.envelope, id, method, params }).then(
-        () => onWritten?.("written"),
-        () => onWritten?.(this.exited ? "gone" : "unknown"),
-      );
-    });
+    return this.request(method, params, { timeoutMs, written: onWritten, answered });
   }
 }
