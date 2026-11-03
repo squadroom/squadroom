@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS console_turns_retention ON console_turns (id) WHERE c
 -- The spend checks on every tick: the month's API-key spend (by when a turn
 -- ended) and a tab's since its reset (by each agent's ended_seq), read from
 -- the index alone.
-CREATE INDEX IF NOT EXISTS console_turns_ended ON console_turns (ended_at, cost_usd);
+CREATE INDEX IF NOT EXISTS console_turns_ended ON console_turns (ended_at, started_at, cost_usd);
 CREATE INDEX IF NOT EXISTS console_turns_spend ON console_turns (agent_id, ended_seq, cost_usd);
 CREATE INDEX IF NOT EXISTS console_messages_to ON console_messages (to_agent, state);
 CREATE INDEX IF NOT EXISTS console_messages_tab ON console_messages (tab_id, id);
