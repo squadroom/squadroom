@@ -71,7 +71,18 @@ export default function FreshCode({
       .catch((e: unknown) => setError((e as Error).message));
   }, [sendOnOpen]);
   return (
-    <div ref={ref} tabIndex={-1} className={className} role="dialog" aria-modal="true" aria-labelledby="fresh-code-title">
+    <div
+      ref={ref}
+      tabIndex={-1}
+      className={className}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="fresh-code-title"
+      // While a code is being sent or checked, Escape waits, as Cancel does.
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && busy) e.stopPropagation();
+      }}
+    >
       <h2 id="fresh-code-title">{title}</h2>
       <p>{text}</p>
       {error && <p role="alert">{error}</p>}

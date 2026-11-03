@@ -8,7 +8,7 @@ import { addMenu, projectMenu, tabMenu, type MenuContext } from "@/lib/console/m
 import { focusTarget, readCollapsed, toggle, writeCollapsed, type TreeProject } from "@/lib/console/tree";
 import type { ConsoleProject } from "@/lib/console/types";
 import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, type Appearance, type SettingsSection } from "@/lib/console/ui";
-import { latestOnly } from "@/lib/console/polled";
+import { inOrder } from "@/lib/console/polled";
 import { pickProject, pickTab } from "@/lib/console/view-state";
 import type { ProjectView, WorkerView, needsView, projectsView, templatesView, treeView } from "@/lib/console/views";
 import AgentWindow from "./AgentWindow";
@@ -142,11 +142,11 @@ export default function ConsoleApp() {
     remember(SIDEBAR_KEY, hidden ? "hidden" : null);
   };
 
-  // Polls and the reload after a command can overlap: only the latest
-  // read's answer is applied, so Needs you (and its notifications) never
-  // step back, and a slow poll never replaces a command's fresh view.
-  const [askProjects] = useState(latestOnly);
-  const [askProject] = useState(latestOnly);
+  // Polls and the reload after a command can overlap: an answer older than
+  // one already applied is dropped, so Needs you (and its notifications)
+  // never step back, and a slow poll never replaces a command's fresh view.
+  const [askProjects] = useState(inOrder);
+  const [askProject] = useState(inOrder);
   /** The versions of the views this page has. */
   const listVersion = useRef<string | null>(null);
   const projectVersion = useRef<{ projectId: string; version: string | null } | null>(null);

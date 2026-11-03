@@ -58,14 +58,17 @@ export function useCodeConfirm(): { done: (confirmed: boolean) => void } | null 
     // forever with its button busy.
     confirmCode = oneAtATime(
       () =>
-        new Promise<boolean>((resolve) =>
-          setAsk({
+        new Promise<boolean>((resolve) => {
+          // Closes its own dialog only: a late answer to an earlier one
+          // never closes a newer dialog whose command still waits.
+          const ask = {
             done: (confirmed: boolean) => {
-              setAsk(null);
+              setAsk((shown) => (shown === ask ? null : shown));
               resolve(confirmed);
             },
-          }),
-        ),
+          };
+          setAsk(ask);
+        }),
     );
     return () => {
       confirmCode = null;

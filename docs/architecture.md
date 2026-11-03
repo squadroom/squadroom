@@ -269,9 +269,9 @@ What Squadroom protects against, and the limits it accepts, are in
   pull request, Save on Keys and Roles, a spend limit, a step move) and the
   fresh-code dialog go through `oneAtATime` (`src/lib/console/busy.ts`): a
   double click sends one command, and commands that need a code at the
-  same time share one dialog. Overlapping reads of one view (a poll and
-  the reload after a command) keep only the latest read's answer
-  (`src/lib/console/polled.ts`).
+  same time share one dialog. Of overlapping reads of one view (a poll and
+  the reload after a command), an answer older than one already shown is
+  dropped (`src/lib/console/polled.ts`).
 - **Keyboard.** Dialogs, the fresh-code dialog and the phone's drawer keep
   Tab inside them, close on Escape and give focus back on close
   (`useDialogFocus`); the file panel takes focus and gives it back. On Settings, Escape in a text field only
