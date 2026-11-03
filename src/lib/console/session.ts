@@ -200,10 +200,11 @@ export interface DriverHost {
   /** A folder is being made now (anywhere, or one a sandbox of this
    * project would not know: in this project, or a new project's first). */
   creatingFolders(projectId?: string): boolean;
-  /** What a Codex thread of this agent denies: every other project's
-   * folder, and its own project's other clones by name (the agent's own
-   * project folder is never denied: that breaks Node). */
-  codexDenied(agent: ConsoleAgent): string[];
+  /** What this agent's Claude Code session and Codex thread deny reading:
+   * every other project's folder, and its own project's other clones by
+   * name (the agent's own project folder is never denied: that breaks
+   * Node). */
+  deniedFolders(agent: ConsoleAgent): string[];
 }
 
 /** One kind of client. */

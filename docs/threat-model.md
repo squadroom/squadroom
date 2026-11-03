@@ -35,9 +35,11 @@ only restates one of them is not a new finding.
 - **Agents, including a prompt-injected one.** An agent cannot read your
   home folder, other projects or teammates' folders (beyond what the team
   tools give it), cannot write outside its clone, has no GitHub credential,
-  and gets only the one credential its model needs. Its requests to the web
-  server from the same Mac are refused like anyone's: loopback is never
-  trusted. Its Markdown is rendered without raw HTML and its images are
+  and gets only the one credential its model needs. Claude Code's own block
+  on reads outside the working folder is backed up by an explicit list of
+  every other project's folder and teammate's clone, as Codex and ACP
+  agents have. An agent's requests to the web server from the same Mac
+  are refused like anyone's: loopback is never trusted. Its Markdown is rendered without raw HTML and its images are
   placeholders unless they are inline (`data:image/…`). The
   Content-Security-Policy keeps the page to its own address for scripts,
   styles, fonts, images (plus inline `data:` ones) and requests, and no

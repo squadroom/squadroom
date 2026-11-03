@@ -144,10 +144,11 @@ export const sessions = {
   projectDirExists(this: ConsoleWorker, projectId: string | undefined): boolean {
     return !!projectId && existsSync(join(this.options.paths.agentHome, "work", projectId));
   },
-  /** What a Codex thread denies: every other project's folder that exists,
+  /** What a Claude Code session or Codex thread denies reading: every
+   * other project's folder that exists,
    * and its own project's other clones that still exist (a closed agent's
    * folder that Clean up removed drops out). */
-  codexDenied(this: ConsoleWorker, agent: ConsoleAgent): string[] {
+  deniedFolders(this: ConsoleWorker, agent: ConsoleAgent): string[] {
     const work = join(this.options.paths.agentHome, "work");
     const projects = this.store.projects().map((p) => join(work, p.id)).filter((dir) => dir !== join(work, agent.projectId) && existsSync(dir));
     const mates = this.store.agents(agent.projectId).map((a) => a.folder).filter((f) => f && f !== agent.folder && existsSync(f));

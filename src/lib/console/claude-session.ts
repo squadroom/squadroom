@@ -123,6 +123,8 @@ class ClaudeSession implements AgentSession {
   private ctx: SessionContext;
   private driver: ClaudeDriver;
   private askFirst: boolean;
+  /** The folders its settings deny reading. */
+  private others: string[];
   // This turn's state.
   private active = false;
   private initSeen = false;
@@ -150,10 +152,11 @@ class ClaudeSession implements AgentSession {
     renameSync(temp, config);
     const resume = ctx.storedSession();
     this.totals = resume ? (driver.totals.get(resume) ?? readTotals(ctx.storedTotals(resume))) : [];
+    this.others = host.deniedFolders(agent);
     const args = claudeArgs({
       model,
       effort: agent.effort,
-      settings: claudeSettings(agent.folder, agent.permission, host.paths, !!agent.askFirst, !!ctx.documentsOnly, !!model.paid),
+      settings: claudeSettings(agent.folder, agent.permission, host.paths, !!agent.askFirst, !!ctx.documentsOnly, !!model.paid, this.others),
       mcpConfig: config,
       system: ctx.system(),
       resume,
@@ -173,8 +176,10 @@ class ClaudeSession implements AgentSession {
   get exited() {
     return this.proc.exited;
   }
+  /** Settings are fixed at spawn, so a new teammate's clone or a new
+   * project's folder restarts the process (resuming its session). */
   stale(agent: ConsoleAgent) {
-    return this.askFirst !== !!agent.askFirst;
+    return this.askFirst !== !!agent.askFirst || JSON.stringify(this.driver.host.deniedFolders(agent)) !== JSON.stringify(this.others);
   }
   async prompt(turn: TurnRequest): Promise<PromptResult> {
     this.active = true;
