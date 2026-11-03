@@ -31,8 +31,9 @@ In scope, for example:
 
 Known limits, documented in [docs/architecture.md](docs/architecture.md),
 are not vulnerabilities by themselves: for example, agents share one macOS
-user and can read each other's environment while running, and redaction
-only recognises the values and key shapes it knows.
+user and can read each other's environment while running, redaction
+only recognises the values and key shapes it knows, and the push check
+finds a credential only byte for byte, not encoded some other way.
 
 ## Supported versions
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { contentSecurityPolicy, SECURED_PATHS, securityHeaders } from "../src/lib/security/csp.ts";
 import { imageDecision, isInlineImage } from "../src/lib/shared/markdown-image.ts";
 
@@ -55,4 +56,20 @@ test("the Console and sign-in pages carry a Content-Security-Policy and send no 
   assert.deepEqual(securityHeaders(false).map((h) => h.key), ["Content-Security-Policy", "Referrer-Policy"]);
   assert.equal(securityHeaders(false)[1].value, "no-referrer");
   assert.deepEqual(SECURED_PATHS, ["/:path*"]);
+});
+
+test("review: the request gate covers Next's image optimizer, which is off; only the build's files and the icon skip it", () => {
+  // Next reads both from the files themselves (the matcher must be a
+  // literal), so this checks the text.
+  const proxy = readFileSync("src/proxy.ts", "utf8");
+  const matcher = /matcher: \["(.+)"\]/.exec(proxy)?.[1];
+  assert.ok(matcher, "one matcher");
+  const gated = new RegExp(`^${JSON.parse(`"${matcher}"`)}$`);
+  for (const path of ["/_next/image", "/_next/image?url=%2Fx.png&w=64&q=75", "/x.png", "/console/a.svg", "/login", "/api/auth/github", "/_next/staticx"])
+    assert.ok(gated.test(path.split("?")[0]), path);
+  for (const path of ["/_next/static/chunks/main.js", "/_next/static/media/font.woff2", "/favicon.ico"])
+    assert.ok(!gated.test(path), path);
+  const config = readFileSync("next.config.ts", "utf8");
+  assert.match(config, /images: \{ unoptimized: true \}/);
+  assert.match(config, /poweredByHeader: false/);
 });

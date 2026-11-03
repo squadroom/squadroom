@@ -3,7 +3,7 @@ import { agentModel } from "./agents.ts";
 import { fingerprint } from "./spend.ts";
 import { CodexError, CodexServer, readCodexNotification, type CodexEvent, type LateReply } from "./codex.ts";
 import { CLONE_TMP } from "./git.ts";
-import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand, decideCodexFiles } from "./permissions.ts";
+import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand } from "./permissions.ts";
 import { CODEX_DISABLED, type ConsoleAgent } from "./types.ts";
 import { Ending, endProcesses, errorMessage as message, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 
@@ -303,15 +303,17 @@ class CodexSession implements AgentSession {
       }
       case "item/fileChange/requestApproval": {
         if (!this.turn) return server.respond(id, { decision: "decline" });
-        // A request for a standing write grant under a folder is never
-        // given (the Console decides each change itself).
-        if (params.grantRoot !== undefined && params.grantRoot !== null) {
-          ctx.emit({ kind: "permission", tool: "Edit", decision: "deny", reason: "Write access to a whole folder is not granted in Console windows." });
-          return server.respond(id, { decision: "decline" });
-        }
+        // Codex's sandbox applies a change in its own folder without
+        // asking; it asks only to apply one outside the sandbox (a path
+        // that leaves through a link, `.git`, another folder, or a standing
+        // grant on a folder). Approved, the write would run unsandboxed, so
+        // none is: a path genuinely in the clone never needs it.
         const paths = this.items.get(String(params.itemId ?? "")) ?? [];
-        const answer = await ctx.permit("Edit", { paths }, decideCodexFiles(paths, { ...ctx.agent, stepFiles: ctx.stepFiles?.() }, this.driver.host.realInside));
-        return server.respond(id, { decision: answer.allow ? "accept" : "decline" });
+        await ctx.permit("Edit", { paths, ...(params.grantRoot ? { grantRoot: params.grantRoot } : {}) }, {
+          behavior: "deny",
+          reason: "File changes outside Codex's sandbox are not allowed in Console windows.",
+        });
+        return server.respond(id, { decision: "decline" });
       }
       case "item/tool/requestUserInput": {
         // Each question is its own request in Needs you, with its own answer.

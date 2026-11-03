@@ -64,17 +64,22 @@ export const git = {
       this.insertRefreshes(c.agentId, c.sha);
     }, epoch);
   },
+  /** The agent's latest 200 commits, without their patches (the Changes
+   * dialog asks for one when it is opened: `commitPatch`). */
   commits(this: ConsoleStore, agentId: string): ConsoleCommit[] {
-    return this.all("SELECT * FROM console_commits WHERE agent_id = ? ORDER BY id DESC LIMIT 200", agentId).map((r) => ({
+    return this.all("SELECT id, turn_id, agent_id, sha, stat, files, created_at FROM console_commits WHERE agent_id = ? ORDER BY id DESC LIMIT 200", agentId).map((r) => ({
       id: r.id as number,
       turnId: r.turn_id as number,
       agentId: r.agent_id as string,
       sha: r.sha as string,
       stat: r.stat as string,
-      patch: r.patch as string,
       files: files(r.files),
       createdAt: r.created_at as number,
     }));
+  },
+  /** One of the agent's commits' patch, or null when it has no such commit. */
+  commitPatch(this: ConsoleStore, agentId: string, id: number): string | null {
+    return (this.get("SELECT patch FROM console_commits WHERE agent_id = ? AND id = ?", agentId, id)?.patch as string | undefined) ?? null;
   },
   /** A tab's commits from `fromTurn` on, oldest first, without their
    * patches: each one's turn, SHA and files (the run report). */
@@ -85,14 +90,16 @@ export const git = {
     ).map((r) => ({ turnId: r.turn_id as number, sha: r.sha as string, files: files(r.files) }));
   },
   setDiff(this: ConsoleStore, epoch: number, agentId: string, d: { base: string; head: string; stat: string; patch: string; files?: string[] }) {
-    this.write(
-      epoch,
-      "INSERT INTO console_diffs (agent_id, base, head, stat, patch, files, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET base = excluded.base, head = excluded.head, stat = excluded.stat, patch = excluded.patch, files = excluded.files, updated_at = excluded.updated_at",
-      agentId, d.base, d.head, d.stat, d.patch, JSON.stringify(d.files ?? []), this.now(),
-    );
-    // A later commit cancels an approval for good: a branch reset back to
-    // the approved commit does not bring it back.
-    this.write(epoch, "UPDATE console_approvals SET cancelled_by = ? WHERE agent_id = ? AND sha <> ? AND cancelled_by IS NULL", d.head, agentId, d.head);
+    this.transaction(() => {
+      this.run(
+        "INSERT INTO console_diffs (agent_id, base, head, stat, patch, files, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET base = excluded.base, head = excluded.head, stat = excluded.stat, patch = excluded.patch, files = excluded.files, updated_at = excluded.updated_at",
+        agentId, d.base, d.head, d.stat, d.patch, JSON.stringify(d.files ?? []), this.now(),
+      );
+      // A later commit cancels an approval for good: a branch reset back to
+      // the approved commit does not bring it back. The same transaction, so
+      // the diff never shows a head its stale approval still covers.
+      this.run("UPDATE console_approvals SET cancelled_by = ? WHERE agent_id = ? AND sha <> ? AND cancelled_by IS NULL", d.head, agentId, d.head);
+    }, epoch);
   },
   /** A finished turn's commit and diff are still being recorded: set before
    * the turn ends, cleared once they are. */
@@ -256,8 +263,9 @@ export const git = {
 
   // ── Pushes ──────────────────────────────────────────────────────────────
   /** Push branch or team_push: one queued push per agent at a time. A later
-   * request's pull request text replaces a queued one's. */
-  queuePush(this: ConsoleStore, agentId: string, request: ConsoleJob["request"] = null): ConsoleJob {
+   * request's pull request text replaces a queued one's. The worker's
+   * (team_push) passes its lease epoch. */
+  queuePush(this: ConsoleStore, agentId: string, request: ConsoleJob["request"] = null, epoch?: number): ConsoleJob {
     return this.transaction(() => {
       const open = this.get("SELECT id, state FROM console_jobs WHERE agent_id = ? AND state IN ('queued', 'running')", agentId);
       if (open && request && open.state === "queued") this.run("UPDATE console_jobs SET request = ? WHERE id = ?", JSON.stringify(request), open.id as number);
@@ -265,10 +273,11 @@ export const git = {
         ? (open.id as number)
         : this.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'push', 'queued', ?, ?)", agentId, request ? JSON.stringify(request) : null, this.now());
       return this.job(id)!;
-    });
+    }, epoch);
   },
   /** Whether the owner asked this turn to open a pull request: its
-   * team_push needs no second approval. */
+   * team_push also asks Codex to review (the owner still approves the
+   * text). */
   pushApproved(this: ConsoleStore, turnId: number): boolean {
     return !!this.get("SELECT push_approved FROM console_turns WHERE id = ?", turnId)?.push_approved;
   },

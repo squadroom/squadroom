@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SignInDatabase } from "../src/lib/signin/store.ts";
 import { servedPath, serverSettings } from "../src/config/server-env.ts";
-import { clientAddress, readCookie, postAllowed, SESSION_COOKIE } from "../src/lib/signin/hosted.ts";
+import { clientAddress, readCappedText, readCookie, postAllowed, SESSION_COOKIE, startAllowed } from "../src/lib/signin/hosted.ts";
 import { codeMailer } from "../src/lib/signin/web-services.ts";
 import type { MailSettings } from "../src/lib/shared/mail.ts";
 import {
@@ -14,6 +15,7 @@ import {
   FRESH_CODE_MS,
   LOCK_MS,
   PARTIAL_MS,
+  STATE_MS,
   SignIn,
   SignInError,
   githubIdentity,
@@ -52,6 +54,8 @@ function setup(t: TestContext, { path = ":memory:", mail = true }: { path?: stri
   let clock = 1_900_000_000_000;
   const codes = new FakeMail();
   const accounts = new Map<string, number>([["owner-code", OWNER_GITHUB], ["other-code", 99]]);
+  /** The PKCE verifier each code was exchanged with. */
+  const verifiers: string[] = [];
   const settings = serverSettings(ENV);
   const make = (s: SignInDatabase = store) =>
     new SignIn({
@@ -59,13 +63,16 @@ function setup(t: TestContext, { path = ":memory:", mail = true }: { path?: stri
       settings,
       codes: mail ? codes : null,
       github: {
-        authorizeUrl: (state) => `https://github.com/login/oauth/authorize?state=${state}`,
-        accountId: async (code) => accounts.get(code) ?? null,
+        authorizeUrl: (state, challenge) => `https://github.com/login/oauth/authorize?state=${state}&code_challenge=${challenge}`,
+        accountId: async (code, verifier) => {
+          verifiers.push(verifier);
+          return accounts.get(code) ?? null;
+        },
       },
       onLocked: (lock) => locks.push(lock),
       now: () => clock,
     });
-  return { store, locks, codes, signIn: make(), make, advance: (ms: number) => (clock += ms) };
+  return { store, locks, codes, verifiers, signIn: make(), make, advance: (ms: number) => (clock += ms) };
 }
 /** Step 1 as the configured account. */
 async function stepOne(signIn: SignIn, current?: string) {
@@ -109,6 +116,14 @@ test("the server serves only the Console and sign-in routes, and commands need O
   // The rate-limit address is the entry the trusted proxy added.
   assert.equal(clientAddress(headers({ "x-forwarded-for": "6.6.6.6, 203.0.113.9" })), "203.0.113.9");
   assert.equal(clientAddress(headers({})), "unknown");
+  // Only an IP address names a bucket.
+  assert.equal(clientAddress(headers({ "x-forwarded-for": "::1" })), "::1");
+  for (const junk of ["6.6.6.6, not-an-address", `1.2.3.4, ${"9".repeat(60)}`, "1.2.3.4,"])
+    assert.equal(clientAddress(headers({ "x-forwarded-for": junk })), "unknown", junk);
+  // Step 1 starts from the sign-in page, a typed address or a bookmark,
+  // never from another site's link.
+  for (const site of [null, "same-origin", "none"]) assert.equal(startAllowed(headers(site ? { "sec-fetch-site": site } : {})), true, String(site));
+  for (const site of ["cross-site", "same-site"]) assert.equal(startAllowed(headers({ "sec-fetch-site": site })), false, site);
   assert.equal(readCookie(`a=1; ${SESSION_COOKIE}=abc; b=2`, SESSION_COOKIE), "abc");
   assert.equal(readCookie(null, "x"), undefined);
 });
@@ -267,6 +282,85 @@ test("sign-in steps are rate limited per address, and in total except for start"
   assert.equal(signIn.allow("code", "203.0.113.1"), true);
 });
 
+test("review M6: a request one address's limit refuses does not count toward the total", async (t) => {
+  const { signIn } = setup(t);
+  for (let i = 0; i < 100; i++) signIn.allow("code", "203.0.113.66");
+  // Only that address's first 10 counted: 20 more from others still pass.
+  for (let i = 0; i < 20; i++) assert.equal(signIn.allow("code", `198.51.100.${i}`), true, String(i));
+  assert.equal(signIn.allow("code", "198.51.100.99"), false);
+});
+
+test("review M6: step 1's state is signed by the server and expires; a made-up one is refused before GitHub", async (t) => {
+  const { signIn, verifiers, advance, make } = setup(t);
+  const { state, url } = signIn.start();
+  assert.equal(signIn.stateValid(state, state), true);
+  // The browser's cookie must still match.
+  assert.equal(signIn.stateValid(state, `${state}x`), false);
+  assert.equal(signIn.stateValid(null, state), false);
+  // A state curl made up, in both cookie and link, or one changed.
+  const [expires, nonce, mac] = state.split(".");
+  for (const forged of [
+    "forged-state",
+    `${expires}.${nonce}.${"A".repeat(mac.length)}`,
+    `${(Number.parseInt(expires, 36) + 60_000).toString(36)}.${nonce}.${mac}`,
+    `${state}.extra`,
+  ]) {
+    assert.equal(signIn.stateValid(forged, forged), false, forged);
+    await assert.rejects(signIn.finishGithub("owner-code", forged, forged, "Mac"), /Sign-in failed/);
+  }
+  assert.equal(verifiers.length, 0);
+  // Another server's secret signs differently.
+  const otherStore = new SignInDatabase(":memory:");
+  t.after(() => otherStore.close());
+  const other = new SignIn({
+    store: otherStore,
+    settings: serverSettings({ ...ENV, SERVER_GITHUB_CLIENT_SECRET: "other-secret" }),
+    codes: null,
+    github: { authorizeUrl: () => "", accountId: async () => null },
+  });
+  assert.equal(other.stateValid(state, state), false);
+  // PKCE: the code is exchanged with the verifier behind the challenge
+  // GitHub was sent (S256), never with the state itself.
+  await signIn.finishGithub("owner-code", state, state, "Mac");
+  const challenge = new URL(url).searchParams.get("code_challenge");
+  assert.match(verifiers[0], /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(createHash("sha256").update(verifiers[0]).digest("base64url"), challenge);
+  assert.notEqual(verifiers[0], state);
+  // A state lasts STATE_MS.
+  const late = make().start().state;
+  advance(STATE_MS);
+  assert.equal(signIn.stateValid(late, late), false);
+  await assert.rejects(signIn.finishGithub("owner-code", late, late, "Mac"), /Sign-in failed/);
+});
+
+test("review: with mail on, a GitHub sign-in from this browser ends its previous session", async (t) => {
+  const { signIn, codes, advance } = setup(t);
+  const full = (await signedIn(signIn, codes, advance))!;
+  assert.equal(signIn.full(full)?.kind, "full");
+  const partial = await stepOne(signIn, full);
+  assert.equal(signIn.session(full), null);
+  assert.equal(signIn.session(partial)?.kind, "partial");
+});
+
+test("review: /api/auth reads at most 4,000 bytes of a body, whatever its length says", async () => {
+  const post = (body: BodyInit, headers: Record<string, string> = {}) =>
+    new Request("https://squadroom.example/api/auth", { method: "POST", body, headers, duplex: "half" } as RequestInit);
+  assert.equal(await readCappedText(post('{"action":"sign_out"}'), 4_000), '{"action":"sign_out"}');
+  assert.equal(await readCappedText(post("x".repeat(4_001)), 4_000), null);
+  // Refused by its declared length before anything is read.
+  const declared = post("{}", { "content-length": "5000" });
+  assert.equal(await readCappedText(declared, 4_000), null);
+  assert.equal(declared.bodyUsed, false);
+  // A body sent without its length is still cut off.
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < 10; i++) controller.enqueue(new Uint8Array(1_000));
+      controller.close();
+    },
+  });
+  assert.equal(await readCappedText(post(stream), 4_000), null);
+});
+
 test("codes are 8 random digits, and the mail carries the code and nothing else from the request", async () => {
   const seen = new Set<string>();
   for (let i = 0; i < 200; i++) {
@@ -296,15 +390,19 @@ test("GitHub: the account ID comes from the user token, which is used once", asy
     if (url.endsWith("/access_token")) {
       const body = JSON.parse(String(init.body));
       assert.equal(body.redirect_uri, "https://squadroom.example/api/auth/callback");
+      assert.equal(body.code_verifier, "the-verifier");
       return Response.json(body.code === "good" ? { access_token: "token" } : { error: "bad_verification_code" });
     }
     assert.equal(new Headers(init.headers).get("authorization"), "Bearer token");
     return Response.json({ id: OWNER_GITHUB, login: "owner" });
   }) as typeof fetch;
   const identity = githubIdentity(serverSettings(ENV), fetcher);
-  assert.match(identity.authorizeUrl("s"), /allow_signup=false/);
-  assert.equal(await identity.accountId("good"), OWNER_GITHUB);
-  assert.equal(await identity.accountId("bad"), null);
+  const authorize = new URL(identity.authorizeUrl("s", "the-challenge")).searchParams;
+  assert.equal(authorize.get("allow_signup"), "false");
+  assert.equal(authorize.get("code_challenge"), "the-challenge");
+  assert.equal(authorize.get("code_challenge_method"), "S256");
+  assert.equal(await identity.accountId("good", "the-verifier"), OWNER_GITHUB);
+  assert.equal(await identity.accountId("bad", "the-verifier"), null);
   assert.deepEqual(requests, [
     "POST https://github.com/login/oauth/access_token",
     "GET https://api.github.com/user",

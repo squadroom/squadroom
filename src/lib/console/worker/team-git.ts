@@ -1,4 +1,4 @@
-import { pushRequest } from "../pull-request.ts";
+import { pushRequest, pushSummary } from "../pull-request.ts";
 import { errorMessage as message } from "../session.ts";
 import { TeamError } from "../team.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -212,18 +212,16 @@ export const teamGit = {
       // pull request already exists.
       const ownerAsked = this.store.pushApproved(t.id);
       const request = ownerAsked ? { ...parsed, review: true } : parsed;
-      const pr = request.title ? `: "${request.title.slice(0, 80)}"` : "";
       // The owner approves each push in Needs you, or "Always for this
-      // agent"; a turn the owner started with "Open pull request" is
-      // already approved.
-      const answer = ownerAsked
-        ? { allow: true, always: false, answer: null, reason: "Asked for by the owner." }
-        : await this.permit(c.rt, "team_push", { branch, title: request.title ?? null }, {
-            behavior: "ask",
-            reason: "Pushing to GitHub needs the owner's approval.",
-            ruleKey: "tool:team_push",
-            summary: `Push ${branch} to GitHub and open its pull request${pr}`,
-          });
+      // agent", seeing the title and description the agent wrote: they are
+      // posted from the owner's account. A turn the owner started with
+      // "Open pull request" asks too, since its text was not written yet.
+      const answer = await this.permit(c.rt, "team_push", { branch, title: request.title ?? null, body: request.body ?? null }, {
+        behavior: "ask",
+        reason: ownerAsked ? "You asked for this pull request; its title and description need your approval." : "Pushing to GitHub needs the owner's approval.",
+        ruleKey: "tool:team_push",
+        summary: pushSummary(branch, request),
+      });
       if (!answer.allow) {
         // Recorded, so the same call again in this turn does not ask again.
         const refused = `Not pushed: ${answer.reason}`;
@@ -238,7 +236,7 @@ export const teamGit = {
           ...request,
           ...(request.title ? { title: this.redactor.text(request.title) } : {}),
           ...(request.body ? { body: this.redactor.text(request.body) } : {}),
-        }),
+        }, c.epoch),
       );
       const result = `Approved. ${branch} is pushed after this turn ends and its changes are committed (push ${job.id}), then its pull request is opened or updated; the result shows in your window.`;
       record(this, c, "team_push", `team_push ${branch}`, result);

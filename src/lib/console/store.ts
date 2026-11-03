@@ -1,5 +1,5 @@
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
-import { openStoreDatabase } from "../shared/sqlite.ts";
+import { enableWal, openStoreDatabase } from "../shared/sqlite.ts";
 import { LIMITS, USAGE_PAUSE, type ConsoleTurn } from "./types.ts";
 import { busy, type Row } from "./store/rows.ts";
 import { projects } from "./store/projects.ts";
@@ -113,6 +113,11 @@ CREATE TABLE IF NOT EXISTS console_mail (key TEXT PRIMARY KEY, kind TEXT NOT NUL
 CREATE INDEX IF NOT EXISTS console_events_turn ON console_events (turn_id, id);
 CREATE INDEX IF NOT EXISTS console_events_agent ON console_events (agent_id, id);
 CREATE INDEX IF NOT EXISTS console_turns_retention ON console_turns (id) WHERE compacted = 0 AND ended_at IS NOT NULL;
+-- The spend checks on every tick: the month's API-key spend (by when a turn
+-- ended) and a tab's since its reset (by each agent's ended_seq), read from
+-- the index alone.
+CREATE INDEX IF NOT EXISTS console_turns_ended ON console_turns (ended_at, started_at, cost_usd);
+CREATE INDEX IF NOT EXISTS console_turns_spend ON console_turns (agent_id, ended_seq, cost_usd);
 CREATE INDEX IF NOT EXISTS console_messages_to ON console_messages (to_agent, state);
 CREATE INDEX IF NOT EXISTS console_messages_tab ON console_messages (tab_id, id);
 CREATE INDEX IF NOT EXISTS console_messages_turn ON console_messages (turn_id);
@@ -166,7 +171,7 @@ export class ConsoleStore {
   constructor(path: string, now: () => number = Date.now) {
     this.now = now;
     this.db = openStoreDatabase(path);
-    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000");
+    enableWal(this.db);
     // The schema in one write transaction, so a refused store is left as it
     // was and the web process and the worker opening at once never race.
     try {

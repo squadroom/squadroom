@@ -4,7 +4,7 @@ import { agentKind } from "../agents.ts";
 import { placeUpload, readAgentFile } from "../agent-files.ts";
 import { runCleanup, scanCleanup, type CleanupOptions } from "../cleanup.ts";
 import { probeConnection } from "../connections.ts";
-import { credentialValues } from "../keys.ts";
+import { loadCredentials } from "../redact.ts";
 import { errorMessage as message } from "../session.ts";
 import type { ConsoleStore } from "../store.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -75,7 +75,8 @@ export const jobs = {
     const seen = this.keysSignature();
     if (seen === null || seen === this.keysSeen) return;
     try {
-      for (const value of credentialValues(this.options.keysFile)) this.redactor.add(value);
+      const note = loadCredentials(this.redactor, this.options.keysFile);
+      if (note) this.log(note);
       this.keysSeen = seen;
     } catch (error) {
       // Unreadable (being edited by hand, say): tried again next tick; an
@@ -167,7 +168,7 @@ export const jobs = {
   /** The file panel's reads (eight at a time) and uploads (four). */
   runFiles(this: ConsoleWorker): void {
     const epoch = this.epoch!;
-    this.safe(() => this.store.expireReads());
+    this.safe(() => this.store.expireReads(epoch));
     for (const read of this.safe(() => this.store.claimReads(epoch, 8 - this.reading.size)) ?? []) {
       if (this.reading.has(read.id)) continue;
       this.reading.add(read.id);

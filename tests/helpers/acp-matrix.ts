@@ -261,11 +261,21 @@ export function acpConformance(v: AcpVendor) {
     await h.ended(hang);
     assert.deepEqual([h.store.turn(hang)!.status, h.store.turn(hang)!.reason], ["stopped", "Stopped by the owner."]);
     assert.ok(h.acpCalls().some((c) => c.method === "session/cancel"));
+    // A paid turn stopped mid-way: its usage plus the allowance, and its
+    // tab waits for a Resume.
+    const resume = () => {
+      if (!h.store.tab(h.tab.id)!.paused) return;
+      assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: /);
+      runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+    };
+    if (paid) assert.equal(h.store.turn(hang)!.costBasis, "allowance");
+    resume();
     const asking = h.send(scout.id, "askhang");
     await h.until(() => h.store.openRequests().some((r) => r.agentId === scout.id), "a request");
     runCommand(h.store, { action: "stop", agentId: scout.id });
     await h.ended(asking);
     assert.ok(h.acpCalls().some((c) => c.result && JSON.stringify(c.result).includes('"cancelled"')));
+    resume();
     const deaf = h.send(scout.id, "deaf");
     await prompted(h, 3);
     runCommand(h.store, { action: "stop", agentId: scout.id });

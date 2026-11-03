@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { projectView, templatesView } from "../src/lib/console/views.ts";
-import { claudeSettings, decide, decideCodexFiles } from "../src/lib/console/permissions.ts";
+import { claudeSettings, decide } from "../src/lib/console/permissions.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, stepNote } from "../src/lib/console/templates.ts";
 
@@ -54,16 +54,13 @@ test("a tab with steps runs document turns: no commands, web access or helpers",
   }
 });
 
-test("Codex's and an ACP agent's writes keep to the step's files, with Claude's message", () => {
+test("an ACP agent's writes keep to the step's files, with Claude's message", () => {
   const stepFiles = DOCUMENT_REVIEW.steps[3].files;
   const always = () => true;
-  assert.equal(decideCodexFiles(["/work/lead/adrs/001-storage.md", "/work/lead/parking-lot.md"], { ...lead, stepFiles }, always).behavior, "allow");
-  assert.match(decideCodexFiles(["/work/lead/architecture.md", "/work/lead/brief.md"], { ...lead, stepFiles }, always).reason, /^This step may change only: architecture\.md, adrs\/\*\.md, parking-lot\.md\.$/);
   const acp = (path: string) => decideAcp({ kind: "edit", locations: [{ path }] }, { ...lead, stepFiles }, always);
   assert.equal(acp("/work/lead/architecture.md").behavior, "allow");
   assert.match(acp("/work/lead/brief.md").reason, /^This step may change only: /);
   // Without steps, any file in its folder, as before.
-  assert.equal(decideCodexFiles(["/work/lead/brief.md"], lead, always).behavior, "allow");
   assert.equal(decideAcp({ kind: "edit", locations: [{ path: "/work/lead/brief.md" }] }, lead, always).behavior, "allow");
 });
 

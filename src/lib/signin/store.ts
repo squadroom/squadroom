@@ -19,6 +19,8 @@ const TABLES = {
     "CREATE TABLE IF NOT EXISTS emergency_links (hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)",
   rate_limits:
     "CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL)",
+  // Every rate-limit check first forgets expired windows by their start.
+  rate_limits_window: "CREATE INDEX IF NOT EXISTS rate_limits_window ON rate_limits (window_start)",
 };
 
 export class SignInDatabase implements SignInStore {

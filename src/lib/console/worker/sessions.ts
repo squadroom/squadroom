@@ -321,6 +321,7 @@ export const sessions = {
         return void this.safe(() => this.store.taskUnfollowed(epoch, rt.agent.id));
       case "helper_start": {
         // A helper (subagent) begins: its row, redacted and bounded.
+        t.helpers = true;
         const clean = (text: string, fallback: string) => this.redactor.text(text).replace(/\s+/g, " ").trim() || fallback;
         return void this.safe(() =>
           this.store.startHelper(epoch, { agentId: rt.agent.id, turnId: t.id, toolUseId: ev.toolUseId, name: clean(ev.name, "Helper"), type: clean(ev.type, "helper") }),
@@ -354,9 +355,11 @@ export const sessions = {
     else if (!t.validated) [status, reason] = ["failed", `${label} ended the turn before confirming its login and model.`];
     else if (ev.outcome === "done") [status, reason] = ["done", null];
     else [status, reason] = [ev.outcome, this.redactor.text(ev.error ?? `${label} ended the turn.`).slice(0, 500)];
-    // Done, the requests' own usage (Codex reports no whole-turn usage) is
-    // the turn's; ended any other way, a request may have been under way.
-    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" });
+    // Done, the usage reported (Codex: its requests' own, summed) is the
+    // turn's. Ended any other way, a request may have been under way that
+    // the usage does not cover, so the allowance is added for it, unless
+    // the provider turned the prompt away before any model ran.
+    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" || !!ev.nothingRan });
   },
   /** What the turn's client has reported so far; a paid turn's is kept
    * with it, so a restart charges it from that. */

@@ -291,6 +291,8 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   assert.match(h.said(lead.id).at(-1)!, /error: console\/[^ ]+ has no open pull request yet\. Push it with team_push/);
   // Open one, then Codex reviews it (seeded into the fake).
   const pushed = h.store.queueTurn(lead.id, call("team_push", { title: "Fix sign-in", body: "Details" }), null, { pushApproved: true }).id;
+  await h.until(() => h.store.openRequests().length === 1, "push asked");
+  runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
   await h.ended(pushed);
   await h.until(() => gh.pulls.length === 1 && gh.comments.length === 1, "pull request opened");
   gh.comments.push({ pr: 100, author: "chatgpt-codex-connector[bot]", body: SUMMARY("completed", "b149db344f31") });

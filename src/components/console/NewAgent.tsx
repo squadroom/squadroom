@@ -78,7 +78,7 @@ export default function NewAgent({
           {PERMISSION_LABELS.look}
         </label>
         {kind === "claude-code" && (
-          <label className={styles.radio} title="Its changes, commands and web access wait for you in Needs you">
+          <label className={styles.radio} title="Its file changes and commands wait for you in Needs you, as web access always does. Team tools (such as pulling teammates' work) and image tools don't wait.">
             <input type="checkbox" checked={askFirst} onChange={(e) => setAskFirst(e.target.checked)} />
             Ask me first
           </label>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { ACP_CLIENTS, CLIENT_VERSIONS } from "../src/lib/console/clients.ts";
+import { envFileProblem } from "../src/config/server-env.ts";
 
 // The setup script installs each client from its committed lockfile
 // (scripts/console/clients/<name>), and bakes this host's paths into the
@@ -93,4 +94,37 @@ test("the running-programs check ignores macOS's own processes for the agent acc
   for (const system of ["/usr/sbin/distnoted", "/usr/sbin/cfprefsd", "/usr/libexec/secd", "/System/Library/Frameworks/x"]) assert.ok(ignored.test(system), system);
   for (const agent of ["/usr/local/bin/node", "/opt/console-clients/codex-0.155.1/node_modules/.bin/codex", "/bin/zsh"]) assert.ok(!ignored.test(agent), agent);
   assert.doesNotMatch(script, /running=\$\(\/usr\/bin\/pgrep -U \$AGENT\)/);
+});
+
+test("setup copies the clients without access lists or extended attributes, and removes any left", () => {
+  const script = read("scripts/console/setup-agent-user.sh");
+  assert.match(script, /\/usr\/bin\/ditto --noacl --noextattr \$stage\/pkg \$prefix\.new/);
+  const acl = script.indexOf("/bin/chmod -R -N $prefix.new");
+  assert.ok(acl > script.indexOf("chown -R root:wheel $prefix.new") && acl < script.indexOf("/bin/chmod -R a-w,ug-s $prefix.new"));
+});
+
+// .env.local holds the sign-in's secrets. Created 0644 and in a checkout
+// outside the home folder, the agent user could read it.
+test("setup's boundary check reads this checkout and its .env.local as the agent user", () => {
+  const script = read("scripts/console/setup-agent-user.sh");
+  assert.match(script, /readonly CHECKOUT=\$\{HERE:h:h\}/);
+  assert.match(script, /for target in [^\n]* \$CHECKOUT \$CHECKOUT\/\.env\.local; do/);
+  // A file is read, not only listed.
+  assert.match(script, /\[\[ -f \$target \]\] && reader=\(\/usr\/bin\/head -c 1\) \|\| reader=\(\/bin\/ls\)/);
+  assert.match(script, /sudo -u \$AGENT \$reader \$target/);
+});
+
+test("the web server and the worker refuse a .env.local every account can read, and say how to fix it", () => {
+  assert.equal(envFileProblem("/x/.env.local", undefined), null);
+  assert.equal(envFileProblem("/x/.env.local", 0o100600), null);
+  assert.equal(envFileProblem("/x/.env.local", 0o100640), null);
+  assert.match(envFileProblem("/x/.env.local", 0o100644) ?? "", /every account on this Mac.*chmod 600 \/x\/\.env\.local$/);
+  for (const entry of ["scripts/web.ts", "scripts/console-worker.ts"]) {
+    const source = read(entry);
+    assert.match(source, /envFileProblem\(/, entry);
+    assert.match(source, /process\.exit\(1\)/, entry);
+  }
+  // The worker checks before it reads the .env files.
+  const worker = read("scripts/console-worker.ts");
+  assert.ok(worker.indexOf("envFileProblem(") < worker.indexOf("workerEnv(root)"));
 });

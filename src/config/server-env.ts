@@ -19,6 +19,14 @@ export function isProduction(): boolean {
   return process.env.NODE_ENV === "production";
 }
 
+/** Why the server must not start with this `.env.local` (its mode, or
+ * undefined when there is none): one every account on the Mac can read,
+ * the `agent` user's included, would hand its secrets to any agent. */
+export function envFileProblem(path: string, mode: number | undefined): string | null {
+  if (mode === undefined || !(mode & 0o004)) return null;
+  return `${path} can be read by every account on this Mac, the agent user's included. Make it yours alone, then start again: chmod 600 ${path}`;
+}
+
 /** The web process's settings. None of them is an agent credential: the web
  * holds only the sign-in settings (and, optionally, the mail key that sends
  * sign-in codes). */

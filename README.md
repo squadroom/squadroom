@@ -39,12 +39,17 @@ you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one
 tray, **Needs you**, which covers every project: network requests,
 questions, pushes, notes agents leave for you (`team_report`) and paused
-tabs. The **Team** panel shows every message between a tab's agents.
+tabs. The **Team** panel shows every message between a tab's agents, and
+in an agent's window a teammate's message has its own style, so you can
+tell it from yours.
 
 Every agent works in its own Git clone on its own `console/…` branch.
 Squadroom commits what changed at the end of each turn, so you can check the
-work one turn at a time in the window's **Changes** view. Nothing is pushed
-until you approve it.
+work one turn at a time in the window's **Changes** view. Each commit's
+message holds your whole request for that turn, and pushing the branch
+publishes it. Nothing is pushed until you approve it, and when an agent
+opens a pull request you see its title and description before they are
+posted, unless you chose **Always** for that agent's pushes.
 
 ## Roles
 
@@ -173,7 +178,9 @@ The pictures use invented demo data; they follow your light or dark setting.
   Homebrew (`brew install node@24`) or the official installer. The setup
   script finds it in `/opt/homebrew/bin`, `/usr/local/bin`, Homebrew's
   `node@24` folder or on your `PATH`, as long as the `agent` user can run
-  it (so not one inside your home folder, such as nvm's).
+  it (so not one inside your home folder, such as nvm's). `brew install
+  node@24` doesn't put it on your own `PATH`, so add it before `npm ci`
+  (see the quick start).
 - **`sudo`**, once, to create the `agent` user, install the pinned agent
   programs and the launcher.
 - **An https address for the Mac**, through a TLS proxy on the same machine
@@ -195,8 +202,9 @@ In short:
 
 ```bash
 git clone https://github.com/squadroom/squadroom.git && cd squadroom
+export PATH="$(brew --prefix node@24)/bin:$PATH"   # Homebrew's node@24; add this line to ~/.zprofile too
 npm ci
-cp .env.example .env.local        # fill in the sign-in and mail settings
+cp .env.example .env.local && chmod 600 .env.local   # then fill in the sign-in and mail settings
 sudo zsh scripts/console/setup-agent-user.sh   # once: the agent user, clients, launcher
 npm run build
 npm run web -- --port 3011        # the web server, on 127.0.0.1:3011
@@ -207,12 +215,15 @@ Then point your https proxy at port 3011 (for example
 `tailscale serve --bg 3011`), open `https://<your address>/console`, sign in
 with GitHub, and add your keys under **Settings**, **Keys and
 connections**. For daily use, install both processes as LaunchAgents (`scripts/install-web-launch-agent.sh` and
-`scripts/console/install-launch-agent.sh`) and update with `npm run update`.
+`scripts/console/install-launch-agent.sh`) and update with `npm run update`;
+when it says the launcher changed, run the setup script again.
 
 ## Configuration
 
 Everything is in one file, [`.env.example`](.env.example); copy it to
-`.env.local`.
+`.env.local` and make that readable by you alone (`chmod 600 .env.local`).
+The web server and the worker refuse to start while every account on the
+Mac can read it.
 
 | Setting | Required | What it is |
 |---|---|---|
@@ -250,18 +261,22 @@ The longer version, with the threat model, is in
 - **Requests from the Mac itself aren't trusted either.** The web server
   listens on loopback only, but agents run on the same Mac, so every request
   needs a signed-in session; commands also need a same-origin `Origin`.
-  Pages carry a strict Content-Security-Policy.
+  Pages carry a Content-Security-Policy that keeps them to Squadroom's own
+  address and stops other sites framing them; it does allow inline scripts,
+  which Next.js needs.
 - **Agents run as a separate macOS user** (`agent`) that cannot read your
   home folder, through a root-owned launcher that passes only the one
   credential an agent needs. Claude Code runs in its sandbox, Codex under
   per-thread permission profiles, and ACP agents inside a macOS sandbox
-  profile. File writes are limited to the agent's own clone.
+  profile. File writes are limited to the agent's own clone (see the known
+  limits in [docs/architecture.md](docs/architecture.md)).
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,
   only to repositories whose base branch is protected by a ruleset the
   token cannot bypass, only the commit the Console recorded at the end of
   the agent's last turn, and only after every new object is checked for
-  credentials the Console handed out.
+  credentials the Console handed out (byte for byte: one encoded some other
+  way isn't caught).
 - **Credentials are redacted** from everything stored, and paid keys are
   bounded by the provider-side caps you set.
 
@@ -290,7 +305,8 @@ the caps you set at the provider, not on Squadroom's figures.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `npm run typecheck`,
-`npm run lint`, `npm test` and `npm run build` must all pass.
+`npm run lint`, `npm test` and `npm run build` must all pass, and so must
+`npm run test:macos` on a Mac.
 
 ## Licence
 

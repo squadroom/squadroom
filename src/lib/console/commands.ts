@@ -18,7 +18,7 @@ import { allTemplates, rolesView, templatesView } from "./views.ts";
 
 /** What "Open pull request" sends the agent. */
 export const OPEN_PR_PROMPT =
-  "Open a pull request for your work: call team_push with a short title and a description in Markdown (what changed and why, the files, the checks you ran and their results, what the owner should test, and anything left open). It is already approved. If your folder has unfinished work, say so in the description.";
+  "Open a pull request for your work: call team_push with a short title and a description in Markdown (what changed and why, the files, the checks you ran and their results, what the owner should test, and anything left open). The owner approves the title and description before they are posted. If your folder has unfinished work, say so in the description.";
 
 /** A Keys page write (`setKey`, `removeKey`): the key file, not the store. */
 export function runKeysCommand(store: ConsoleStore, keysPath: string, input: Record<string, unknown>): Record<string, unknown> {
@@ -134,7 +134,8 @@ export interface FreshCodeContext {
   /** The Console-wide spend limit now. */
   consoleSpendLimit?: number;
   /** The project an agent, team or template tab is made in has an agent,
-   * open or closed, with Ask me first on. */
+   * open or closed, with Ask me first on (or another project on the same
+   * GitHub repository has). */
   askFirstInUse?: boolean;
 }
 
@@ -231,13 +232,22 @@ export function freshCodeContext(store: ConsoleStore, input: Record<string, unkn
     case "createAgent":
     case "createTeam": {
       const tab = typeof input.tabId === "string" ? store.tab(input.tabId) : undefined;
-      return { askFirstInUse: !!tab && store.askFirstInUse(tab.projectId) };
+      return { askFirstInUse: !!tab && askFirstInRepo(store, tab.projectId) };
     }
     case "createTab":
-      return { askFirstInUse: typeof input.projectId === "string" && store.askFirstInUse(input.projectId) };
+      return { askFirstInUse: typeof input.projectId === "string" && askFirstInRepo(store, input.projectId) };
     default:
       return {};
   }
+}
+
+/** Ask me first is used in the project, or in another project on the same
+ * GitHub repository: otherwise a new project on that repository would make
+ * agents without it, with no code. */
+function askFirstInRepo(store: ConsoleStore, projectId: string): boolean {
+  if (store.askFirstInUse(projectId)) return true;
+  const repo = store.project(projectId)?.repo?.toLowerCase();
+  return !!repo && store.projects().some((p) => p.id !== projectId && p.repo?.toLowerCase() === repo && store.askFirstInUse(p.id));
 }
 
 /** A command that needs a fresh code by the store as it is now, run
@@ -528,8 +538,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       return { job: store.queuePush(agent.id, { by: "owner" }) };
     }
     case "openPullRequest": {
-      // The owner asks the agent to describe its work and push it:
-      // one click; the agent's team_push needs no second approval.
+      // The owner asks the agent to describe its work and push it; its
+      // team_push then shows the owner the text before anything is posted.
       const agent = store.agent(id(input.agentId, "Agent"));
       if (!agent || agent.state !== "ready") throw new CommandError("That agent is not ready.");
       if (store.project(agent.projectId)?.source !== "github") throw new CommandError("Only a GitHub project's agents open pull requests.");

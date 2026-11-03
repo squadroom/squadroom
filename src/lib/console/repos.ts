@@ -6,6 +6,7 @@ import {
   Clone,
   commentOnPullRequest,
   CONSOLE_BRANCH,
+  CONSOLE_FILES_IN_BRANCH,
   consoleBranch,
   findPullRequest,
   GitError,
@@ -534,6 +535,9 @@ export class Repos {
       const mirror = this.mirror(project);
       try {
         await mirror.stage(bundle, branch, head);
+        // The owner's uploads never leave the Mac, even committed by the
+        // agent itself.
+        if (await mirror.addsConsoleFiles(head)) throw new GitError(CONSOLE_FILES_IN_BRANCH);
         await mirror.scanNew(head, (bytes) => this.o.redactor.holdsSecretBytes(bytes));
         await mirror.pushStaged(branch, head, token);
       } finally {

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { changedFiles, readCodexNotification } from "../src/lib/console/codex.ts";
-import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand, decideCodexFiles } from "../src/lib/console/permissions.ts";
+import { CODEX_PROFILE, codexThreadConfig, decideCodexCommand } from "../src/lib/console/permissions.ts";
 import { harness } from "./helpers/console-harness.ts";
 
 // -3: Codex windows through one App Server (a scripted fake), with a
@@ -26,6 +26,7 @@ test("a Codex thread's config: its profile denies every other folder by name, ne
   assert.equal(profile.extends, ":workspace");
   assert.deepEqual(Object.entries(profile.filesystem).filter(([, v]) => v === "deny").map(([k]) => k).sort(), [
     "/Users/agent/.claude",
+    "/Users/agent/.claude.json",
     "/Users/agent/.codex",
     "/Users/agent/.kimi-code",
     "/Users/agent/.tmp",
@@ -42,15 +43,10 @@ test("a Codex thread's config: its profile denies every other folder by name, ne
   assert.equal(look.permissions[CODEX_PROFILE].extends, ":read-only");
 });
 
-test("Codex approvals: network goes to the owner, other escalations are refused, file changes only in its folder", () => {
+test("Codex approvals: network goes to the owner, other escalations are refused", () => {
   assert.equal(decideCodexCommand({ networkApprovalContext: { host: "registry.npmjs.org" } }).behavior, "ask");
   assert.equal(decideCodexCommand({ networkApprovalContext: { host: "registry.npmjs.org" } }).ruleKey, "network:registry.npmjs.org");
   assert.equal(decideCodexCommand({ command: "rm -rf /" }).behavior, "deny");
-  const edit = { folder: "/w/a", permission: "edit" as const };
-  assert.equal(decideCodexFiles(["/w/a/x.ts"], edit, () => true).behavior, "allow");
-  assert.equal(decideCodexFiles(["/w/b/x.ts"], edit, () => true).behavior, "deny");
-  assert.equal(decideCodexFiles([], edit, () => true).behavior, "deny");
-  assert.equal(decideCodexFiles(["/w/a/x.ts"], { folder: "/w/a", permission: "look" }, () => true).behavior, "deny");
 });
 
 test("the notification reader keeps executed items and the reply apart", () => {
@@ -158,7 +154,7 @@ test("a new agent folder: made only between Codex turns, and the thread is resum
   assert.equal(filesystem[h.store.agent(late.id)!.folder], "deny");
 });
 
-test("file changes: allowed in its folder, refused elsewhere; the Console's own MCP tools only", async (t) => {
+test("file changes: made by its sandbox in its folder; every request to write outside it is declined; the Console's own MCP tools only", async (t) => {
   const h = await harness(t, {}, false, { codex: {} });
   await h.worker.start();
   const coder = h.codexAgent();
@@ -181,7 +177,8 @@ test("file changes: allowed in its folder, refused elsewhere; the Console's own 
   await h.ended(h.send(coder.id, `move ${mine} ${inside}`));
   assert.equal(h.said(coder.id).at(-1), "file: accept");
   // A change of an unknown kind, or one asking for a standing grant on a
-  // folder, is refused even inside its folder.
+  // folder, is refused even inside its folder: any request is one to leave
+  // the sandbox.
   for (const word of ["oddkind", "grant"]) {
     const file = join(h.store.agent(coder.id)!.folder, `${word}.txt`);
     await h.ended(h.send(coder.id, `${word} ${file}`));

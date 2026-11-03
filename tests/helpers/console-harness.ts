@@ -68,6 +68,7 @@ case "$1" in
     ;;
   signal) if [ -f ${root}/fail-signal ]; then rm ${root}/fail-signal; exit 1; fi; echo "signal $2 $3" >> $LOG; kill -s "$2" -- "-$3" 2>/dev/null; exit 0 ;;
   sweep) echo sweep >> $LOG; exit 0 ;;
+  unlock) shift; echo "unlock $*" >> $LOG; for d in "$@"; do if [ -f "$d/.git/index.lock" ]; then rm -f "$d/.git/index.lock"; echo "$d"; fi; done; exit 0 ;;
   ${old ? "" : `version) echo ${LAUNCHER_VERSION}; exit 0 ;;`}
 esac
 exit 64

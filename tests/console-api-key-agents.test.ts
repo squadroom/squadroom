@@ -236,7 +236,7 @@ test("an API-key Codex server that does not report the API key runs no turn", as
   assert.ok(!h.codexCalls().some((c) => c.method === "thread/start"));
 });
 
-test("a Codex API-key turn that did not complete normally is charged its reported request plus one allowance, and its tab waits", async (t) => {
+test("a stopped Codex API-key turn is charged its reported request plus one sized by its largest input, and its tab waits", async (t) => {
   const h = await harness(t, {}, false, { codex: {} });
   keys(h.keysFile);
   await h.worker.start();
@@ -254,8 +254,36 @@ test("a Codex API-key turn that did not complete normally is charged its reporte
   const running = requestUsage(requestGauged(NO_REQUESTS, 40), request, SOL_KEY);
   const at = new Date(row.startedAt!);
   assert.equal(row.costBasis, "allowance");
-  assert.equal(row.costUsd, chargeTurn(SOL_KEY, request, at, running)!.usd + chargeTurn(SOL_KEY, null, at)!.usd);
-  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: .*the full allowance for a request whose usage it did not report/);
+  assert.equal(row.costUsd, chargeTurn(SOL_KEY, request, at, running, false, true)!.usd);
+  assert.ok(row.costUsd! > chargeTurn(SOL_KEY, request, at, running)!.usd);
+  assert.ok(row.costUsd! < chargeTurn(SOL_KEY, request, at, running, false)!.usd);
+  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: .*was stopped mid-request, so it was charged the usage it reported plus one more request of 40 input tokens/);
+});
+
+test("a stopped Claude Code API-key turn's unreported request is sized by its largest input, unless a helper ran", async (t) => {
+  const h = await harness(t);
+  keys(h.keysFile);
+  await h.worker.start();
+  const paid = h.agent("Paid", "edit", "claude-sonnet-5@api-key");
+  await h.ready(paid.id);
+  const stop = async (word: string) => {
+    const turn = h.send(paid.id, word);
+    await h.until(() => h.store.turn(turn)?.status === "running", "running");
+    await new Promise((r) => setTimeout(r, 300));
+    runCommand(h.store, { action: "stop", agentId: paid.id });
+    await h.ended(turn);
+    const row = h.store.turn(turn)!;
+    assert.equal(row.status, "stopped", row.reason ?? "");
+    assert.equal(row.costBasis, "allowance");
+    const reason = h.store.tab(h.tab.id)!.pauseReason ?? "";
+    runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+    return { usd: row.costUsd!, reason };
+  };
+  const sized = await stop("measuredhang");
+  assert.match(sized.reason, /was stopped mid-request, so it was charged the usage it reported plus one more request of 1,000 input tokens/);
+  const helped = await stop("measuredhelperhang");
+  assert.match(helped.reason, /the full allowance for a request/);
+  assert.ok(sized.usd < helped.usd);
 });
 
 test("a turn a dead worker left is charged from what its client had reported, at the prices it started with, even once its model has left the catalog", async (t) => {

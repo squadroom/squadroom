@@ -47,6 +47,9 @@ export interface ActiveTurn {
   gaugeSeen?: boolean;
   /** The latest top-level request began and has not reported its usage. */
   gaugePending?: boolean;
+  /** A helper (subagent) ran: its requests are not counted, so a stop is
+   * charged the full allowance. */
+  helpers?: boolean;
   /** A Re-send of this interrupted turn. */
   resendOf: number | null;
 }

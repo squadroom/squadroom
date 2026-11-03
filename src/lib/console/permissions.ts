@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve, sep } from "node:path";
 import type { Permission } from "./types.ts";
 
@@ -48,8 +48,10 @@ const DOCUMENTS_ONLY_DENY = ["Bash", "WebFetch", "WebSearch", "Task", "NotebookE
 /** `--settings` for one window: flags only, with `--setting-sources ""`. */
 export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false, apiKey = false) {
   // Unreadable: the shared folder and each client's login, Kimi Code's
-  // membership login too (only its own client reads it).
+  // membership login too (only its own client reads it), and Claude Code's
+  // own state file.
   const hidden = [paths.shared, `${paths.agentHome}/.codex`, `${paths.agentHome}/.claude`, `${paths.agentHome}/.kimi-code`];
+  const hiddenFiles = [`${paths.agentHome}/.claude.json`];
   return {
     sandbox: {
       enabled: true,
@@ -59,7 +61,7 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
       // instead of running because it is sandboxed.
       ...(askFirst ? { autoAllowBashIfSandboxed: false } : {}),
       filesystem: {
-        denyRead: hidden,
+        denyRead: [...hidden, ...hiddenFiles],
         ...(permission === "look" ? { denyWrite: [folder] } : {}),
       },
     },
@@ -67,6 +69,7 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
       blockReadsOutsideWorkingDirectories: true,
       deny: [
         ...hidden.map((p) => `Read(/${p}/**)`),
+        ...hiddenFiles.map((p) => `Read(/${p})`),
         ...(permission === "look" ? ["Edit", "Write", "NotebookEdit"] : []),
         ...(documentsOnly ? DOCUMENTS_ONLY_DENY : []),
         // On an API key a web search is billed per search, which the
@@ -120,56 +123,69 @@ function targetPath(tool: string, input: Record<string, unknown>): string | null
   return typeof value === "string" && value ? value : null;
 }
 
-/** Inside the folder (or the folder itself), by path text. Symbolic links
- * are resolved by the caller (`realInside`). */
+/** Inside the folder (or the folder itself), by path text. A path with a
+ * `..` part is refused even when its text ends inside: on disk `link/..`
+ * leaves through the link, not back to the folder. Symbolic links are
+ * checked by `realInside`. */
 export function inside(folder: string, path: string): boolean {
+  if (path.split(/[\\/]/).includes("..")) return false;
   const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
   const rel = relative(resolve(folder), full);
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
 
-/** On disk: the path's nearest existing part, with links resolved, is still
- * inside the folder. Anything unreadable counts as outside. */
-export function realInside(folder: string, path: string): boolean {
-  const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
-  let probe = full;
-  for (;;) {
+/** Where a path leads on disk: its nearest existing part with links
+ * resolved, plus the rest. Null when that cannot be known: a part that
+ * cannot be read, or a link to something that does not exist yet (writing
+ * there would create its target, wherever that is). */
+function leadsTo(full: string): string | null {
+  for (let probe = full; ; probe = dirname(probe)) {
     try {
-      const real = realpathSync(probe);
-      return inside(realpathSync(folder), join(real, relative(probe, full)));
+      return join(realpathSync(probe), relative(probe, full));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
-      const parent = dirname(probe);
-      if (parent === probe) return false;
-      probe = parent;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(probe) === probe) return null;
+      try {
+        lstatSync(probe);
+        return null;
+      } catch {
+        // Not there at all: the part above decides.
+      }
     }
   }
 }
 
+/** On disk: the path is inside the folder by its text, and where it leads,
+ * with links resolved, is still inside the folder. A link that stays
+ * inside is followed; one to nothing, or anything unreadable, counts as
+ * outside. */
+export function realInside(folder: string, path: string): boolean {
+  if (!inside(folder, path)) return false;
+  const real = leadsTo(isAbsolute(path) ? resolve(path) : resolve(folder, path));
+  try {
+    return real !== null && inside(realpathSync(folder), real);
+  } catch {
+    return false;
+  }
+}
+
 /** A path in the folder that one of the step's files or patterns names,
- * by its name and, on disk, by where links lead (so an allowed name that
- * links to another document does not open it). */
+ * by its text (never through `..`) and, on disk, by where links lead (so
+ * an allowed name that links to another document does not open it). */
 export function inStep(folder: string, path: string, files: string[]): boolean {
   const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
   const named = (base: string, target: string) => {
     const rel = relative(base, target).split(sep).join("/");
     return files.some((f) => matchesGlob(rel, f));
   };
-  if (!named(resolve(folder), full)) return false;
+  if (!inside(folder, path) || !named(resolve(folder), full)) return false;
   let root: string;
   try {
     root = realpathSync(folder);
   } catch {
     return true; // No folder on disk (as in a check of the rule alone).
   }
-  // The nearest existing part, with links resolved, plus the rest.
-  for (let probe = full; ; probe = dirname(probe)) {
-    try {
-      return named(root, join(realpathSync(probe), relative(probe, full)));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(probe) === probe) return false;
-    }
-  }
+  const real = leadsTo(full);
+  return real !== null && named(root, real);
 }
 
 /** A tab with steps: a write to any path outside the
@@ -180,10 +196,12 @@ export function outsideStep(folder: string, paths: string[], stepFiles: string[]
 }
 
 /**
- * Decide one permission prompt. `realInside` confirms, on disk, that the
- * path's nearest existing folder (or the file itself) resolves inside the
- * agent's folder, so a link planted in the folder cannot lead a write
- * elsewhere.
+ * Decide one permission prompt. A path with a `..` part is refused, and
+ * `realInside` confirms, on disk, that the path's nearest existing part
+ * (or the file itself) resolves inside the agent's folder, so a link
+ * planted in the folder cannot lead a write elsewhere. A link swapped in
+ * after this check is not caught here (docs/architecture.md, known
+ * limits).
  */
 export function decide(
   tool: string,
@@ -198,7 +216,7 @@ export function decide(
 
 /** Ask me first: an action the boundaries allow that changes something or
  * reaches out goes to the owner; null when it only reads (or is the
- * Console's own tool). */
+ * Console's own tool: the team and image tools never wait here). */
 function askFirst(tool: string, input: Record<string, unknown>): Decision | null {
   if (FILE_WRITE.has(tool)) {
     const path = targetPath(tool, input) ?? "a file";
@@ -213,7 +231,9 @@ function askFirst(tool: string, input: Record<string, unknown>): Decision | null
       // "Always" remembers this exact command, and only a plain one: a rule
       // must never approve anything the owner did not see.
       ...(rule ? { ruleKey: `ask-first:command:${rule}` } : {}),
-      summary: `Run: ${command.replace(/\s+/g, " ").trim().slice(0, 300)}`,
+      // Whole and with its lines as written: the worker redacts and bounds
+      // it (marking any cut), and the tray can show the stored input too.
+      summary: `Run: ${command.trim()}`,
     };
   }
   return null;
@@ -365,6 +385,7 @@ export function codexThreadConfig(
     `${paths.agentHome}/.tmp`,
     `${paths.agentHome}/.codex`,
     `${paths.agentHome}/.claude`,
+    `${paths.agentHome}/.claude.json`,
     `${paths.agentHome}/.kimi-code`,
     paths.shared,
   ];
@@ -396,17 +417,4 @@ export function decideCodexCommand(params: Record<string, unknown>): Decision {
     return { behavior: "ask", reason: `Network access to ${host} needs the owner's approval.`, ruleKey: `network:${host}`, summary: `Network access to ${host}` };
   }
   return { behavior: "deny", reason: "Commands run only inside the sandbox here." };
-}
-/** Codex asks before applying a file change its sandbox would not allow:
- * allowed only for an editing window and only inside its own folder. */
-export function decideCodexFiles(
-  paths: string[],
-  agent: { folder: string; permission: Permission; stepFiles?: string[] | null },
-  check: (folder: string, path: string) => boolean = realInside,
-): Decision {
-  if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
-  if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
-  if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p)))
-    return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
-  return outsideStep(agent.folder, paths, agent.stepFiles) ?? { behavior: "allow", reason: "Files in this agent's own folder." };
 }

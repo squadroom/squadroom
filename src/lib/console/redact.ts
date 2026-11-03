@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { credentialValues, readKeyFile, writeKeyFile, type KeyEntry } from "./keys.ts";
+
 // Secrets never stored: before any event, message or tool result is
 // written, every exact value the worker handed to an agent, and every
 // common key shape, is replaced by `[redacted …last4]`. So an agent running
@@ -21,9 +26,9 @@ const PATTERNS: RegExp[] = [
 ];
 const BEARER = /\b(bearer\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
 /** The start of a key shape, which a cut must never leave behind. */
-const SHAPE_START = /(\bsk-|\bgh[pousr]_|\bgithub_pat_|\bxai-|\bAIza|\bbearer\s+)[A-Za-z0-9._~+/=-]*$/i;
+const SHAPE_START = /(\bsk-|\bgh[pousr]_|\bgithub_pat_|\bxai-|\bAIza|\bbearer\s+)[A-Za-z0-9._~+/=-]*$/gi;
 /** Characters a key shape is made of: a run of them is held back as one. */
-const KEY_RUN = /[A-Za-z0-9._~+/=-]+$/;
+const KEY_RUN = /[A-Za-z0-9._~+/=-]+$/g;
 
 /** Values shorter than this are not treated as secrets (they would mask
  * ordinary words). Every credential the worker issues is far longer. */
@@ -32,6 +37,18 @@ export const MIN_SECRET_LENGTH = 12;
  * at least this much beyond the cut before redacting. No real key is
  * longer; a run of key characters past it is cut like any other text. */
 const SHAPE_REACH = 1024;
+
+/** Where `pattern` (one of the two above: they end in `$`, and carry `g`
+ * so a search can start part way) matches at the end of `text`, looked for
+ * in the last `reach` characters only; -1 when it does not. Over the whole
+ * text such a pattern takes time that grows with the square of its length
+ * (34 s on 512 KB), and nothing longer than `reach` is a key. Starting the
+ * search there, rather than on a slice, lets `\b` see the character
+ * before. */
+function endMatch(pattern: RegExp, text: string, reach: number): number {
+  pattern.lastIndex = Math.max(0, text.length - reach);
+  return pattern.exec(text)?.index ?? -1;
+}
 
 export class Redactor {
   private secrets = new Set<string>();
@@ -55,8 +72,9 @@ export class Redactor {
     for (const secret of this.secrets) if (input.includes(secret)) return true;
     return false;
   }
-  /** Whether raw bytes (a Git blob, say) hold any exact value handed to an
-   * agent, whatever their encoding. */
+  /** Whether raw bytes (a Git blob, say) hold any value handed to an agent,
+   * byte for byte as UTF-8. Exact bytes only: the same value encoded
+   * another way (base64, UTF-16, split across lines) is not found. */
   holdsSecretBytes(input: Buffer): boolean {
     for (const secret of this.secrets) if (input.includes(Buffer.from(secret, "utf8"))) return true;
     return false;
@@ -85,8 +103,7 @@ export class Redactor {
           kept = kept.slice(0, -n);
           break;
         }
-    kept = kept.replace(SHAPE_START, "");
-    return { text: kept, truncated: true };
+    return { text: this.dropShapeStart(kept), truncated: true };
   }
   /** Redacted text shortened to `maxChars` characters (a summary line),
    * with the same care at the cut as `cut()`. */
@@ -100,7 +117,12 @@ export class Redactor {
           kept = kept.slice(0, -n);
           break;
         }
-    return `${kept.replace(SHAPE_START, "")}…`;
+    return `${this.dropShapeStart(kept)}…`;
+  }
+  /** Text without a trailing start of a key shape. */
+  private dropShapeStart(text: string): string {
+    const at = endMatch(SHAPE_START, text, this.reach);
+    return at < 0 ? text : text.slice(0, at);
   }
   /**
    * Where raw streamed text may be divided into a row written now and a
@@ -114,7 +136,8 @@ export class Redactor {
    */
   splitPoint(text: string, at: number): number {
     let cut = Math.min(at, text.length);
-    const run = KEY_RUN.exec(text)?.[0].length ?? 0;
+    const start = endMatch(KEY_RUN, text, this.reach);
+    const run = start < 0 ? 0 : text.length - start;
     if (run && text.length - run < cut) cut = Math.max(text.length - run, text.length - this.reach, 0);
     for (let changed = true; changed && cut > 0; ) {
       changed = false;
@@ -165,3 +188,45 @@ export function truncateBytes(text: string, maxBytes: number): { text: string; t
   const kept = cutBytes(text, maxBytes);
   return { text: `${kept}\n… truncated, ${bytes - Buffer.byteLength(kept, "utf8")} bytes omitted`, truncated: true };
 }
+
+/** Beside the key file: every credential value the worker has loaded from
+ * it, so a key replaced on the Keys page is still known after a restart. */
+export const rememberedKeysFile = (keysFile: string) => join(dirname(keysFile), "console-keys-replaced.json");
+
+/**
+ * Load every credential value the key file holds, and every one it held
+ * before (remembered beside it), into the redactor, and remember the
+ * current ones: a key replaced on the Keys page is still masked, and still
+ * refused by the push check, after a restart. The values themselves are
+ * kept, in the key file's own format and folder (a plain file of the
+ * owner's, 0600, in the 0700 key folder, where the live keys already are):
+ * a hash could only match a whole text, never find a key inside one or
+ * mask it there. Throws when either file exists but cannot be read whole.
+ * Returns why the current values could not be remembered, or null (they
+ * are masked all the same in this worker's life).
+ */
+export function loadCredentials(redactor: Redactor, keysFile: string): string | null {
+  const current = credentialValues(keysFile);
+  const file = rememberedKeysFile(keysFile);
+  let kept: Record<string, KeyEntry> = {};
+  if (present(file)) kept = readKeyFile(file).keys;
+  const known = new Set(Object.values(kept).map((e) => e.value));
+  for (const value of [...known, ...current]) redactor.add(value);
+  const fresh = current.filter((v) => !known.has(v));
+  if (!fresh.length) return null;
+  const name = (v: string) => createHash("sha256").update(v, "utf8").digest("hex").slice(0, 16);
+  try {
+    writeKeyFile(file, { keys: { ...kept, ...Object.fromEntries(fresh.map((v) => [name(v), { value: v }])) }, projects: {} });
+    return null;
+  } catch (error) {
+    return `Replaced keys could not be remembered in ${file}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+const present = (path: string) => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};

@@ -10,13 +10,12 @@ import { backupFailedKey, needsCounts, needsMailDue, needsYouKey, renderConsoleM
 import { needNotices } from "./notify.ts";
 import { needsView } from "./views.ts";
 import { Launcher } from "./launcher.ts";
-import { credentialValues } from "./keys.ts";
 import { ClaudeDriver } from "./claude-session.ts";
 import { CodexDriver } from "./codex-session.ts";
 import { AcpDriver, type AcpHost } from "./acp-session.ts";
 import { errorMessage as message, type AgentDriver, type DriverHost } from "./session.ts";
 import { realInside, type ConsolePaths } from "./permissions.ts";
-import { Redactor } from "./redact.ts";
+import { loadCredentials, Redactor } from "./redact.ts";
 import { Repos } from "./repos.ts";
 import { sweepUploadLeftovers } from "./agent-files.ts";
 import { currentStepFiles } from "./templates.ts";
@@ -310,7 +309,7 @@ export class ConsoleWorker {
         }
         // Recording the outcome is a store write like any other: a failure
         // stops the worker and its agents (safe), never an unhandled error.
-        this.safe(() => this.store.recordBackup(written ? "succeeded" : "failed", now));
+        this.safe(() => this.store.recordBackup(this.epoch!, written ? "succeeded" : "failed", now));
         if (written) this.log(`backup written: ${written}`);
         // At most one e-mail a UTC day: its key names the day.
         else if (this.options.mail) this.safe(() => this.store.enqueueMail(backupFailedKey(now), { kind: "backup_failed" }, now, this.epoch!));
@@ -326,7 +325,9 @@ export class ConsoleWorker {
     // beside the worker raises no alert.
     if (this.options.health) this.timers.push(setInterval(() => void this.heartbeat(), this.options.healthMs ?? 5 * 60_000));
     // Retention: turns older than RETENTION_DAYS are compacted, a few at a
-    // time, so the store does not grow without bound.
+    // time: their streamed thinking, tool output and earlier text go. The
+    // turns themselves, their prompts, commits with patches and request
+    // inputs are kept.
     this.timers.push(
       setInterval(() => {
         if (this.stopped || this.epoch === null) return;
@@ -347,7 +348,8 @@ export class ConsoleWorker {
   private async recover(epoch: number) {
     // Every credential value in the file, global and per project, is known
     // to the redactor from the start, not only the ones handed out in this
-    // worker's life: a key an agent copied somewhere before a restart is
+    // worker's life, and so is every value it held before (a key replaced on
+    // the Keys page): a key an agent copied somewhere before a restart is
     // masked and refused by the push check all the same.
     // A key file that exists but cannot be read whole stops the start: no
     // agent runs with credentials the redactor does not know.
@@ -355,7 +357,8 @@ export class ConsoleWorker {
     // needs one can start).
     if (existsSync(this.options.keysFile)) {
       const seen = this.keysSignature();
-      for (const value of credentialValues(this.options.keysFile)) this.redactor.add(value);
+      const note = loadCredentials(this.redactor, this.options.keysFile);
+      if (note) this.log(note);
       this.keysSeen = seen;
     } else this.log("There is no key file yet: no credential is loaded.");
     // Before any agent runs: the launcher must pass only listed credentials,
@@ -363,6 +366,16 @@ export class ConsoleWorker {
     await this.launcher.check(this.options.paths.agentHome);
     this.leading(epoch);
     await this.launcher.sweep();
+    // A Git command the sweep, a crash or a power loss cut short can leave
+    // its index lock, and every later Git command in that clone (the next
+    // turn's included) fails. No agent process is left now, so any lock is
+    // stale.
+    const clones = this.store.agents().flatMap((a) => (a.folder ? [a.folder] : []));
+    if (clones.length) {
+      this.leading(epoch);
+      const unlocked = await this.launcher.unlock(clones).catch((error: unknown) => (this.log(message(error)), []));
+      if (unlocked.length) this.log(`Removed a stale Git lock in ${unlocked.length} agent folder(s).`);
+    }
     // Paid turns an earlier worker left running after their prompt reached
     // the client are charged now. Their end never came back, so they are
     // charged what their requests reported plus the full allowance for each
@@ -484,6 +497,14 @@ export class ConsoleWorker {
     // Every process this worker started, without the account-wide sweep:
     // each driver ends its own (TERM, then KILL).
     await Promise.all([...this.drivers.values()].map((d) => d.shutdown()));
+    // A turn's commit still running gets one grace period to finish: the
+    // sweep below would kill its Git mid-way and leave the clone locked.
+    const committing = [...this.runtimes.values()].flatMap((rt) => (rt.busy ? [rt.busy] : []));
+    if (committing.length) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([Promise.allSettled(committing), new Promise((r) => (timer = setTimeout(r, this.grace)))]);
+      clearTimeout(timer);
+    }
     // The sweep reaches every `agent` process, so it runs only while this
     // worker still holds the lease: after a takeover, the new worker's
     // agents are not ours to end (ours were signalled above).
@@ -627,7 +648,7 @@ export class ConsoleWorker {
       const members = this.store.waitFor(agent.id);
       if (members.length) {
         if (members.some((id) => this.store.agent(id)?.state === "creating")) continue;
-        this.safe(() => this.store.clearWaitFor(agent.id));
+        this.safe(() => this.store.clearWaitFor(epoch, agent.id));
       }
       // A team turn that waited (a slot, a push) still keeps to its
       // instruction's wall time.

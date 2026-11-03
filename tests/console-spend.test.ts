@@ -140,6 +140,73 @@ test("a turn without usage it can be trusted on is charged its reported requests
   assert.deepEqual(readRunning("nonsense"), NO_REQUESTS);
 });
 
+test("a turn that did not end normally is charged its reported usage plus the allowance for the requests it did not cover, at least one", () => {
+  const allowance = chargeTurn(LUNA, null, AT)!.usd;
+  const usage = { inputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const reported = chargeTurn(LUNA, usage, AT)!.usd;
+  // A client that reports the whole turn's usage (Claude Code, ACP), stopped:
+  // never only what it reported, even a zeroed report.
+  assert.deepEqual(chargeTurn(LUNA, usage, AT, NO_REQUESTS, false), { usd: reported + allowance, basis: "allowance", allowances: 1 });
+  assert.deepEqual(chargeTurn(LUNA, { inputTokens: 0, outputTokens: 0 }, AT, NO_REQUESTS, false), { usd: allowance, basis: "allowance", allowances: 1 });
+  // Claude Code: three requests started, two measured (their usage is in the
+  // report), so one was under way.
+  let claude = NO_REQUESTS;
+  for (let i = 0; i < 3; i++) claude = requestStarted(claude);
+  claude = requestGauged(requestGauged(claude, 1_000), 1_500);
+  assert.equal(chargeTurn(LUNA, usage, AT, claude, false)!.allowances, 1);
+  claude = requestStarted(requestStarted(claude));
+  assert.equal(chargeTurn(LUNA, usage, AT, claude, false)!.allowances, 3);
+  // Ended normally, the same report is the charge.
+  assert.deepEqual(chargeTurn(LUNA, usage, AT, claude, true), { usd: reported, basis: "reported" });
+});
+
+test("a stopped turn is charged its reported usage plus each request it did not cover, sized by its largest input", () => {
+  const usage = { inputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const reported = chargeTurn(HAIKU, usage, AT)!.usd;
+  // Haiku's cache writes cost more than its input: the request's input is
+  // priced at that rate, with the model's maximum output.
+  const one = (input: number) => costUsd({ ...HAIKU.paid!.prices, id: HAIKU.id, label: HAIKU.label, model: HAIKU.model }, input, HAIKU.paid!.maxOutputTokens, 0, { requestedAt: AT.toISOString(), cacheWriteInputTokens: input });
+  let claude = NO_REQUESTS;
+  for (let i = 0; i < 3; i++) claude = requestStarted(claude);
+  claude = requestGauged(requestGauged(claude, 1_000), 1_500);
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, claude, false, true), { usd: reported + one(1_500), basis: "allowance", allowances: 1, sizedBy: 1_500 });
+  assert.ok(one(1_500) < chargeTurn(HAIKU, null, AT)!.usd);
+  // Two requests it did not cover are two of them.
+  assert.equal(chargeTurn(HAIKU, usage, AT, requestStarted(claude), false, true)!.usd, reported + 2 * one(1_500));
+  // Not stopped (it failed), the full allowance.
+  assert.equal(chargeTurn(HAIKU, usage, AT, claude, false)!.sizedBy, undefined);
+  // No input seen, or a report that could not be read: the full allowance.
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, NO_REQUESTS, false, true), chargeTurn(HAIKU, usage, AT, NO_REQUESTS, false));
+  const req = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const bad = requestUsage(requestUsage(requestGauged(NO_REQUESTS, 1_000), req, SOL), { inputTokens: undefined, outputTokens: 5 }, SOL);
+  assert.equal(chargeTurn(SOL, bad.usage, AT, bad, false, true)!.sizedBy, undefined);
+  // Ended normally, the report is the charge, stopped or not.
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, claude, true, true), { usd: reported, basis: "reported" });
+});
+
+test("a Codex request whose usage cannot be read is charged the allowance, never nothing", () => {
+  const req = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const good = requestUsage(NO_REQUESTS, req, SOL);
+  // A malformed field arrives as missing: that request did not report.
+  const bad = requestUsage(good, { inputTokens: undefined, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 50 }, SOL);
+  assert.deepEqual([bad.reported, bad.unreported, bad.usage], [1, 1, good.usage]);
+  const charge = chargeTurn(SOL, bad.usage, AT, bad)!;
+  assert.deepEqual(charge, { usd: chargeTurn(SOL, good.usage, AT, good)!.usd + chargeTurn(SOL, null, AT)!.usd, basis: "allowance", allowances: 1 });
+  assert.deepEqual(readRunning(JSON.parse(JSON.stringify(bad))), bad);
+});
+
+test("the allowance prices the window's input at the model's highest input-side rate", () => {
+  // Haiku's cache writes cost more than its input.
+  const haiku = agentModel("claude-code", "haiku@api-key")!;
+  const priced = { ...haiku.paid!.prices, id: haiku.id, label: haiku.label, model: haiku.model, longContext: haiku.paid!.longContext };
+  const { contextWindow, maxOutputTokens } = haiku.paid!;
+  assert.ok(haiku.paid!.prices.cacheWritePerMtok! > haiku.paid!.prices.inputPerMtok);
+  assert.equal(chargeTurn(haiku, null, AT)!.usd, costUsd(priced, contextWindow, maxOutputTokens, 0, { requestedAt: AT.toISOString(), cacheWriteInputTokens: contextWindow }));
+  // A model with no dearer rate: its plain input.
+  const grok = MODELS.find((m) => m.id === "grok-4.7")!;
+  assert.equal(chargeTurn(GROK, null, AT)!.usd, costUsd(grok, GROK.paid!.contextWindow, GROK.paid!.maxOutputTokens, 0, { requestedAt: AT.toISOString() }));
+});
+
 test("each agent is offered only the team tools it may use", () => {
   const names = (tools: { name: string }[]) => tools.map((t) => t.name).sort();
   const all = names(TEAM_TOOLS);

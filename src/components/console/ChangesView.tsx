@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type SyntheticEvent } from "react";
 import type { changesView } from "@/lib/console/views";
 import { nextPolled, type Polled } from "@/lib/console/polled";
 import { approvalLine } from "@/lib/console/ui";
@@ -17,6 +17,35 @@ function StatFiles({ files, onOpenFile }: { files: string[]; onOpenFile: (path: 
         </button>
       ))}
     </div>
+  );
+}
+
+type Commit = NonNullable<ReturnType<typeof changesView>>["commits"][number];
+
+/** One turn's commit: its patch is asked for once, when it is first opened,
+ * so the 3-second poll carries the list only. */
+function CommitDetails({ agentId, commit }: { agentId: string; commit: Commit }) {
+  const [patch, setPatch] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [asked, setAsked] = useState(false);
+  const open = (e: SyntheticEvent<HTMLDetailsElement>) => {
+    if (!e.currentTarget.open || asked) return;
+    setAsked(true);
+    void api(undefined, `?changes=${encodeURIComponent(agentId)}&commit=${commit.id}`)
+      .then((data: { patch: string }) => setPatch(data.patch))
+      .catch((error: Error) => {
+        setFailed(error.message);
+        setAsked(false);
+      });
+  };
+  return (
+    <details className={styles.tool} onToggle={open}>
+      <summary>
+        Turn {commit.turnId} · {commit.sha.slice(0, 8)} · {commit.stat.split("\n").at(-1)}
+      </summary>
+      <pre>{commit.stat}</pre>
+      {failed ? <p className={styles.errorLine}>{failed}</p> : <pre>{patch ?? "Loading…"}</pre>}
+    </details>
   );
 }
 
@@ -130,13 +159,7 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
           {changes.commits.length === 0 && <p className={styles.hint}>No turn has changed files yet.</p>}
           {changes.commits.map((c) => (
             <div key={c.id}>
-              <details className={styles.tool}>
-                <summary>
-                  Turn {c.turnId} · {c.sha.slice(0, 8)} · {c.stat.split("\n").at(-1)}
-                </summary>
-                <pre>{c.stat}</pre>
-                <pre>{c.patch}</pre>
-              </details>
+              <CommitDetails agentId={agentId} commit={c} />
               <StatFiles files={c.files ?? []} onOpenFile={onOpenFile} />
             </div>
           ))}

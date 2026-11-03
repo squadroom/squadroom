@@ -282,6 +282,9 @@ export function needsView(store: ConsoleStore) {
       kind: r.kind,
       tool: r.tool,
       summary: r.summary,
+      // The whole stored input (redacted, at most 64 KB, a cut marked): the
+      // tray shows it on request, so the owner sees what Allow once allows.
+      input: r.input,
       // Only where there is a rule to remember (a compound command has none).
       canAlways: r.kind === "permission" && !!r.ruleKey,
       canProject: r.kind === "permission" && !!r.ruleKey?.startsWith("network:"),
@@ -334,8 +337,6 @@ export function searchView(store: ConsoleStore, text: string) {
   };
 }
 
-/** One agent's changes view: each turn's commit, the branch against its
- * base, and its latest push. */
 function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType<ConsoleStore["diff"]>) {
   // The head is the shown diff's, so Approve names the commit whose
   // changes the owner sees (read once, not again).
@@ -354,6 +355,9 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
   };
 }
 
+/** One agent's changes view: each turn's commit (without its patch, which
+ * the dialog asks for when it is opened), the branch against its base, and
+ * its latest push. */
 export function changesView(store: ConsoleStore, agentId: string) {
   const agent = store.agent(agentId);
   if (!agent) return null;
@@ -373,6 +377,12 @@ export function changesView(store: ConsoleStore, agentId: string) {
     // whether each has reviewed the current head.
     approval: approvalView(store, agent, diff),
   };
+}
+
+/** One commit's patch in the changes view, asked for when it is opened. */
+export function commitPatchView(store: ConsoleStore, agentId: string, commitId: number): { patch: string } | null {
+  const patch = Number.isSafeInteger(commitId) ? store.commitPatch(agentId, commitId) : null;
+  return patch === null ? null : { patch };
 }
 
 /** The navigation tree: every project → tabs → agents by name, each with

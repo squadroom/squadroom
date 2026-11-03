@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Redactor, truncateBytes } from "../src/lib/console/redact.ts";
+import { loadCredentials, Redactor, rememberedKeysFile, truncateBytes } from "../src/lib/console/redact.ts";
 import { TurnEvents } from "../src/lib/console/events.ts";
-import { claudeSettings, decide, decideControl, inside, realInside } from "../src/lib/console/permissions.ts";
+import { claudeSettings, decide, decideControl, inside, inStep, realInside } from "../src/lib/console/permissions.ts";
 import { ConsoleStore, LEASE_LOST } from "../src/lib/console/store.ts";
 import { backupDue, consoleBackupName, expiredConsoleBackups } from "../src/lib/console/backup.ts";
 import { CommandError, runCommand } from "../src/lib/console/commands.ts";
@@ -95,6 +95,29 @@ test("a size-triggered flush also keeps a split credential whole", () => {
   assert.equal(text.at(-1), "[redacted …6789] done");
 });
 
+test("review M5: the cut and the split point stay fast on 512 KB written to defeat them", () => {
+  const r = new Redactor();
+  r.add("secret-value-0123456789");
+  // Every "AIza" starts a key shape that runs to the "!" just before the
+  // cut; one long run of key characters ends in "!". Both took tens of
+  // seconds when the patterns looked through the whole text.
+  const shapes = `${"AIza.".repeat(512 * 1024 / 5)}!`;
+  const run = `${"a.".repeat(256 * 1024)}!`;
+  const started = performance.now();
+  const cut = r.cut(`${shapes}tail`, shapes.length);
+  assert.deepEqual([cut.truncated, cut.text.endsWith("!")], [true, true]);
+  assert.match(r.shorten(`${shapes}tail`, shapes.length + 1), /!…$/);
+  assert.equal(r.splitPoint(run, run.length), run.length);
+  assert.ok(performance.now() - started < 500, `${performance.now() - started} ms`);
+  // The same as before near the cut: a key shape's start is dropped, a
+  // word that merely contains one is not, and a run is held back.
+  assert.equal(r.cut("key: ghp_abcdefghij", 15).text, "key: ");
+  assert.equal(r.cut("xsk-abc", 6).text, "xsk-ab");
+  assert.equal(r.cut(`${"x".repeat(5000)} sk-abc`, 5006).text, `${"x".repeat(5000)} `);
+  assert.equal(r.splitPoint("hi sk-ab", 8), 3);
+  assert.equal(r.splitPoint("a".repeat(3000), 3000), 3000 - r.reach);
+});
+
 test("permission inputs count toward the turn bound", () => {
   const events = new TurnEvents(sink(), new Redactor(), 0, { coalesceMs: 10, toolOutputBytes: 100, turnBytes: 300 });
   let full = 0;
@@ -117,6 +140,29 @@ test("a turn stores at most its byte limit, then reports it once", () => {
   assert.ok(s.rows.reduce((n, x) => n + Buffer.byteLength(JSON.stringify(x.body)), 0) <= 300);
   assert.ok((s.rows[0].body as { text: string }).text.length < 200);
   assert.match((s.rows[0].body as { text: string }).text, /truncated/);
+});
+
+test("a key replaced in the key file is still masked and caught after a restart", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-keys-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keysFile = join(dir, "console-keys.json");
+  const OLD = "sk-proj-FAKE-old-key-0000000000000000";
+  const NEW = "sk-proj-FAKE-new-key-1111111111111111";
+  const write = (value: string) => writeFileSync(keysFile, JSON.stringify({ keys: { OPENAI_API_KEY: { value } }, projects: {} }), { mode: 0o600 });
+  write(OLD);
+  assert.equal(loadCredentials(new Redactor(), keysFile), null);
+  assert.equal(statSync(rememberedKeysFile(keysFile)).mode & 0o777, 0o600);
+  // Replaced, then a new worker: the old key is still known.
+  write(NEW);
+  const after = new Redactor();
+  assert.equal(loadCredentials(after, keysFile), null);
+  assert.ok(after.holdsSecretBytes(Buffer.from(`token=${OLD}\n`)));
+  assert.equal(after.text(`token=${OLD}`), "token=[redacted …0000]");
+  assert.ok(after.holdsSecret(`key ${OLD}`) && after.holdsSecret(`key ${NEW}`));
+  // A link where the remembered file belongs stops the load.
+  rmSync(rememberedKeysFile(keysFile));
+  symlinkSync(keysFile, rememberedKeysFile(keysFile));
+  assert.throws(() => loadCredentials(new Redactor(), keysFile), /plain file/);
 });
 
 function folders(t: TestContext) {
@@ -165,14 +211,55 @@ test("file-tool writes outside the agent's own folder are denied at both levels"
   assert.equal(inside(mine, `${mine}-evil/x`), false);
 });
 
+test("a path through `..`, a link leading outside the folder or a link to nothing is outside it; a link that stays inside is followed", (t) => {
+  const { root, mine } = folders(t);
+  // lnk -> a folder outside: `lnk/../escape.txt` reads as inside by its
+  // text, but on disk it lands beside the link's target.
+  mkdirSync(join(root, "outside", "sub"), { recursive: true });
+  symlinkSync(join(root, "outside", "sub"), join(mine, "lnk"));
+  mkdirSync(join(mine, "docs"));
+  symlinkSync(join(mine, "docs"), join(mine, "alias"));
+  // Links to nothing yet: a write would create their target, wherever it is.
+  symlinkSync(join(root, "outside", "absent.md"), join(mine, "planted"));
+  symlinkSync(join(root, "outside", "absent-dir"), join(mine, "pdir"));
+  const edit = { folder: mine, permission: "edit" as const };
+  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/lnk/a.txt`, `${mine}/lnk`, `${mine}/planted`, `${mine}/pdir/x.txt`]) {
+    assert.equal(realInside(mine, path), false, path);
+    assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "deny", path);
+    assert.equal(inStep(mine, path, ["**"]), false, path);
+  }
+  assert.equal(inside(mine, `${mine}/docs/../a.txt`), false);
+  // A link that stays inside is followed: allowed, and in a step only
+  // when both its name and where it leads are named.
+  for (const path of [`${mine}/alias/a.txt`, `${mine}/alias`]) {
+    assert.equal(realInside(mine, path), true, path);
+    assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "allow", path);
+    assert.equal(inStep(mine, path, ["**"]), true, path);
+  }
+  assert.equal(inStep(mine, `${mine}/alias/a.md`, ["alias/*.md"]), false);
+  assert.equal(inStep(mine, `${mine}/alias/a.md`, ["docs/*.md"]), false);
+  // Plain paths, existing or not yet, still are inside.
+  assert.equal(realInside(mine, `${mine}/docs/a.txt`), true);
+  assert.equal(realInside(mine, `${mine}/new/deeper/a.txt`), true);
+  assert.equal(inStep(mine, `${mine}/docs/a.md`, ["docs/*.md"]), true);
+  // A folder that is not there holds nothing.
+  assert.equal(realInside(join(root, "missing"), join(root, "missing", "a.txt")), false);
+});
+
 test("Claude settings: the sandbox, the read block, the hidden folders, and Look only's write blocks", () => {
   const paths = { agentHome: "/Users/agent", shared: "/opt/console-shared" };
   const edit = claudeSettings("/Users/agent/work/p/a", "edit", paths);
-  assert.deepEqual(edit.sandbox.filesystem.denyRead, ["/opt/console-shared", "/Users/agent/.codex", "/Users/agent/.claude", "/Users/agent/.kimi-code"]);
+  assert.deepEqual(edit.sandbox.filesystem.denyRead, ["/opt/console-shared", "/Users/agent/.codex", "/Users/agent/.claude", "/Users/agent/.kimi-code", "/Users/agent/.claude.json"]);
   assert.equal(edit.sandbox.allowUnsandboxedCommands, false);
   assert.equal(edit.sandbox.failIfUnavailable, true);
   assert.equal(edit.permissions.blockReadsOutsideWorkingDirectories, true);
-  assert.deepEqual(edit.permissions.deny, ["Read(//opt/console-shared/**)", "Read(//Users/agent/.codex/**)", "Read(//Users/agent/.claude/**)", "Read(//Users/agent/.kimi-code/**)"]);
+  assert.deepEqual(edit.permissions.deny, [
+    "Read(//opt/console-shared/**)",
+    "Read(//Users/agent/.codex/**)",
+    "Read(//Users/agent/.claude/**)",
+    "Read(//Users/agent/.kimi-code/**)",
+    "Read(//Users/agent/.claude.json)",
+  ]);
   assert.equal("denyWrite" in edit.sandbox.filesystem, false);
   const look = claudeSettings("/Users/agent/work/p/a", "look", paths);
   assert.deepEqual((look.sandbox.filesystem as { denyWrite?: string[] }).denyWrite, ["/Users/agent/work/p/a"]);
