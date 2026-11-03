@@ -270,6 +270,36 @@ test("a replaced OpenAI key's Codex server is ended once no window is on it; one
   assert.equal(new Set(logins().map((c) => c.pid)).size, 3);
 });
 
+test("a turn being prepared when its key's last window closes waits for that server to exit, then runs on a new one", async (t) => {
+  const h = await harness(t, {}, false, { codex: { ignoreTerm: true } });
+  keys(h.keysFile);
+  await h.worker.start();
+  const one = h.agent("One", "edit", "gpt-5.6-sol@api-key", "codex");
+  const two = h.agent("Two", "edit", "gpt-5.6-sol@api-key", "codex");
+  await h.ready(one.id, two.id);
+  const first = h.send(one.id, "hello");
+  await h.ended(first);
+  assert.equal(h.store.turn(first)!.status, "done", h.store.turn(first)!.reason ?? "");
+  // Two's folder commit is held, so its turn is past waiting() but has no
+  // window on the server yet.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const beforeTurn = h.worker.repos.beforeTurn.bind(h.worker.repos);
+  h.worker.repos.beforeTurn = async (...args) => {
+    if (args[0].id === two.id) await held;
+    return beforeTurn(...args);
+  };
+  const turn = h.send(two.id, "hello");
+  await h.until(() => h.store.turn(turn)!.status === "running", "Two's turn is being prepared");
+  runCommand(h.store, { action: "close", agentId: one.id });
+  // The idle server is sent TERM (which it ignores); the turn goes on.
+  await h.until(() => /^signal TERM \d+$/m.test(h.log()), "the idle server is ended");
+  release();
+  await h.ended(turn);
+  assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+  assert.match(h.log(), /^signal KILL \d+$/m);
+});
+
 test("an API-key Codex server that does not report the API key runs no turn", async (t) => {
   const h = await harness(t, {}, false, { codex: { loginAs: "chatgpt" } });
   keys(h.keysFile);

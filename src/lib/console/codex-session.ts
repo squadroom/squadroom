@@ -416,7 +416,12 @@ class CodexLoginDriver implements AgentDriver {
       if (this.ending || this.serverRetiring()) throw new CodexError("The Codex server is being ended.");
       return this.current;
     }
-    if (this.serverRetiring()) throw new CodexError("The previous Codex server has not exited yet.");
+    // A turn that got past waiting() (an idle server ended while its folder
+    // was being committed, say) waits for the retired server to exit.
+    if (this.serverRetiring()) {
+      await Promise.all([...this.retired].filter((e) => !e.proc.exited).map((e) => e.done));
+      return this.server();
+    }
     this.starting ??= (async () => {
       const server = new CodexServer(this.host.launcher, this.host.paths.agentHome, this.host.binary("codex"), this.host.redactor, this.apiKey);
       this.spawning = server;
