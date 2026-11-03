@@ -345,8 +345,11 @@ test("a stopped Claude Code API-key turn's unreported request is sized by its la
   await h.ready(paid.id);
   const stop = async (word: string) => {
     const turn = h.send(paid.id, word);
-    await h.until(() => h.store.turn(turn)?.status === "running", "running");
-    await new Promise((r) => setTimeout(r, 300));
+    // Stop only once the measured request (and the helper, if any) is kept
+    // with the turn; sooner, the charge has no input to size it by.
+    const kept = () => readRunning(JSON.parse(String(h.store.get("SELECT running FROM console_turns WHERE id = ?", turn)?.running ?? "null")));
+    const helper = () => h.store.get("SELECT id FROM console_helpers WHERE turn_id = ?", turn) !== undefined;
+    await h.until(() => kept().largest === 1_000 && (word !== "measuredhelperhang" || helper()), "request kept");
     runCommand(h.store, { action: "stop", agentId: paid.id });
     await h.ended(turn);
     const row = h.store.turn(turn)!;
