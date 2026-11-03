@@ -22,7 +22,7 @@ export interface LauncherConfig {
 export const SYSTEM_LAUNCHER_PATH = "/usr/local/libexec/console-agent";
 /** The launcher version this worker needs: `readonly VERSION=` in
  * scripts/console/console-agent (a test keeps the two equal). */
-export const LAUNCHER_VERSION = 1;
+export const LAUNCHER_VERSION = 2;
 const BASE_ENV = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8" };
 
 /** The environment sudo starts with: a fixed PATH and only the credentials
@@ -164,6 +164,15 @@ export class Launcher {
   async sweep() {
     const result = await run(this.config, ["sweep"]);
     if (result.code !== 0) throw new LauncherError(`The agent sweep failed: ${result.stderr || `exit ${result.code}`}`);
+  }
+  /** Remove Git's index lock that a killed Git command left in agents'
+   * clones (run at the worker's start, after the sweep). Returns the clones
+   * it was removed from; a clone it would not touch (a link on the way) is
+   * in the error. */
+  async unlock(clones: string[]): Promise<string[]> {
+    const result = await run(this.config, ["unlock", ...clones], 30_000, 1024 * 1024);
+    if (result.code !== 0) throw new LauncherError(`Stale Git locks could not all be removed: ${result.stderr || `exit ${result.code}`}`);
+    return result.stdout.split("\n").filter(Boolean);
   }
   /** The installed launcher is this checkout's (its `version` action prints
    * LAUNCHER_VERSION; one from before versions has no such action) and

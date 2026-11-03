@@ -9,12 +9,18 @@
 // checkout's (src/lib/shared/web-server.ts). Run as a LaunchAgent by
 // scripts/install-web-launch-agent.sh.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BUILD_STAMP, buildProblem, nextArgs, serverExitCode, webMode, webPort } from "../src/lib/shared/web-server.ts";
-import { setting } from "../src/config/server-env.ts";
+import { envFileProblem, setting } from "../src/config/server-env.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const envFile = `${root}.env.local`;
+const envProblem = envFileProblem(envFile, statSync(envFile, { throwIfNoEntry: false })?.mode);
+if (envProblem) {
+  console.error(`[web] ${envProblem}`);
+  process.exit(1);
+}
 const { mode, rest: args } = webMode(process.argv.slice(2));
 const port = webPort(args, process.env);
 

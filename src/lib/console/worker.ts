@@ -363,6 +363,16 @@ export class ConsoleWorker {
     await this.launcher.check(this.options.paths.agentHome);
     this.leading(epoch);
     await this.launcher.sweep();
+    // A Git command the sweep, a crash or a power loss cut short can leave
+    // its index lock, and every later Git command in that clone (the next
+    // turn's included) fails. No agent process is left now, so any lock is
+    // stale.
+    const clones = this.store.agents().flatMap((a) => (a.folder ? [a.folder] : []));
+    if (clones.length) {
+      this.leading(epoch);
+      const unlocked = await this.launcher.unlock(clones).catch((error: unknown) => (this.log(message(error)), []));
+      if (unlocked.length) this.log(`Removed a stale Git lock in ${unlocked.length} agent folder(s).`);
+    }
     // Paid turns an earlier worker left running after their prompt reached
     // the client are charged now. Their end never came back, so they are
     // charged what their requests reported plus the full allowance for each
@@ -484,6 +494,14 @@ export class ConsoleWorker {
     // Every process this worker started, without the account-wide sweep:
     // each driver ends its own (TERM, then KILL).
     await Promise.all([...this.drivers.values()].map((d) => d.shutdown()));
+    // A turn's commit still running gets one grace period to finish: the
+    // sweep below would kill its Git mid-way and leave the clone locked.
+    const committing = [...this.runtimes.values()].flatMap((rt) => (rt.busy ? [rt.busy] : []));
+    if (committing.length) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([Promise.allSettled(committing), new Promise((r) => (timer = setTimeout(r, this.grace)))]);
+      clearTimeout(timer);
+    }
     // The sweep reaches every `agent` process, so it runs only while this
     // worker still holds the lease: after a takeover, the new worker's
     // agents are not ours to end (ours were signalled above).

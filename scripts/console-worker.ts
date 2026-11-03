@@ -23,13 +23,9 @@ import { backupSettings } from "../src/lib/console/backup.ts";
 import { mailSettings } from "../src/lib/shared/mail.ts";
 import { healthSettings } from "../src/lib/shared/healthcheck.ts";
 import { codexReviewSetting } from "../src/lib/console/pull-request.ts";
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-
-// Only those settings are read from the .env files (shared with the web
-// server); the rest of their contents is not kept.
-const env = workerEnv(fileURLToPath(new URL("..", import.meta.url)));
-const backup = backupSettings(env);
-const mail = mailSettings(env);
+import { envFileProblem } from "../src/config/server-env.ts";
 
 // The worker's log: JSON lines the Logs page reads; startup problems also
 // go to standard error, which the LaunchAgent keeps.
@@ -38,6 +34,18 @@ const fail = (line: string) => {
   console.error(`[console] ${line}`);
   log(line);
 };
+// A .env.local any account can read is refused, as by the web server.
+const root = fileURLToPath(new URL("..", import.meta.url));
+const envProblem = envFileProblem(`${root}.env.local`, statSync(`${root}.env.local`, { throwIfNoEntry: false })?.mode);
+if (envProblem) {
+  fail(`worker did not start: ${envProblem}`);
+  process.exit(1);
+}
+// Only those settings are read from the .env files (shared with the web
+// server); the rest of their contents is not kept.
+const env = workerEnv(root);
+const backup = backupSettings(env);
+const mail = mailSettings(env);
 // A ping URL without the web check it needs, or a Codex review switch that is
 // neither on nor off, stops the start.
 let health;

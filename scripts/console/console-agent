@@ -8,6 +8,7 @@
 #   sudo -u agent /usr/local/libexec/console-agent git <repo> [git args…]   (git <new folder> init [--bare])
 #   sudo -u agent /usr/local/libexec/console-agent signal <TERM|KILL|INT> <pgid>
 #   sudo -u agent /usr/local/libexec/console-agent sweep
+#   sudo -u agent /usr/local/libexec/console-agent unlock <clone>…
 #   sudo -u agent /usr/local/libexec/console-agent version
 #
 # sudo's env_reset already drops the owner's environment. The sudoers rule
@@ -25,7 +26,7 @@ umask 027
 # (LAUNCHER_VERSION in src/lib/console/launcher.ts, kept equal by a test):
 # raise both whenever this file changes, so an update tells the owner to
 # run the setup script again.
-readonly VERSION=1
+readonly VERSION=2
 # setup-agent-user.sh replaces these four lines with the host's paths
 # (NODE_BIN: the folder of the Node it installed the clients with).
 readonly AGENT_HOME=/Users/agent
@@ -65,6 +66,14 @@ private_tmp() {
   export TMPDIR=$dir/
 }
 
+# A new file with $1's contents at $2: never one already there, nor through
+# a link (noclobber creates it with O_EXCL). The launcher is not sandboxed,
+# so it never writes through a link an agent left in its own folders.
+new_file() {
+  setopt localoptions noclobber
+  /bin/cat -- $1 > $2
+}
+
 case ${1-} in
   spawn)
     if [[ ${2-} == --keep ]]; then
@@ -87,11 +96,12 @@ case ${1-} in
     # so the client can load its program, runtime and system files, except
     # every other project's folder, its teammates' clones (named by the
     # worker with --deny), the local bare repositories, every other agent's
-    # temporary folder, the Codex and Claude logins and the shared folder.
-    # Writes only in its own clone and temporary folder (Look only: the
-    # temporary folder alone). Network is off unless the owner switched it
-    # on for the project, except the Console's own team tools on the
-    # loopback port the worker names.
+    # temporary folder, the Codex, Claude and Kimi Code folders (and
+    # ~/.claude.json, which names every Claude agent's folder) and the shared
+    # folder. Writes only in its own clone and temporary folder (Look only:
+    # the temporary folder alone), and no preferences (`defaults write`).
+    # Network is off unless the owner switched it on for the project, except
+    # the Console's own team tools on the loopback port the worker names.
     sandbox="" net="" port="" deny=() login=""
     if [[ ${2-} == --sandbox ]]; then
       while [[ ${2-} == --(sandbox|net|port|deny|login) ]]; do
@@ -124,15 +134,17 @@ case ${1-} in
       project=${clone:h}
       params=(-D WORK=$AGENT_HOME/work -D PROJECT=$project -D CLONE=$clone -D TMP=${TMPDIR:A}
         -D PROJECTS=$AGENT_HOME/projects -D TMPS=$AGENT_HOME/.tmp -D CODEX=$AGENT_HOME/.codex
-        -D CLAUDE=$AGENT_HOME/.claude -D SHARED=$SHARED -D PORT=localhost:$port)
-      denied=""
-      # Account logins kept in the agent's home (Kimi Code's) are denied to
-      # every program but their own client, which also writes its data root
-      # there (sessions, settings, the login's refresh).
-      params+=(-D KIMI=$AGENT_HOME/.kimi-code)
-      if [[ $login != kimi ]]; then
-        denied+=" (subpath (param \"KIMI\"))"
-      fi
+        -D CLAUDE=$AGENT_HOME/.claude -D CLAUDEJSON=$AGENT_HOME/.claude.json -D SHARED=$SHARED
+        -D KIMI=$AGENT_HOME/.kimi-code -D KIMILOGIN=$AGENT_HOME/.kimi-code/credentials -D PORT=localhost:$port)
+      # Kimi Code's folder in the agent's home is denied to every program:
+      # its sessions, settings, hooks, MCP servers and plugins would
+      # otherwise be shared by every project. Each Kimi Code window keeps
+      # its data in its own temporary folder instead (KIMI_CODE_HOME, set
+      # below), and only the membership login (credentials/) is the shared
+      # one: readable and writable by Kimi Code alone, at any level, since
+      # its refresh writes a new file and renames it over the login.
+      denied=" (subpath (param \"KIMI\"))"
+      login_rules=""
       i=0
       for dir in $deny; do
         [[ $dir == "$project"/* && ${dir#$project/} != *[^A-Za-z0-9._-]* && -n ${dir#$project/} && $dir != $clone ]] ||
@@ -148,10 +160,14 @@ case ${1-} in
       [[ $net == on ]] && network=''
       writes='(subpath (param "CLONE")) (subpath (param "TMP"))'
       [[ $sandbox == look ]] && writes='(subpath (param "TMP"))'
-      [[ $login == kimi ]] && writes+=' (subpath (param "KIMI"))'
       # The client keeps its data, settings and caches in its own temporary
-      # folder, the one place besides its clone it may write.
-      xdg=${TMPDIR:A}/xdg
+      # folder, the one place besides its clone it may write. These folders
+      # are made outside the sandbox: none may be a link an agent left.
+      tmp=${TMPDIR:A}
+      for dir in xdg gemini grok kimi; do
+        [[ ! -L $tmp/$dir ]] || die "$dir in the temporary folder is a link"
+      done
+      xdg=$tmp/xdg
       /bin/mkdir -p -m 700 -- $xdg/data $xdg/config $xdg/cache $xdg/state
       export XDG_DATA_HOME=$xdg/data XDG_CONFIG_HOME=$xdg/config XDG_CACHE_HOME=$xdg/cache XDG_STATE_HOME=$xdg/state
       # Clients that keep their state in a folder of their own in the home
@@ -159,8 +175,30 @@ case ${1-} in
       # moved by GEMINI_CLI_HOME) and Grok Build (~/.grok, moved by
       # GROK_HOME, which also must not update itself). Each window keeps
       # them in its own temporary folder; their keys come in the environment.
-      /bin/mkdir -p -m 700 -- ${TMPDIR:A}/gemini ${TMPDIR:A}/grok
-      export GEMINI_CLI_HOME=${TMPDIR:A}/gemini GROK_HOME=${TMPDIR:A}/grok GROK_DISABLE_AUTOUPDATER=1
+      /bin/mkdir -p -m 700 -- $tmp/gemini $tmp/grok
+      export GEMINI_CLI_HOME=$tmp/gemini GROK_HOME=$tmp/grok GROK_DISABLE_AUTOUPDATER=1
+      # Kimi Code (~/.kimi-code, moved by KIMI_CODE_HOME): the window's own
+      # folder, with a link to the shared login and a fresh copy of what
+      # `kimi login` wrote beside it (its provider settings and device id).
+      if [[ $login == kimi ]]; then
+        kimi=$tmp/kimi shared_kimi=$AGENT_HOME/.kimi-code
+        [[ ! -L $shared_kimi && ! -L $shared_kimi/credentials ]] || die "Kimi Code's login folder is a link"
+        /bin/mkdir -p -m 700 -- $kimi
+        /bin/rm -rf -- $kimi/credentials $kimi/config.toml $kimi/device_id
+        /bin/ln -s -- $shared_kimi/credentials $kimi/credentials
+        for file in config.toml device_id; do
+          if [[ -f $shared_kimi/$file && ! -L $shared_kimi/$file ]]; then new_file $shared_kimi/$file $kimi/$file; fi
+        done
+        export KIMI_CODE_HOME=$kimi
+        login_rules='(allow file-read-data (subpath (param "KIMILOGIN")))'
+        writes+=' (subpath (param "KIMILOGIN"))'
+      fi
+      # A repository's own OpenCode settings and plugins (opencode.json,
+      # .opencode/) are not loaded. Usage statistics stay off: Kimi Code's
+      # by its switch, Gemini CLI's by the system settings the setup script
+      # installs (they win over the user's and the repository's own).
+      export OPENCODE_DISABLE_PROJECT_CONFIG=1 KIMI_DISABLE_TELEMETRY=1 \
+        GEMINI_CLI_SYSTEM_SETTINGS_PATH=${CLIENTS:h}/gemini-system-settings.json
       shift 2
       exec /usr/bin/sandbox-exec -p "
         (version 1)
@@ -170,10 +208,12 @@ case ${1-} in
         (allow file-read-data (subpath (param \"PROJECT\")))
         (deny file-read-data${denied}
           (subpath (param \"PROJECTS\")) (subpath (param \"TMPS\")) (subpath (param \"CODEX\"))
-          (subpath (param \"CLAUDE\")) (subpath (param \"SHARED\")))
+          (subpath (param \"CLAUDE\")) (prefix (param \"CLAUDEJSON\")) (subpath (param \"SHARED\")))
         (allow file-read-data (subpath (param \"CLONE\")) (subpath (param \"TMP\")))
+        $login_rules
         (deny file-write*)
-        (allow file-write* $writes (literal \"/dev/null\"))" $params "$@"
+        (allow file-write* $writes (literal \"/dev/null\"))
+        (deny user-preference-write)" $params "$@"
     fi
     shift 2
     exec "$@"
@@ -208,7 +248,9 @@ case ${1-} in
     # Git runs in a sandbox that may execute only Git itself and its compiled
     # pack helpers (never an interpreter or a shell script), may read and
     # write in the agent's home only inside this repository and its
-    # temporary folder (never a teammate's clone), and has no network.
+    # temporary folder (never a teammate's clone), may read nothing in the
+    # shared folder (every agent's settings and the MCP tokens) but the one
+    # bundle this command names, and has no network.
     # Git is called directly, not via xcrun. Nothing here talks to GitHub and
     # no token ever reaches the agent user: the worker pushes and fetches as
     # the owner in its own mirror, and commits cross by bundle.
@@ -241,12 +283,16 @@ case ${1-} in
       GIT_CONFIG_KEY_2=credential.helper GIT_CONFIG_VALUE_2= \
       GIT_CONFIG_KEY_3=core.commitGraph GIT_CONFIG_VALUE_3=false \
       GIT_CONFIG_KEY_4=core.useReplaceRefs GIT_CONFIG_VALUE_4=false
+    bundle=/dev/null
+    for arg in "$@"; do
+      if [[ $arg == $SHARED/*.bundle && ${arg#$SHARED/} != *[^A-Za-z0-9._-]* ]]; then bundle=$arg; break; fi
+    done
     exec /usr/bin/sandbox-exec -p '
       (version 1)
       (allow default)
       (deny network*)
-      (deny file-read-data (subpath (param "HOME")))
-      (allow file-read-data (subpath (param "REPO")) (subpath (param "TMP")))
+      (deny file-read-data (subpath (param "HOME")) (subpath (param "SHARED")))
+      (allow file-read-data (subpath (param "REPO")) (subpath (param "TMP")) (literal (param "BUNDLE")))
       (deny process-exec*)
       (allow process-exec*
         (literal (param "GIT"))
@@ -257,7 +303,7 @@ case ${1-} in
         (subpath (param "REPO")) (subpath (param "TMP"))
         (subpath "/private/var/folders") (literal "/dev/null"))' \
       -D GIT=$gitbin -D CORE=$core -D HOME=$AGENT_HOME -D REPO=$repo \
-      -D TMP=${TMPDIR:A} $gitbin "$@"
+      -D SHARED=$SHARED -D BUNDLE=$bundle -D TMP=${TMPDIR:A} $gitbin "$@"
     ;;
   signal)
     (( $# == 3 )) || die "usage: signal <TERM|KILL|INT> <pgid>"
@@ -273,6 +319,31 @@ case ${1-} in
     /usr/bin/pkill -KILL -U agent && exit 0
     rc=$?
     (( rc == 1 )) && exit 0
+    exit $rc
+    ;;
+  unlock)
+    # Git's index lock, left in a clone by a Git command that was killed (a
+    # worker that stopped or crashed, a power loss): every later Git command
+    # there fails until it is gone. The worker removes them at its start,
+    # after the sweep, when no Git command of an agent can be running. Only
+    # an agent's own clone, with no link on the way, is touched.
+    unset arrived
+    shift
+    rc=0
+    for clone in "$@"; do
+      rel=${clone#$AGENT_HOME/work/} name=${clone:t}
+      if [[ $clone != "$AGENT_HOME"/work/*/* || $rel != */* || ${rel#*/} == */* || $rel == *[^A-Za-z0-9._/-]* || ${rel%%/*} == (|.|..) || $name == (|.|..) ]]; then
+        print -u2 -- "console-agent: unlock: not an agent's clone: $clone"; rc=64; continue
+      fi
+      [[ -e $clone/.git/index.lock || -L $clone/.git/index.lock ]] || continue
+      # rm never follows the lock itself if it is a link; a link on the
+      # way to it (the clone, its .git) would lead elsewhere.
+      if [[ ${clone:A} != $clone || -L $clone/.git || ! -d $clone/.git ]]; then
+        print -u2 -- "console-agent: unlock: left as it is (a link on the way): $clone"; rc=64; continue
+      fi
+      /bin/rm -f -- $clone/.git/index.lock
+      print -r -- $clone
+    done
     exit $rc
     ;;
   version)

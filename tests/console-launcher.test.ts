@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { LAUNCHER_VERSION, Launcher, launcherEnvironment } from "../src/lib/console/launcher.ts";
+import type { Runtime } from "../src/lib/console/worker/shared.ts";
+import { harness } from "./helpers/console-harness.ts";
 
 // only the credentials the worker lists in `spawn --keep`
 // reach an agent. The real launcher script runs here with its user check
@@ -139,8 +141,12 @@ const sandboxed = zsh && existsSync("/usr/bin/sandbox-exec");
 
 function sandboxLauncher(t: TestContext) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "console-sandbox-")));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const shared = join(root, "shared");
+  // The shared folder is outside the agent's home, as /opt/console-shared is.
+  const shared = realpathSync(mkdtempSync(join(tmpdir(), "console-shared-")));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(shared, { recursive: true, force: true });
+  });
   const source = readFileSync(SCRIPT, "utf8")
     .replace("readonly AGENT_HOME=/Users/agent", `readonly AGENT_HOME=${root}`)
     .replace("readonly SHARED=/opt/console-shared", `readonly SHARED=${shared}`)
@@ -150,7 +156,7 @@ function sandboxLauncher(t: TestContext) {
   const mine = join(root, "work", "p1", "a1");
   const mate = join(root, "work", "p1", "a2");
   const other = join(root, "work", "p2", "a3");
-  for (const dir of [mine, mate, other, join(root, "projects", "p1.git"), join(root, ".codex"), join(root, ".claude"), join(root, ".kimi-code"), shared, join(root, ".tmp", "someone-else")])
+  for (const dir of [mine, mate, other, join(root, "projects", "p1.git"), join(root, ".codex"), join(root, ".claude"), join(root, ".kimi-code", "credentials"), join(root, ".kimi-code", "sessions"), shared, join(root, ".tmp", "someone-else")])
     mkdirSync(dir, { recursive: true });
   for (const [dir, name] of [
     [mine, "own.txt"],
@@ -159,7 +165,11 @@ function sandboxLauncher(t: TestContext) {
     [join(root, "projects", "p1.git"), "HEAD"],
     [join(root, ".codex"), "auth.json"],
     [join(root, ".claude"), "creds"],
-    [join(root, ".kimi-code"), "credentials.json"],
+    [join(root, ".kimi-code", "credentials"), "kimi-code.json"],
+    [join(root, ".kimi-code", "sessions"), "q.jsonl"],
+    [join(root, ".kimi-code"), "config.toml"],
+    [join(root, ".kimi-code"), "device_id"],
+    [root, ".claude.json"],
     [shared, "a2.json"],
     [join(root, ".tmp", "someone-else"), "scratch"],
   ])
@@ -183,7 +193,9 @@ test("spawn --sandbox: reads of the listed folders are refused, the rest of the 
     `${s.root}/projects/p1.git/HEAD`,
     `${s.root}/.codex/auth.json`,
     `${s.root}/.claude/creds`,
-    `${s.root}/.kimi-code/credentials.json`,
+    `${s.root}/.kimi-code/credentials/kimi-code.json`,
+    `${s.root}/.kimi-code/config.toml`,
+    `${s.root}/.claude.json`,
     `${s.shared}/a2.json`,
     `${s.root}/.tmp/someone-else/scratch`,
   ]) {
@@ -191,16 +203,6 @@ test("spawn --sandbox: reads of the listed folders are refused, the rest of the 
     assert.notEqual(r.status, 0, `read of ${target} was allowed`);
     assert.match(r.stderr, /Operation not permitted/, target);
   }
-  // Kimi Code's membership login: only a program started with
-  // --login kimi reads it, and nothing else may be named there.
-  const kimi = s.run("edit", `cat ${s.root}/.kimi-code/credentials.json`, ["--login", "kimi"]);
-  assert.equal(kimi.status, 0, kimi.stderr);
-  // It also writes its own data root (sessions, settings, the login's
-  // refresh), at Look only too, and still not its clone there.
-  const write = s.run("look", `echo s > ${s.root}/.kimi-code/session && cat ${s.root}/.kimi-code/session`, ["--login", "kimi"]);
-  assert.equal(write.status, 0, write.stderr);
-  assert.notEqual(s.run("look", `echo x > ${s.mine}/probe`, ["--login", "kimi"]).status, 0);
-  assert.notEqual(s.run("edit", `echo x > ${s.root}/.kimi-code/other`).status, 0);
   assert.notEqual(s.run("edit", "true", ["--login", "codex"]).status, 0);
   // A listing of another project's folder or of a teammate's is refused too.
   assert.notEqual(s.run("edit", `ls ${s.root}/work/p2`).status, 0);
@@ -215,6 +217,70 @@ test("spawn --sandbox: Gemini CLI's and Grok Build's own folders are the window'
   assert.equal(gemini, `${tmp.replace(/\/$/, "")}/gemini`);
   assert.equal(grok, `${tmp.replace(/\/$/, "")}/grok`);
   assert.equal(noUpdate, "1");
+  // A link an agent left where these folders are made is refused, never
+  // followed by the launcher (which runs outside the sandbox).
+  rmSync(gemini, { recursive: true });
+  symlinkSync(s.mate, gemini);
+  const linked = s.run("look", "true");
+  assert.equal(linked.status, 64);
+  assert.match(linked.stderr, /gemini in the temporary folder is a link/);
+});
+
+test("spawn --sandbox: a repository's OpenCode settings are not loaded, and Kimi Code's and Gemini CLI's usage statistics are off", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  const r = s.run("look", 'echo "$OPENCODE_DISABLE_PROJECT_CONFIG|$KIMI_DISABLE_TELEMETRY|$GEMINI_CLI_SYSTEM_SETTINGS_PATH"');
+  assert.equal(r.status, 0, r.stderr);
+  // The settings file is the setup script's, beside the clients' folder.
+  assert.equal(r.stdout.trim(), "1|1|/opt/console-clients/gemini-system-settings.json");
+  const setup = readFileSync(new URL("../scripts/console/setup-agent-user.sh", import.meta.url), "utf8");
+  assert.match(setup, /'\{ "privacy": \{ "usageStatisticsEnabled": false \} \}'/);
+  assert.match(setup, /install -o root -g wheel -m 644 \$gemini_tmp \$CLIENTS\/gemini-system-settings\.json/);
+});
+
+// Kimi Code keeps sessions, settings (with hooks), MCP servers and plugins
+// in its data folder: shared, it would let a window in one project read
+// another's transcripts or plant a hook another project's window runs.
+test("spawn --sandbox --login kimi: each window has its own Kimi Code folder; only the shared login is read and written", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  const home = `${s.root}/.kimi-code`;
+  const kimi = (level: "look" | "edit", script: string) => s.run(level, script, ["--login", "kimi"]);
+  const where = kimi("look", 'echo "$KIMI_CODE_HOME|$TMPDIR" && readlink "$KIMI_CODE_HOME/credentials" && cat "$KIMI_CODE_HOME/credentials/kimi-code.json" "$KIMI_CODE_HOME/config.toml"');
+  assert.equal(where.status, 0, where.stderr);
+  const [paths, link, login, config] = where.stdout.trim().split("\n");
+  const [own, tmp] = paths.split("|");
+  assert.equal(own, `${tmp.replace(/\/$/, "")}/kimi`);
+  assert.equal(link, `${home}/credentials`);
+  assert.deepEqual([login, config], ["x", "x"]);
+  // The login's refresh writes a new file and renames it over the login,
+  // at Look only too.
+  const refresh = kimi("look", 'echo new > "$KIMI_CODE_HOME/credentials/t.tmp" && mv "$KIMI_CODE_HOME/credentials/t.tmp" "$KIMI_CODE_HOME/credentials/kimi-code.json"');
+  assert.equal(refresh.status, 0, refresh.stderr);
+  assert.equal(readFileSync(`${home}/credentials/kimi-code.json`, "utf8"), "new\n");
+  // Nothing else of the shared folder is read or written, and Look only
+  // still keeps the clone.
+  for (const script of [`cat ${home}/sessions/q.jsonl`, `cat ${home}/config.toml`, `ls ${home}`, `echo x > ${home}/config.toml`, `echo x > ${home}/mcp.json`, `echo x > ${s.mine}/probe`])
+    assert.notEqual(kimi("look", script).status, 0, script);
+  // A setting the window changes in its own folder lasts until its next
+  // start, which copies the login's settings again; a link it left there is
+  // replaced, never written through.
+  rmSync(`${own}/config.toml`);
+  symlinkSync(`${s.mate}/victim`, `${own}/config.toml`);
+  assert.equal(kimi("look", "true").status, 0);
+  assert.ok(!existsSync(`${s.mate}/victim`));
+  assert.ok(lstatSync(`${own}/config.toml`).isFile());
+  assert.equal(readFileSync(`${own}/config.toml`, "utf8"), "x\n");
+  assert.equal(readlinkSync(`${own}/credentials`), `${home}/credentials`);
+  // Any other program: not even the login.
+  assert.notEqual(s.run("edit", `cat ${home}/credentials/kimi-code.json`).status, 0);
+  assert.notEqual(s.run("edit", `echo x > ${home}/credentials/kimi-code.json`).status, 0);
+});
+
+test("spawn --sandbox: no preferences are written (defaults write)", { skip: !sandboxed || !existsSync("/usr/bin/defaults") }, (t) => {
+  const s = sandboxLauncher(t);
+  const domain = `io.squadroom.launcher-test-${process.pid}`;
+  t.after(() => spawnSync("/usr/bin/defaults", ["delete", domain], { stdio: "ignore" }));
+  assert.notEqual(s.run("edit", `/usr/bin/defaults write ${domain} k v`).status, 0);
+  assert.notEqual(spawnSync("/usr/bin/defaults", ["read", domain, "k"], { stdio: "ignore" }).status, 0);
 });
 
 test("spawn --sandbox: writes only in the clone and its temporary folder; Look only writes neither its clone", { skip: !sandboxed }, (t) => {
@@ -282,6 +348,72 @@ test("git reads objects as stored: an agent's replace refs, grafts and commit-gr
   };
   assert.equal(launched("log", "--format=%s"), "3\n2\n1");
   assert.equal(launched("config", "core.commitGraph"), "false");
+});
+
+// The shared folder holds every agent's MCP settings (with their tokens).
+test("git reads nothing in the shared folder but the bundle its command names", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  const g = (...a: string[]) => spawnSync("git", ["-c", "user.name=a", "-c", "user.email=a@b", ...a], { cwd: s.mine, encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as unknown as NodeJS.ProcessEnv });
+  g("init", "-q", "-b", "main");
+  g("commit", "-q", "--allow-empty", "-m", "1");
+  assert.equal(g("bundle", "create", "-q", `${s.shared}/p1.bundle`, "refs/heads/main").status, 0);
+  const launched = (...a: string[]) => spawnSync("/bin/zsh", ["-f", s.path, "git", s.mine, ...a], { env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv, encoding: "utf8" });
+  const fetched = launched("fetch", "--quiet", `${s.shared}/p1.bundle`, "refs/heads/main:refs/heads/copy");
+  assert.equal(fetched.status, 0, fetched.stderr);
+  assert.equal(launched("hash-object", `${s.shared}/p1.bundle`).status, 0);
+  const other = launched("hash-object", `${s.shared}/a2.json`);
+  assert.notEqual(other.status, 0);
+  assert.match(other.stderr, /Operation not permitted|could not open|unable/i);
+});
+
+test("unlock removes Git's index lock in agents' clones only, never through a link", { skip: !zsh }, (t) => {
+  const { root, run } = launcher(t);
+  const clone = (project: string, agent: string, lock = true) => {
+    const dir = join(root, "work", project, agent);
+    mkdirSync(join(dir, ".git"), { recursive: true });
+    if (lock) writeFileSync(join(dir, ".git", "index.lock"), "");
+    return dir;
+  };
+  const stale = clone("p1", "a1");
+  const clean = clone("p1", "a2", false);
+  const other = clone("p2", "a3");
+  // A clone whose .git is a link to another clone's.
+  const linked = join(root, "work", "p1", "a4");
+  mkdirSync(linked);
+  symlinkSync(join(other, ".git"), join(linked, ".git"));
+  const env = { PATH: "/usr/bin:/bin" };
+  const r = run(["unlock", stale, clean, linked, join(root, "projects", "p1.git"), `${root}/work/p1/../p2/a3`], env);
+  assert.equal(r.status, 64);
+  assert.equal(r.stdout.trim(), stale);
+  assert.ok(!existsSync(join(stale, ".git", "index.lock")));
+  assert.ok(existsSync(join(other, ".git", "index.lock")));
+  assert.match(r.stderr, /left as it is \(a link on the way\): .*a4/);
+  assert.match(r.stderr, /not an agent's clone: .*projects/);
+  assert.match(r.stderr, /not an agent's clone: .*\/\.\.\//);
+  // Nothing to remove is a success.
+  assert.equal(run(["unlock", clean], env).status, 0);
+});
+
+test("a worker's start removes Git index locks in agents' clones after the sweep; its stop lets a commit end first", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent();
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder!;
+  await h.worker.stop();
+  writeFileSync(join(folder, ".git", "index.lock"), "");
+  const next = h.newWorker();
+  await next.start();
+  assert.ok(!existsSync(join(folder, ".git", "index.lock")));
+  assert.match(h.log(), new RegExp(`sweep\nunlock [^\n]*${folder}`));
+  // A commit still running gets up to the stop's grace period before the
+  // sweep; one that never ends does not hold the stop.
+  const log = join(h.root, "launcher.log");
+  const committing = (busy: Promise<void>) => ({ busy }) as unknown as Runtime;
+  next.runtimes.set("done-soon", committing(new Promise((r) => setTimeout(() => (appendFileSync(log, "committed\n"), r()), 100))));
+  next.runtimes.set("stuck", committing(new Promise(() => {})));
+  await next.stop();
+  assert.match(h.log(), /committed\nsweep\n$/);
 });
 
 test("spawn --sandbox refuses a folder outside an agent's clone and a --deny outside its project", { skip: !zsh }, (t) => {
