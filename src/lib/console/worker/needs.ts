@@ -75,7 +75,9 @@ export const needs = {
     if (decision.behavior === "ask" && decision.ruleKey && this.store.hasRule(rt.agent.id, decision.ruleKey))
       decision = { behavior: "allow", reason: "Allowed always for this agent by the owner." };
     if (decision.behavior !== "ask") {
-      this.record(rt, tool, input, decision);
+      // An allow that could not be stored (a full turn, a store failure)
+      // is not given.
+      if (this.record(rt, tool, input, decision) === null && decision.behavior === "allow") return deny("This turn reached its output limit, or the decision could not be recorded.");
       return decision.behavior === "allow" ? { allow: true, always: false, answer: null, reason: decision.reason } : deny(decision.reason);
     }
     const id = this.record(rt, tool, input, decision);

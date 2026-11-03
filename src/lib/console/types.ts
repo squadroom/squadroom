@@ -247,7 +247,6 @@ export interface ConsoleCommit {
   agentId: string;
   sha: string;
   stat: string;
-  patch: string;
   /** Exact changed paths (for the file panel). */
   files: string[];
   createdAt: number;
