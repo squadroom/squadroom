@@ -635,9 +635,9 @@ export default function ConsoleApp() {
 /** The phone's drawer of projects and agents: a dialog, so focus moves in,
  * stays inside and comes back, and Escape closes it. */
 function Drawer({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  const { box, onKeyDown } = useDialogFocus(onClose);
+  const { box, overlay } = useDialogFocus(onClose);
   return (
-    <div className={styles.drawerOverlay} onClick={onClose} onKeyDown={onKeyDown}>
+    <div className={styles.drawerOverlay} {...overlay}>
       <div ref={box} tabIndex={-1} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Projects and agents" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
