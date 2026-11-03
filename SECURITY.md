@@ -29,7 +29,7 @@ In scope, for example:
   being stored unredacted;
 - spend limits or key caps being bypassed.
 
-Known limits, documented in [docs/architecture.md](docs/architecture.md),
+Known limits, documented in [docs/threat-model.md](docs/threat-model.md),
 are not vulnerabilities by themselves: for example, agents share one macOS
 user and can read each other's environment while running, redaction
 only recognises the values and key shapes it knows, and the push check
