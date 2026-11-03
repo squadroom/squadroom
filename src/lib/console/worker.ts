@@ -10,13 +10,12 @@ import { backupFailedKey, needsCounts, needsMailDue, needsYouKey, renderConsoleM
 import { needNotices } from "./notify.ts";
 import { needsView } from "./views.ts";
 import { Launcher } from "./launcher.ts";
-import { credentialValues } from "./keys.ts";
 import { ClaudeDriver } from "./claude-session.ts";
 import { CodexDriver } from "./codex-session.ts";
 import { AcpDriver, type AcpHost } from "./acp-session.ts";
 import { errorMessage as message, type AgentDriver, type DriverHost } from "./session.ts";
 import { realInside, type ConsolePaths } from "./permissions.ts";
-import { Redactor } from "./redact.ts";
+import { loadCredentials, Redactor } from "./redact.ts";
 import { Repos } from "./repos.ts";
 import { sweepUploadLeftovers } from "./agent-files.ts";
 import { currentStepFiles } from "./templates.ts";
@@ -349,7 +348,8 @@ export class ConsoleWorker {
   private async recover(epoch: number) {
     // Every credential value in the file, global and per project, is known
     // to the redactor from the start, not only the ones handed out in this
-    // worker's life: a key an agent copied somewhere before a restart is
+    // worker's life, and so is every value it held before (a key replaced on
+    // the Keys page): a key an agent copied somewhere before a restart is
     // masked and refused by the push check all the same.
     // A key file that exists but cannot be read whole stops the start: no
     // agent runs with credentials the redactor does not know.
@@ -357,7 +357,8 @@ export class ConsoleWorker {
     // needs one can start).
     if (existsSync(this.options.keysFile)) {
       const seen = this.keysSignature();
-      for (const value of credentialValues(this.options.keysFile)) this.redactor.add(value);
+      const note = loadCredentials(this.redactor, this.options.keysFile);
+      if (note) this.log(note);
       this.keysSeen = seen;
     } else this.log("There is no key file yet: no credential is loaded.");
     // Before any agent runs: the launcher must pass only listed credentials,

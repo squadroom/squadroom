@@ -35,6 +35,8 @@ export default function NeedsTray({
   run: Run;
 }) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
+  /** Requests whose whole input is shown. */
+  const [open, setOpen] = useState<Record<number, boolean>>({});
   const project = (id: string) => <span className={styles.chip}>{projects.find((p) => p.id === id)?.name ?? ""}</span>;
   /** A button that sends one command. */
   const act = (label: string, body: ConsoleCommand, primary = false, title?: string) => (
@@ -75,6 +77,7 @@ export default function NeedsTray({
               <b>{r.agentName}</b> {project(r.projectId)}
             </p>
             <p className={styles.needText}>{r.summary}</p>
+            {open[r.id] && <pre className={`${styles.needText} ${styles.needInput}`}>{wholeInput(r.input)}</pre>}
             {r.kind === "question" ? (
               <>
                 <textarea rows={2} aria-label="Your answer" value={answers[r.id] ?? ""} onChange={(e) => setAnswers({ ...answers, [r.id]: e.target.value })} />
@@ -89,6 +92,9 @@ export default function NeedsTray({
             ) : (
               <div className={styles.dialogButtons}>
                 {show(r.agentId, led)}
+                <button aria-expanded={!!open[r.id]} onClick={() => setOpen({ ...open, [r.id]: !open[r.id] })} title="Everything the agent asked to do, exactly as Allow once would allow it">
+                  {open[r.id] ? "Hide" : "Show all"}
+                </button>
                 {act("Deny", decide("deny"))}
                 {r.canAlways && act("Always for this agent", decide("always"))}
                 {r.canProject &&
@@ -160,4 +166,15 @@ export default function NeedsTray({
       ))}
     </aside>
   );
+}
+
+/** A request's stored input, laid out to read: indented when it is whole
+ * JSON (so text inside it keeps its `\n` marks), otherwise as stored (a cut
+ * one ends with how much was left out). */
+function wholeInput(input: string): string {
+  try {
+    return JSON.stringify(JSON.parse(input), null, 2);
+  } catch {
+    return input;
+  }
 }

@@ -15,8 +15,9 @@ import { currentStepFiles } from "../templates.ts";
 // Permissions and the owner (Needs you), and the loopback MCP backend that
 // serves the team tools and Claude Code's permission prompt tool.
 
-/** A permission request's stored input. */
-const REQUEST_INPUT_BYTES = 8 * 1024;
+/** A permission request's stored input: enough for a whole pull request
+ * description (team_push), all of which the tray can show. */
+const REQUEST_INPUT_BYTES = 64 * 1024;
 /** The permission prompt tool Claude Code calls (`--permission-prompt-tool`). */
 const APPROVE_TOOL = {
   name: "approve",
@@ -105,6 +106,9 @@ export const needs = {
     const t = rt.turn;
     if (!t || this.epoch === null) return null;
     const shown = truncateBytes(this.redactor.text(JSON.stringify(input ?? {})), REQUEST_INPUT_BYTES).text;
+    // The tray's line: redacted, then bounded with the cut marked (…); the
+    // whole stored input is in the tray behind "Show all".
+    const summary = this.redactor.shorten(decision.summary ?? tool, REPLY_MAX + 200);
     if (!t.events.charge(Buffer.byteLength(shown))) return null;
     const epoch = this.epoch;
     const id = this.safe(() =>
@@ -113,7 +117,7 @@ export const needs = {
         agentId: rt.agent.id,
         kind: decision.question ? "question" : "permission",
         tool,
-        summary: this.redactor.text(decision.summary ?? tool).slice(0, REPLY_MAX + 200),
+        summary,
         input: shown,
         ruleKey: decision.ruleKey ?? null,
         state: decision.behavior === "ask" ? "open" : decision.behavior === "allow" ? "allowed" : "denied",
@@ -122,7 +126,7 @@ export const needs = {
     );
     if (id === undefined) return null;
     if (decision.behavior === "ask") {
-      t.events.emit("permission", { tool, decision: "ask", reason: this.redactor.text(decision.summary ?? decision.reason) });
+      t.events.emit("permission", { tool, decision: "ask", reason: decision.summary ? summary : decision.reason });
       if (t.waitingSince === null) {
         t.waitingSince = this.now();
         this.safe(() => this.store.setWaiting(epoch, t.id, true));

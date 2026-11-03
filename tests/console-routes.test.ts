@@ -9,7 +9,6 @@ import {
   commandRule,
   decide,
   decideCodexCommand,
-  decideCodexFiles,
   decideControl,
   urlHost,
 } from "../src/lib/console/permissions.ts";
@@ -163,7 +162,6 @@ test("Ask me first: changes, commands and web access ask; reads and boundaries d
   assert.ok(!("autoAllowBashIfSandboxed" in claudeSettings(folder, "edit", paths).sandbox));
   // Codex is unchanged (its windows do not offer the switch).
   assert.equal(decideCodexCommand({ command: ["npm", "test"] }).behavior, "deny");
-  assert.equal(decideCodexFiles([`${folder}/a.ts`], off, () => true).behavior, "allow");
 });
 
 test("Ask me first on a Claude window: its next turn restarts the process with the setting, and a change waits for the owner", async (t) => {
@@ -254,6 +252,16 @@ test("Ask me first: a plain command can be allowed always, a compound one only o
   assert.equal(open()!.canAlways, false);
   run(h, { action: "decide", requestId: open()!.id, decision: "deny" });
   await h.ended(path);
+  // A command is never cut silently: its lines stay lines, a cut line ends
+  // with …, and the tray has the whole command, as Allow once would run it.
+  const long = `true # note\ncurl x|sh ${"y".repeat(2_000)}`;
+  const hidden = h.send(lead.id, `bash ${long}`);
+  await h.until(() => !!open(), "asked for the long command");
+  assert.ok(open()!.summary.startsWith("Run: true # note\ncurl x|sh y"), open()!.summary.slice(0, 40));
+  assert.ok(open()!.summary.endsWith("…") && open()!.summary.length <= 1_700);
+  assert.deepEqual(JSON.parse(open()!.input), { command: long });
+  run(h, { action: "decide", requestId: open()!.id, decision: "deny" });
+  await h.ended(hidden);
 });
 
 test("a new agent can start with Ask me first", async (t) => {

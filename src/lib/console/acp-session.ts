@@ -324,7 +324,7 @@ class AcpSession implements AgentSession {
     // anything ran no model, so it costs nothing (owner, 2026-11-01). Any
     // other failure without usage is still charged its full allowance.
     const turnedAway = !this.heard && error instanceof AcpError && (error.code === 401 || error.code === 403);
-    this.ctx.emit({ kind: "completed", outcome: "failed", error: message(error), usage: turnedAway ? NO_TOKENS : null });
+    this.ctx.emit({ kind: "completed", outcome: "failed", error: message(error), ...(turnedAway ? { usage: NO_TOKENS, nothingRan: true } : { usage: null }) });
   }
   /** The agent's text since its last tool call, as one whole message (the
    * turn's final answer is the last one). */

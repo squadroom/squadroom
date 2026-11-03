@@ -106,7 +106,16 @@ export type SessionEvent =
   /** The client ended the turn. `text`: its final answer when no whole
    * message carried one. `usage`: the turn's whole usage, when the client
    * reports it at the end. */
-  | { kind: "completed"; outcome: "done" | "stopped" | "failed"; error: string | null; text?: string; usage?: TurnUsage | null }
+  | {
+      kind: "completed";
+      outcome: "done" | "stopped" | "failed";
+      error: string | null;
+      text?: string;
+      usage?: TurnUsage | null;
+      /** Failed before any model ran (the provider turned the prompt
+       * away): its usage, none, is the whole turn's. */
+      nothingRan?: boolean;
+    }
   /** The client refused the turn after all (a late refusal): nothing ran. */
   | { kind: "refused"; reason: string }
   /** The session ended under a running turn (its process exited, or a

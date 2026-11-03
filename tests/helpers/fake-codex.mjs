@@ -101,6 +101,15 @@ async function runTurn(threadId, turnId, text) {
   }
   const [word, ...rest] = text.split(" ");
   const arg = rest.join(" ");
+  // Codex's sandbox applies a change inside the thread's folder (not its
+  // .git, nothing through `..`, never under a read-only profile) without
+  // asking; it asks only for one outside it, which would then run
+  // unsandboxed.
+  const profile = thread.config?.permissions?.[thread.config?.default_permissions];
+  const sandboxed = (paths) =>
+    !!thread.cwd && profile?.extends === ":workspace" && paths.every((p) => p.startsWith(`${thread.cwd}/`) && !p.startsWith(`${thread.cwd}/.git/`) && !p.split("/").includes(".."));
+  const fileApproval = (paths, extra = {}) =>
+    sandboxed(paths) ? { decision: "accept" } : request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now(), ...extra });
   if (word === "team_ask" || word === "team_send") {
     const accepted = await request("mcpServer/elicitation/request", { threadId, turnId, serverName: "console" });
     if (accepted.action !== "accept") {
@@ -135,7 +144,7 @@ async function runTurn(threadId, turnId, text) {
   }
   if (word === "write") {
     note("item/started", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: "inProgress" } });
-    const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now() });
+    const answer = await fileApproval([arg]);
     if (answer.decision === "accept") fs.writeFileSync(arg, "written by codex\n");
     note("item/completed", { item: { type: "fileChange", id: "f1", changes: [{ path: arg, kind: { type: "add" }, diff: "" }], status: answer.decision === "accept" ? "completed" : "declined" } });
     say(`file: ${answer.decision}`);
@@ -144,12 +153,16 @@ async function runTurn(threadId, turnId, text) {
   if (word === "move" || word === "grant" || word === "oddkind") {
     // move P Q: renames P to Q (the destination in `kind.move_path`);
     // grant P: a change to P that also asks for a write grant on its folder;
-    // oddkind P: a change of a kind the schema does not have.
+    // oddkind P: a change of a kind the schema does not have (both always
+    // ask).
     const [from, to] = rest;
     const kind = word === "move" ? { type: "update", move_path: to } : word === "oddkind" ? { type: "rewrite" } : { type: "add" };
     const changes = [{ path: from, kind, diff: "" }];
     note("item/started", { item: { type: "fileChange", id: "f1", changes, status: "inProgress" } });
-    const answer = await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now(), ...(word === "grant" ? { grantRoot: from.replace(/\/[^/]*$/, "") } : {}) });
+    const answer =
+      word === "move"
+        ? await fileApproval([from, to])
+        : await request("item/fileChange/requestApproval", { threadId, turnId, itemId: "f1", startedAtMs: Date.now(), ...(word === "grant" ? { grantRoot: from.replace(/\/[^/]*$/, "") } : {}) });
     if (answer.decision === "accept") fs.writeFileSync(word === "move" ? to : from, "written by codex\n");
     note("item/completed", { item: { type: "fileChange", id: "f1", changes, status: answer.decision === "accept" ? "completed" : "declined" } });
     say(`file: ${answer.decision}`);

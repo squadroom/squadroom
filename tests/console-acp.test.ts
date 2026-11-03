@@ -41,6 +41,13 @@ async function acp(t: Parameters<typeof harness>[0], setup: Record<string, unkno
   return h;
 }
 const said = (h: Awaited<ReturnType<typeof acp>>, id: string) => h.said(id).join("");
+/** A paid turn stopped mid-way: charged its usage plus the allowance, and
+ * its tab waits for the owner, who resumes it. */
+function resumeAfterStop(h: Awaited<ReturnType<typeof acp>>, turn: number) {
+  assert.equal(h.store.turn(turn)!.costBasis, "allowance");
+  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: /);
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+}
 /** The agent has the turn's prompt (its setup done). */
 const prompted = (h: Awaited<ReturnType<typeof acp>>, n: number) => h.until(() => h.acpCalls().filter((c) => c.method === "session/prompt").length >= n, `prompt ${n} reached the agent`);
 
@@ -397,12 +404,16 @@ test("Console-wide spend counts this UTC month from the last reset; Reset needs 
   const project = runCommand(store, { action: "createProject", name: "P", source: "none" }).project as { id: string };
   const tab = store.tabs(project.id)[0];
   const a = store.createAgent({ tabId: tab.id, name: "Scout", role: "", kind: "opencode", model: LUNA.id, effort: null, permission: "look" });
-  const charged = (usd: number, endedAt: number) =>
-    store.run("INSERT INTO console_turns (agent_id, trigger, prompt, status, created_at, ended_at, cost_usd) VALUES (?, 'owner', 'x', 'done', ?, ?, ?)", a.id, endedAt, endedAt, usd);
+  const charged = (usd: number, endedAt: number, startedAt = endedAt) =>
+    store.run("INSERT INTO console_turns (agent_id, trigger, prompt, status, created_at, started_at, ended_at, cost_usd) VALUES (?, 'owner', 'x', 'done', ?, ?, ?, ?)", a.id, startedAt, startedAt, endedAt, usd);
   charged(3, now);
   assert.equal(store.consoleSpend().usd, 3);
-  // A new UTC month starts from zero.
+  // A new UTC month starts from zero. A turn counts in the month it
+  // started, as the Overview counts it, even when it ended in the next.
+  const lastMonth = now;
   now = Date.UTC(2026, 10, 1, 0, 5);
+  assert.equal(store.consoleSpend().usd, 0);
+  charged(4, now, lastMonth);
   assert.equal(store.consoleSpend().usd, 0);
   charged(2, now);
   // Reset: a fresh code; it counts from now and lifts the Console's pauses only.
@@ -574,11 +585,15 @@ test("cancellation: Stop cancels the session and answers a waiting request 'canc
   await h.ended(hang);
   assert.deepEqual([h.store.turn(hang)!.status, h.store.turn(hang)!.reason], ["stopped", "Stopped by the owner."]);
   assert.ok(h.acpCalls().some((c) => c.method === "session/cancel"));
+  resumeAfterStop(h, hang);
   const asking = h.send(scout.id, "askhang");
   await h.until(() => h.store.openRequests().some((r) => r.agentId === scout.id), "a request");
   runCommand(h.store, { action: "stop", agentId: scout.id });
   await h.ended(asking);
   assert.ok(h.acpCalls().some((c) => c.result && JSON.stringify(c.result).includes('"cancelled"')));
+  // It may have ended normally after its ask was answered (then nothing
+  // pauses); otherwise the tab waits for a Resume.
+  if (h.store.tab(h.tab.id)!.paused) resumeAfterStop(h, asking);
   const deaf = h.send(scout.id, "deaf");
   await prompted(h, 3);
   runCommand(h.store, { action: "stop", agentId: scout.id });
@@ -716,6 +731,7 @@ test("the project's network switch: behind a fresh code, waits for running ACP t
   // Stop now: the running turn is stopped, the session restarts, then on.
   runCommand(h.store, { action: "setAcpNetwork", projectId: h.project.id, on: true, mode: "now" });
   await h.ended(hang);
+  resumeAfterStop(h, hang);
   await h.until(() => h.store.project(h.project.id)!.acpNetwork, "network on");
   assert.equal(h.store.project(h.project.id)!.acpNetworkPending, null);
   await h.ended(queued);
@@ -734,6 +750,7 @@ test("a new clone in the project waits for its ACP turns; the session then resta
   assert.equal(h.store.agent(mate.id)!.state, "creating");
   runCommand(h.store, { action: "stop", agentId: scout.id });
   await h.ended(hang);
+  resumeAfterStop(h, hang);
   await h.ready(mate.id);
   const after = h.send(scout.id, "hello");
   await h.ended(after);

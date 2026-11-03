@@ -50,7 +50,7 @@ test("ACP on an API key in a tab with steps: the step's file is written, committ
   assert.equal(existsSync(join(folder, "brief.md")), false);
 });
 
-test("Codex in a tab with steps: a change to the step's file is accepted; another file is declined", async (t) => {
+test("Codex in a tab with steps: its sandbox writes in its folder without asking; another file than the step's is put back after the turn", async (t) => {
   const h = await stepped(t, { codex: {} });
   const coder = h.codexAgent();
   await h.ready(coder.id);
@@ -58,7 +58,7 @@ test("Codex in a tab with steps: a change to the step's file is accepted; anothe
   await h.ended(h.send(coder.id, `write ${join(folder, "notes.md")}`));
   assert.equal(h.said(coder.id).at(-1), "file: accept");
   await h.ended(h.send(coder.id, `write ${join(folder, "brief.md")}`));
-  assert.equal(h.said(coder.id).at(-1), "file: decline");
+  await h.until(() => h.store.notices().some((n) => n.agentId === coder.id && n.text.includes("brief.md")), "a notice");
   assert.equal(existsSync(join(folder, "brief.md")), false);
 });
 
