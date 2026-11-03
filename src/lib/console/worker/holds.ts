@@ -144,7 +144,7 @@ export const holds = {
       const agents = this.store.agents(tab.projectId).filter((a) => a.tabId === tab.id);
       const open = this.store.openTurns();
       if (agents.some((a) => this.heldWaiting(a, open))) continue;
-      this.safe(() => this.store.unpauseTab(this.epoch!, tab.id, HOLD_STALL));
+      this.safe(() => this.store.liftPause(tab.id, HOLD_STALL, this.epoch!));
     }
   },
   /** On hold, with mail or a team turn waiting. */

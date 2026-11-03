@@ -1,5 +1,5 @@
 import { agentModel } from "./agents.ts";
-import { keysPageView, needsView, tabSpend, workerView, type TabSpend, type WorkerView } from "./views.ts";
+import { keysPageView, needsView, tabSpendView, workerView, type TabSpend, type WorkerView } from "./views.ts";
 import { consolePaths } from "./config.ts";
 import { IMAGE_KEY } from "./image-tools.ts";
 import { readKeyFile } from "./keys.ts";
@@ -170,7 +170,7 @@ export function overviewView(store: ConsoleStore, keysPath: string, now: number)
       // Tabs are archived, never deleted, so every charged turn's tab exists.
       tabs: [...tabs].map(([tabId, s]) => {
         const tab = store.tab(tabId)!;
-        return { tabId, tabName: tab.name, projectId: tab.projectId, projectName: projectName(tab.projectId)!, ...s, sinceReset: tabSpend(store, tab) };
+        return { tabId, tabName: tab.name, projectId: tab.projectId, projectName: projectName(tab.projectId)!, ...s, sinceReset: tabSpendView(store, tab) };
       }),
       keys: [...keys.values()].map((k) => ({
         name: k.name,

@@ -12,6 +12,7 @@ export const TASK_CALLS_PENDING = 200;
 export const UPLOAD_HOLD_MS = 60 * 60_000;
 /** File reads (and their content) are kept this long. */
 const READ_KEPT_MS = 15 * 60_000;
+const NO_TASKS = { state: EMPTY_TASKS, pending: {} as Record<string, TaskOp> };
 
 type Upload = { id: number; agentId: string; name: string; size: number; staged: string; replace: boolean; state: string; message: string | null };
 type Helper = { id: number; name: string; type: string; state: "running" | "done" | "stopped"; tool: string | null; startedAt: number; endedAt: number | null; canOpen: boolean };
@@ -34,9 +35,7 @@ export const files = {
   /** Reads older than 15 minutes (with their content) are deleted: by the
    * worker fenced by its lease epoch, or inside the page's own queueRead. */
   expireReads(this: ConsoleStore, epoch?: number) {
-    const sql = "DELETE FROM console_file_reads WHERE created_at < ?";
-    if (epoch === undefined) this.run(sql, this.now() - READ_KEPT_MS);
-    else this.write(epoch, sql, this.now() - READ_KEPT_MS);
+    this.write(epoch, "DELETE FROM console_file_reads WHERE created_at < ?", this.now() - READ_KEPT_MS);
   },
   /** Claim at most `limit` pending reads (the worker's free capacity). */
   claimReads(this: ConsoleStore, epoch: number, limit = 8): { id: number; agentId: string; path: string; helperId: number | null }[] {
@@ -112,18 +111,6 @@ export const files = {
   stagedInUse(this: ConsoleStore): string[] {
     return this.all("SELECT staged FROM console_uploads WHERE staged != ''").map((r) => r.staged as string);
   },
-  /** Uploads an earlier worker left half done fail visibly, and its file
-   * reads are read again; the staged copies no upload needs any more are
-   * returned for removal. */
-  failEarlierUploads(this: ConsoleStore, epoch: number): string[] {
-    return this.transaction(() => {
-      const staged = this.all("SELECT staged FROM console_uploads WHERE state IN ('running', 'queued') AND staged != ''").map((r) => r.staged as string);
-      this.run("UPDATE console_uploads SET state = 'failed', message = 'The Console worker restarted during this upload. Upload it again.', staged = '' WHERE state = 'running'");
-      this.run("UPDATE console_file_reads SET state = 'pending' WHERE state = 'running'");
-      // Queued ones keep their staged copy (they are placed now).
-      return staged.filter((path) => !this.get("SELECT 1 FROM console_uploads WHERE staged = ?", path));
-    }, epoch);
-  },
 
   // ── Helpers: a Claude agent's subagents ──────────────────
   /** A helper begins (its Agent or Task call); at most HELPERS_PER_TURN. */
@@ -187,11 +174,11 @@ export const files = {
   },
 
   // ── Task list ─────────────────────────────────────
-  /** The agent's list and pending calls for its current session; another
-   * session's (before Start fresh) is not carried over. */
-  taskRow(this: ConsoleStore, agentId: string): { state: TaskListState; pending: Record<string, TaskOp> } {
+  /** The agent's list and pending calls for its current session, or null;
+   * another session's (before Start fresh) is not carried over. */
+  taskRow(this: ConsoleStore, agentId: string): { state: TaskListState; pending: Record<string, TaskOp> } | null {
     const r = this.get("SELECT * FROM console_tasks WHERE agent_id = ?", agentId);
-    if (!r || r.session_id !== this.session(agentId)) return { state: EMPTY_TASKS, pending: {} };
+    if (!r || r.session_id !== this.session(agentId)) return null;
     return {
       state: { items: JSON.parse(r.items as string) as TaskItem[], incomplete: r.incomplete === 1, stale: r.stale === 1 },
       pending: JSON.parse(r.pending as string) as Record<string, TaskOp>,
@@ -207,7 +194,7 @@ export const files = {
    * result. */
   taskCall(this: ConsoleStore, epoch: number, agentId: string, callId: string, op: TaskOp) {
     this.transaction(() => {
-      const { state, pending } = this.taskRow(agentId);
+      const { state, pending } = this.taskRow(agentId) ?? NO_TASKS;
       if (Object.keys(pending).length >= TASK_CALLS_PENDING) return this.putTasks(agentId, { ...state, stale: true }, pending);
       this.putTasks(agentId, state, { ...pending, [callId]: op });
     }, epoch);
@@ -216,7 +203,7 @@ export const files = {
    * changes the list only if it succeeded. */
   taskResult(this: ConsoleStore, epoch: number, agentId: string, callId: string, ok: boolean, text: string) {
     this.transaction(() => {
-      const { state, pending } = this.taskRow(agentId);
+      const { state, pending } = this.taskRow(agentId) ?? NO_TASKS;
       const op = pending[callId];
       if (!op) return;
       const rest = { ...pending };
@@ -227,28 +214,27 @@ export const files = {
   /** A task call the Console cannot follow: the list may be out of date. */
   taskUnfollowed(this: ConsoleStore, epoch: number, agentId: string) {
     this.transaction(() => {
-      const { state, pending } = this.taskRow(agentId);
+      const { state, pending } = this.taskRow(agentId) ?? NO_TASKS;
       this.putTasks(agentId, { ...state, stale: true }, pending);
     }, epoch);
   },
   /** A whole list the client reports as already applied (Codex's plan). */
   taskList(this: ConsoleStore, epoch: number, agentId: string, op: TaskOp) {
     this.transaction(() => {
-      const { state, pending } = this.taskRow(agentId);
+      const { state, pending } = this.taskRow(agentId) ?? NO_TASKS;
       this.putTasks(agentId, applyTaskOp(state, op), pending);
     }, epoch);
   },
   /** A turn ended: a task call still without its result leaves the list
    * possibly out of date until the next whole list or Start fresh. */
   settleTasks(this: ConsoleStore, agentId: string) {
-    const { state, pending } = this.taskRow(agentId);
+    const { state, pending } = this.taskRow(agentId) ?? NO_TASKS;
     if (Object.keys(pending).length) this.putTasks(agentId, { ...state, stale: true }, {});
   },
   /** The task list for the agent's current session, or null. */
   tasks(this: ConsoleStore, agentId: string): { items: { text: string; status: TaskStatus }[]; count: { done: number; total: number } | null; incomplete: boolean; stale: boolean } | null {
-    const r = this.get("SELECT session_id FROM console_tasks WHERE agent_id = ?", agentId);
-    if (!r || r.session_id !== this.session(agentId)) return null;
-    const { state } = this.taskRow(agentId);
+    const state = this.taskRow(agentId)?.state;
+    if (!state) return null;
     return { items: state.items.map((i) => ({ text: i.text, status: i.status })), count: taskCount(state), incomplete: state.incomplete, stale: state.stale };
   },
 };

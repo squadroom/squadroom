@@ -622,6 +622,63 @@ test("a store missing a column is refused with the reason, and left as it was", 
   after.close();
 });
 
+test("a store a newer build stamped is refused, and left as it was", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-schema-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "console.sqlite");
+  new ConsoleStore(path).close();
+  const raw = new DatabaseSync(path);
+  raw.exec("PRAGMA user_version = 99");
+  raw.close();
+  assert.throws(() => new ConsoleStore(path), /The Console store is version 99, newer than this build reads \(3\)\. Update Squadroom/);
+  const after = new DatabaseSync(path);
+  assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 99);
+  after.close();
+});
+
+test("a transaction inside another is part of it: it commits with it, its epoch is checked, and its own error undoes only its part", () => {
+  const store = new ConsoleStore(":memory:");
+  const epoch = store.takeLease("w", Date.now())!;
+  const names = () => store.projects().map((p) => p.name);
+  // The inner one commits only with the outer one.
+  assert.throws(() =>
+    store.transaction(() => {
+      store.createProject("Inner", "none");
+      throw new Error("outer fails");
+    }),
+  );
+  assert.deepEqual(names(), []);
+  // A nested write fenced by a stale epoch is refused, and so is the whole.
+  assert.throws(() => store.transaction(() => store.setFlag("x", "1", epoch + 1)), new RegExp(LEASE_LOST));
+  assert.equal(store.flag("x"), null);
+  // An inner error the outer one catches undoes the inner writes alone.
+  store.transaction(() => {
+    store.createProject("Kept", "none");
+    try {
+      store.transaction(() => {
+        store.createProject("Undone", "none");
+        throw new Error("inner fails");
+      });
+    } catch {
+      /* the outer one carries on */
+    }
+    store.setFlag("x", "1", epoch);
+  }, epoch);
+  assert.deepEqual(names(), ["Kept"]);
+  assert.equal(store.flag("x"), "1");
+  store.close();
+});
+
+test("delivering no messages is no turn", () => {
+  const store = new ConsoleStore(":memory:");
+  const epoch = store.takeLease("w", Date.now())!;
+  const project = store.createProject("P", "none");
+  const agent = store.createAgent({ tabId: store.tabs(project.id)[0].id, name: "A", role: "", kind: "claude-code", model: "claude-sonnet-5", effort: null, permission: "look" });
+  store.setAgentFolder(epoch, agent.id, "/tmp/a");
+  assert.equal(store.deliver(epoch, agent.id, [], "nothing"), null);
+  store.close();
+});
+
 const DAY = 24 * 60 * 60_000;
 test("backups run once a night after 02:00 UTC, retry hourly, and keep 14 days", () => {
   const night = Date.parse("2026-09-25T02:30:00Z");

@@ -1,11 +1,10 @@
-import type { ConsoleAgent, TurnStatus } from "../types.ts";
+import { isOpen, type ConsoleAgent, type TurnStatus } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { circlePair, continuation, READ_PAGE, SHARE_MAX, TeamError, type TeamMessage } from "../team.ts";
-import { CIRCLE_BASELINE, MESSAGES, newId, safeCut, teamMessage, type Row } from "./rows.ts";
+import { MESSAGES, newId, safeCut, teamMessage, type Row } from "./rows.ts";
 
 type Named = TeamMessage & { fromName: string; toName: string };
 type Route = { id: number; from: string; fromName: string; to: string; toName: string; phrase: string };
-const shut = (a: ConsoleAgent | undefined) => !a || a.state === "closed" || a.state === "error";
 
 // The mailbox: team messages, asks and their answers, routes, and the
 // instruction limits and circle detector.
@@ -23,7 +22,7 @@ export const mailbox = {
       const t = this.turn(m.turnId);
       if (!t) throw new TeamError("This turn has ended.");
       // Read again here: the owner may have closed it meanwhile.
-      if (shut(this.agent(m.to.id))) throw new TeamError(`${m.to.name} can no longer take messages.`);
+      if (!isOpen(this.agent(m.to.id))) throw new TeamError(`${m.to.name} can no longer take messages.`);
       const correlationId = m.kind === "ask" ? newId("c") : null;
       this.run(
         "INSERT INTO console_messages (tab_id, from_agent, to_agent, kind, correlation_id, body, state, from_turn, instruction_id, created_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
@@ -116,9 +115,10 @@ export const mailbox = {
     return this.transaction(() => {
       const a = this.agent(agentId);
       if (!a || a.state !== "ready" || this.openTurns().some((t) => t.agentId === agentId)) return null;
-      const list = ids.join(",");
-      const rows = this.all(`${MESSAGES} WHERE m.id IN (${list}) AND m.state = 'queued' AND m.to_agent = ? ORDER BY m.id`, agentId).map(teamMessage);
-      if (!rows.length || rows.length !== ids.length) return null;
+      if (!ids.length) return null;
+      const list = ids.map(() => "?").join(", ");
+      const rows = this.all(`${MESSAGES} WHERE m.id IN (${list}) AND m.state = 'queued' AND m.to_agent = ? ORDER BY m.id`, ...ids, agentId).map(teamMessage);
+      if (rows.length !== ids.length) return null;
       const now = this.now();
       const instruction = Math.max(...rows.map((m) => m.instructionId ?? 0)) || null;
       const resendOf = Math.max(...rows.map((m) => m.resendAfter ?? 0)) || null;
@@ -126,25 +126,28 @@ export const mailbox = {
         "INSERT INTO console_turns (agent_id, trigger, prompt, status, instruction_id, resend_of, created_at) VALUES (?, 'team', ?, 'queued', ?, ?, ?)",
         agentId, prompt, instruction, resendOf, now,
       );
-      this.run(`UPDATE console_messages SET state = 'in_turn', turn_id = ? WHERE id IN (${list})`, id);
+      this.run(`UPDATE console_messages SET state = 'in_turn', turn_id = ? WHERE id IN (${list})`, id, ...ids);
       const messages = rows.map((m) => ({ from: m.fromName, kind: m.kind, correlationId: m.correlationId, text: m.body }));
       this.insertEvent(id, a, "team", { text: prompt, messages }, now);
       return id;
     }, epoch);
   },
-  /** The tab's messages, oldest first (the team timeline). */
-  timeline(this: ConsoleStore, tabId: string, limit = 200): Named[] {
-    return this.all(`SELECT * FROM (${MESSAGES} WHERE m.tab_id = ? ORDER BY m.id DESC LIMIT ?) ORDER BY id`, tabId, limit).map(teamMessage);
+  /** The tab's newest messages, oldest first (the team timeline), each body
+   * read only up to `bodyMax` characters. */
+  timeline(this: ConsoleStore, tabId: string, limit = 200, bodyMax = Number.MAX_SAFE_INTEGER): Named[] {
+    return this.all(
+      "SELECT * FROM (SELECT m.id, m.tab_id, m.from_agent, m.to_agent, m.kind, m.correlation_id, substr(m.body, 1, ?) AS body, m.state, m.turn_id, m.from_turn, m.instruction_id, m.resend_after, m.created_at, f.name AS from_name, t.name AS to_name FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent LEFT JOIN console_agents t ON t.id = m.to_agent WHERE m.tab_id = ? ORDER BY m.id DESC LIMIT ?) ORDER BY id",
+      bodyMax, tabId, limit,
+    ).map(teamMessage);
   },
   /** Asks in a tab still waiting for an answer. */
   openAsks(this: ConsoleStore, tabId: string): number {
     return Number(this.get("SELECT COUNT(*) AS n FROM console_messages WHERE tab_id = ? AND kind = 'ask' AND state IN ('queued', 'in_turn')", tabId)!.n);
   },
   /** Interrupted messages (Needs you), oldest first. */
-  interruptedMessages(this: ConsoleStore, projectId?: string): (Named & { projectId: string })[] {
+  interruptedMessages(this: ConsoleStore): (Named & { projectId: string })[] {
     return this.all(
-      `SELECT m.*, f.name AS from_name, t.name AS to_name, t.project_id FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent JOIN console_agents t ON t.id = m.to_agent JOIN console_tabs tb ON tb.id = t.tab_id JOIN console_projects p ON p.id = t.project_id WHERE m.state = 'interrupted' AND tb.archived_at IS NULL AND p.archived_at IS NULL${projectId ? " AND t.project_id = ?" : ""} ORDER BY m.id`,
-      ...(projectId ? [projectId] : []),
+      "SELECT m.*, f.name AS from_name, t.name AS to_name, t.project_id FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent JOIN console_agents t ON t.id = m.to_agent JOIN console_tabs tb ON tb.id = t.tab_id JOIN console_projects p ON p.id = t.project_id WHERE m.state = 'interrupted' AND tb.archived_at IS NULL AND p.archived_at IS NULL ORDER BY m.id",
     ).map((r) => ({ ...teamMessage(r), projectId: r.project_id as string }));
   },
   /** Re-send (a new attempt, told what the interrupted one already did) or
@@ -157,7 +160,7 @@ export const mailbox = {
         this.run("UPDATE console_messages SET state = 'discarded', ended_at = ? WHERE id = ?", this.now(), messageId);
         return;
       }
-      if (shut(this.agent(m.to_agent as string))) throw new Error("Its agent is closed, so it cannot be sent again. Discard it.");
+      if (!isOpen(this.agent(m.to_agent as string))) throw new Error("Its agent is closed, so it cannot be sent again. Discard it.");
       this.run("UPDATE console_messages SET state = 'queued', resend_after = COALESCE(turn_id, resend_after), turn_id = NULL, ended_at = NULL WHERE id = ?", messageId);
     });
   },
@@ -174,7 +177,7 @@ export const mailbox = {
     for (const r of this.routes(from.tabId)) {
       if (r.from !== from.id || (r.phrase && !lower.includes(r.phrase.toLowerCase()))) continue;
       const to = this.agent(r.to);
-      if (shut(to)) continue;
+      if (!isOpen(to)) continue;
       const id = this.insert(
         "INSERT INTO console_messages (tab_id, from_agent, to_agent, kind, correlation_id, body, state, from_turn, instruction_id, created_at) VALUES (?, ?, ?, 'route', NULL, ?, 'queued', ?, ?, ?)",
         from.tabId, from.id, to!.id, finalText.slice(0, safeCut(finalText, SHARE_MAX)), turnId, instruction, now,
@@ -183,7 +186,7 @@ export const mailbox = {
     }
   },
   /** A tab's working routes, oldest first, with the agents' names: one
-   * whose agent was closed or failed its setup is not listed. */
+   * whose agent is not open (`isOpen`) is not listed. */
   routes(this: ConsoleStore, tabId: string): Route[] {
     return this.all(
       "SELECT r.*, f.name AS from_name, t.name AS to_name FROM console_routes r JOIN console_agents f ON f.id = r.from_agent JOIN console_agents t ON t.id = r.to_agent WHERE r.tab_id = ? AND r.removed_at IS NULL AND f.state NOT IN ('closed', 'error') AND t.state NOT IN ('closed', 'error') ORDER BY r.id",
@@ -252,8 +255,6 @@ export const mailbox = {
       one("SELECT MAX(turn_id) AS n FROM console_messages WHERE tab_id = ? AND from_agent IS NULL"),
       // The owner's latest Resume.
       one("SELECT count_from AS n FROM console_tabs WHERE id = ?"),
-      // Nothing from before the detector existed.
-      Number(this.flag(CIRCLE_BASELINE) ?? 0),
     );
     // Only messages from turns checked for progress: a turn not checked yet
     // (running, or its check failed and waits for a restart) may be progress.

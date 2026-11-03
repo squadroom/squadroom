@@ -58,7 +58,7 @@ export interface EndedTurn {
   credential?: string;
   /** When it started (a turn), which places it in a day and a month. */
   startedAt?: number | null;
-  /** The key that paid, as the turn recorded it when it started (L6). */
+  /** The key that paid, as the turn recorded it when it started. */
   paidBy?: { name: string; scope: "project" | "global" | null; print: string };
 }
 type Gauge = { tokens: number | null; contextWindow: number | null; measured: boolean; compactedFrom: number | null };
@@ -68,31 +68,29 @@ type Gauge = { tokens: number | null; contextWindow: number | null; measured: bo
 export const turns = {
   /** Queue an owner message as a turn, with its transcript row. */
   queueTurn(this: ConsoleStore, agentId: string, prompt: string, resendOf: number | null = null, options: { pushApproved?: boolean; uploadIds?: number[] } = {}): Queued {
-    return this.transaction(() => this.ownerTurn(agentId, prompt, resendOf, options));
-  },
-  /** queueTurn's work, in the caller's transaction. */
-  ownerTurn(this: ConsoleStore, agentId: string, prompt: string, resendOf: number | null, options: { pushApproved?: boolean; uploadIds?: number[] }): Queued {
-    const a = this.agent(agentId);
-    if (!a || a.state === "closed") throw new Error("That agent is closed.");
-    if (a.state === "error") throw new Error("That agent could not be set up.");
-    const resendSummary = resendOf !== null && !!this.turn(resendOf)?.summary;
-    if (resendSummary) this.summaryAllowed(a);
-    const now = this.now();
-    const id = this.insert(
-      "INSERT INTO console_turns (agent_id, trigger, prompt, status, resend_of, created_at, push_approved) VALUES (?, 'owner', ?, 'queued', ?, ?, ?)",
-      // A Send again of an "Open pull request" turn keeps its approval.
-      agentId, prompt, resendOf, now, (options.pushApproved ?? (resendOf !== null && this.pushApproved(resendOf))) ? 1 : 0,
-    );
-    // An owner message starts an instruction.
-    this.run("UPDATE console_turns SET instruction_id = id WHERE id = ?", id);
-    // A Re-send of a summary request is still one, with the same checks
-    // and first in the queue.
-    if (resendSummary) this.markSummary(id);
-    this.insertEvent(id, a, "owner", { text: prompt }, now);
-    // A Re-send carries the files its interrupted turn never announced.
-    if (resendOf !== null) this.run("UPDATE console_uploads SET bound_turn = ? WHERE bound_turn = ? AND delivered_turn IS NULL", id, resendOf);
-    const refusedUploads = this.bindUploads(agentId, id, options.uploadIds ?? []);
-    return { ...this.turn(id)!, refusedUploads };
+    return this.transaction(() => {
+      const a = this.agent(agentId);
+      if (!a || a.state === "closed") throw new Error("That agent is closed.");
+      if (a.state === "error") throw new Error("That agent could not be set up.");
+      const resendSummary = resendOf !== null && !!this.turn(resendOf)?.summary;
+      if (resendSummary) this.summaryAllowed(a);
+      const now = this.now();
+      const id = this.insert(
+        "INSERT INTO console_turns (agent_id, trigger, prompt, status, resend_of, created_at, push_approved) VALUES (?, 'owner', ?, 'queued', ?, ?, ?)",
+        // A Send again of an "Open pull request" turn keeps its approval.
+        agentId, prompt, resendOf, now, (options.pushApproved ?? (resendOf !== null && this.pushApproved(resendOf))) ? 1 : 0,
+      );
+      // An owner message starts an instruction.
+      this.run("UPDATE console_turns SET instruction_id = id WHERE id = ?", id);
+      // A Re-send of a summary request is still one, with the same checks
+      // and first in the queue.
+      if (resendSummary) this.markSummary(id);
+      this.insertEvent(id, a, "owner", { text: prompt }, now);
+      // A Re-send carries the files its interrupted turn never announced.
+      if (resendOf !== null) this.run("UPDATE console_uploads SET bound_turn = ? WHERE bound_turn = ? AND delivered_turn IS NULL", id, resendOf);
+      const refusedUploads = this.bindUploads(agentId, id, options.uploadIds ?? []);
+      return { ...this.turn(id)!, refusedUploads };
+    });
   },
   /** The files sent with a message: bound to it, unless one was released
    * (its hold lapsed or was let go), since another turn may have announced
@@ -272,7 +270,7 @@ export const turns = {
       const agent = this.agent(agentId);
       if (!agent || agent.state === "closed") throw new Error("That agent does not exist.");
       this.summaryAllowed(agent);
-      const t = this.ownerTurn(agentId, SUMMARY_PROMPT, null, {});
+      const t = this.queueTurn(agentId, SUMMARY_PROMPT);
       this.markSummary(t.id);
       return this.turn(t.id)!;
     });
@@ -406,10 +404,9 @@ export const turns = {
   },
 
   // ── Interrupted turns (Needs you) ───────────────────────────────────────
-  interruptedTurns(this: ConsoleStore, projectId?: string): (TurnRow & { agentName: string; projectId: string })[] {
+  interruptedTurns(this: ConsoleStore): (TurnRow & { agentName: string; projectId: string })[] {
     return this.all(
-      `SELECT t.*, a.name AS agent_name, a.project_id FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE t.status = 'interrupted' AND t.trigger = 'owner' AND t.acknowledged = 0 AND a.state != 'closed'${projectId ? " AND a.project_id = ?" : ""} ORDER BY t.id`,
-      ...(projectId ? [projectId] : []),
+      "SELECT t.*, a.name AS agent_name, a.project_id FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE t.status = 'interrupted' AND t.trigger = 'owner' AND t.acknowledged = 0 AND a.state != 'closed' ORDER BY t.id",
     ).map((r) => ({ ...turn(r), agentName: r.agent_name as string, projectId: r.project_id as string }));
   },
   /** Send again (a new turn with the same message) or dismiss. Never
@@ -421,7 +418,7 @@ export const turns = {
       const t = this.turn(turnId);
       if (!t || t.status !== "interrupted" || t.acknowledged) throw new Error("That turn is no longer waiting.");
       this.run("UPDATE console_turns SET acknowledged = 1 WHERE id = ?", turnId);
-      return resend ? this.ownerTurn(t.agentId, t.prompt, turnId, {}) : null;
+      return resend ? this.queueTurn(t.agentId, t.prompt, turnId) : null;
     });
   },
 };

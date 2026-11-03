@@ -36,13 +36,11 @@ export const requests = {
     const r = this.get("SELECT * FROM console_requests WHERE id = ?", id);
     return r && request(r);
   },
-  /** The open requests (all projects, or one), oldest first. */
-  /** Open requests, each with its whole stored input (redacted, bounded):
-   * what "Allow once" approves. */
-  openRequests(this: ConsoleStore, projectId?: string): (ConsoleRequest & { agentName: string; projectId: string; input: string })[] {
+  /** Open requests in every project, oldest first, each with its whole
+   * stored input (redacted, bounded): what "Allow once" approves. */
+  openRequests(this: ConsoleStore): (ConsoleRequest & { agentName: string; projectId: string; input: string })[] {
     return this.all(
-      `SELECT r.*, a.name AS agent_name, a.project_id FROM console_requests r JOIN console_agents a ON a.id = r.agent_id JOIN console_tabs tb ON tb.id = a.tab_id JOIN console_projects p ON p.id = a.project_id WHERE r.state = 'open' AND tb.archived_at IS NULL AND p.archived_at IS NULL${projectId ? " AND a.project_id = ?" : ""} ORDER BY r.id`,
-      ...(projectId ? [projectId] : []),
+      "SELECT r.*, a.name AS agent_name, a.project_id FROM console_requests r JOIN console_agents a ON a.id = r.agent_id JOIN console_tabs tb ON tb.id = a.tab_id JOIN console_projects p ON p.id = a.project_id WHERE r.state = 'open' AND tb.archived_at IS NULL AND p.archived_at IS NULL ORDER BY r.id",
     ).map((r) => ({ ...request(r), agentName: r.agent_name as string, projectId: r.project_id as string, input: String(r.input ?? "") }));
   },
   /** The owner's answer to an open request. "always" also remembers the

@@ -23,9 +23,6 @@ import type { TurnRow } from "../store.ts";
 // What the store's area modules share at run time: row mappers and small
 // helpers. It never imports store.ts at run time (no import cycle).
 
-/** The last turn from before the circle detector. */
-export const CIRCLE_BASELINE = "circle-baseline";
-
 /** Where to cut text at or before `at` without splitting a surrogate pair
  * (an emoji at the boundary stays whole on one side). */
 export function safeCut(text: string, at: number): number {

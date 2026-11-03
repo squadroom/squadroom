@@ -9,7 +9,7 @@ import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
 import { ASK_FIRST_CLAUDE_ONLY, NEEDS_MAIL, type ConsoleStore } from "./store.ts";
 import { usd } from "./spend.ts";
-import { CODEX_DISABLED, LIMITS, NAME_MAX, PROMPT_MAX, ROLE_MAX, type ConsoleTab, type Permission } from "./types.ts";
+import { CODEX_DISABLED, LIMITS, NAME_MAX, PROMPT_MAX, ROLE_MAX, isOpen, type ConsoleTab, type Permission } from "./types.ts";
 import { allTemplates, rolesView, templatesView } from "./views.ts";
 
 // The owner's commands, validated here so the route stays glue; the
@@ -265,6 +265,7 @@ const TEAM_NEEDS_FILES = "A coding team needs a project with files.";
 function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes: TabTemplate["routes"] = [], exactPrompts = false) {
   if (store.project(tab.projectId)?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
   const codexOff = store.flag(CODEX_DISABLED) !== null;
+  // A failed agent keeps its name until it is closed.
   const taken = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed").map((a) => a.name);
   const roles = rolesView(store);
   const checked = checkTeamSetup(setup ?? defaultTeamSetup(codexOff, taken, roles), { takenNames: taken, codexOff, roles, exactPrompts });
@@ -389,7 +390,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       // tab's own).
       const tab = store.tab(id(input.tabId, "Tab"));
       if (!tab || tab.archivedAt !== null) throw new CommandError("That tab is closed.");
-      const agents = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
+      const agents = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && isOpen(a));
       if (!agents.length) throw new CommandError("The tab has no agents to save.");
       const steps = checkSteps(input.steps);
       if (!steps.ok) throw new CommandError(steps.errors.join(" "));
@@ -418,7 +419,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       const step = Number(input.step);
       if (!Number.isInteger(step) || step < 0 || step >= stepped.steps.length) throw new CommandError("Choose one of the tab's steps.");
       if (step > stepped.index) {
-        const open = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
+        const open = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && isOpen(a));
         const editors = open.filter((a) => a.permission === "edit");
         // Not while an editor's branch may be changing: its approval is of
         // a head that is about to move.
@@ -588,7 +589,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (store.project(tab.projectId)?.source === "none" && input.permission !== "look")
         throw new CommandError("A project without files has Code analysis agents only.");
       if (input.askFirst === true && kind.kind !== "claude-code") throw new CommandError(ASK_FIRST_CLAUDE_ONLY);
-      // One name per agent in a tab, as the team setup checks.
+      // One name per agent in a tab, as the team setup checks: a failed
+      // agent keeps its name until it is closed.
       const name = text(input.name, "Name", NAME_MAX);
       if (store.agents(tab.projectId).some((a) => a.tabId === tab.id && a.state !== "closed" && a.name.trim().toLowerCase() === name.toLowerCase()))
         throw new CommandError(`${name}: an agent in this tab already has that name.`);
@@ -633,7 +635,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "setNeedsMail": {
       if (typeof input.on !== "boolean") throw new CommandError("Say on or off.");
-      store.transaction(() => store.putFlag(NEEDS_MAIL, input.on ? "on" : null));
+      store.setFlag(NEEDS_MAIL, input.on ? "on" : null);
       return { needsMail: input.on };
     }
     case "setSpendLimit": {
