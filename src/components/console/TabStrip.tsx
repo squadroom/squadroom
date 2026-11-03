@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ProjectView } from "@/lib/console/views";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import InlineRename from "./InlineRename";
 import { Menu, type MenuItem } from "./Menu";
 import styles from "./console.module.css";
@@ -54,6 +54,13 @@ export default function TabStrip({
     if (press.current) clearTimeout(press.current.timer);
     press.current = null;
   };
+  // A press still held when the strip goes never opens a menu.
+  useEffect(
+    () => () => {
+      if (press.current) clearTimeout(press.current.timer);
+    },
+    [],
+  );
   const keys = (e: React.KeyboardEvent, i: number) => {
     const next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
     if (next === null) return;

@@ -4,6 +4,7 @@ import type { keysPageView } from "@/lib/console/views";
 import type { ConnectionPanel } from "@/lib/console/connections";
 import { api, usePolled, type Run } from "./api";
 import { Panel } from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 // The Keys page and connection panels.
@@ -19,9 +20,11 @@ export default function KeysDialog({ run }: { run: Run }) {
   // The form: a stored value is never loaded into it; an empty value on a
   // change keeps the stored one.
   const [form, setForm] = useState<{ name: string; value: string; usd: string; url: string; checkedAt: string; existing: boolean } | null>(null);
+  // Save and Remove: one at a time.
+  const { busy, guard } = useBusy();
   const load = useCallback(async () => {
     try {
-      setPage((await api(undefined, "?keys=1")) as KeysPage);
+      setPage(await api<KeysPage>(undefined, "?keys=1"));
       setStatus("");
     } catch (e) {
       setStatus((e as Error).message);
@@ -103,7 +106,9 @@ export default function KeysDialog({ run }: { run: Run }) {
                 {r.needsCap && <div className={styles.warning}>No monthly cap recorded: no agent is given this key until it has one.</div>}
                 <div className={styles.dialogButtons}>
                   <button onClick={() => edit(r.name, true)}>{r.kind === "api" ? "Change key or cap" : "Change key"}</button>
-                  <button onClick={() => void remove(r.name)}>Remove</button>
+                  <button disabled={busy} onClick={() => guard(() => remove(r.name))}>
+                    Remove
+                  </button>
                 </div>
               </li>
             ))}
@@ -201,7 +206,7 @@ export default function KeysDialog({ run }: { run: Run }) {
           )}
           <div className={styles.dialogButtons}>
             <button onClick={() => setForm(null)}>Back</button>
-            <button className={styles.primary} onClick={() => void save()}>
+            <button className={styles.primary} disabled={busy} onClick={() => guard(save)}>
               Save
             </button>
           </div>

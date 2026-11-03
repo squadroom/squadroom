@@ -1,10 +1,10 @@
 import type { ConsoleAgent } from "./types.ts";
-import type { TeamSetup } from "./team-setup.ts";
+import { defaultModel, type TeamSetup } from "./team-setup.ts";
 
 // Templates: a tab saved as a team setup that the setup screen's own
 // checks and creation path accept, its routes by agent name, and steps
 // naming the files each step may edit, written in the steps editor and
-// kept for any squad. Browser-safe and pure.
+// kept for any team. Browser-safe and pure.
 
 export interface TemplateStep {
   name: string;
@@ -165,8 +165,8 @@ export const DOCUMENT_REVIEW: TabTemplate = {
     orchestrated: false,
     orchestrator: { kind: "claude-code", model: "", effort: "default", prompt: "" },
     members: [
-      { name: "Lead", kind: "claude-code", model: "claude-sonnet-5", effort: "default", permission: "edit", roleId: "", prompt: LEAD_PROMPT, note: "" },
-      { name: "Reviewer", kind: "codex", model: "gpt-5.6-sol", effort: "default", permission: "look", roleId: "", prompt: REVIEWER_PROMPT, note: "" },
+      { name: "Lead", kind: "claude-code", model: defaultModel("claude-code"), effort: "default", permission: "edit", roleId: "", prompt: LEAD_PROMPT, note: "" },
+      { name: "Reviewer", kind: "codex", model: defaultModel("codex"), effort: "default", permission: "look", roleId: "", prompt: REVIEWER_PROMPT, note: "" },
     ],
     goal: "",
   },

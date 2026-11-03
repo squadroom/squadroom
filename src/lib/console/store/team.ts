@@ -1,4 +1,4 @@
-import type { ConsoleAgent } from "../types.ts";
+import { isOpen, type ConsoleAgent } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { claimsOverlap, holdCycle, HoldCycleError, REPORTS_PER_TURN, TeamError, type ToolCall } from "../team.ts";
 
@@ -118,16 +118,14 @@ export const team = {
     });
   },
   /** team_release (all of the agent's claims when none are named). */
-  releaseClaims(this: ConsoleStore, epoch: number | null, agentId: string, patterns: string[]): number {
-    const run = () => {
+  releaseClaims(this: ConsoleStore, epoch: number, agentId: string, patterns: string[]): number {
+    return this.transaction(() => {
       const now = this.now();
       if (!patterns.length) return this.run("UPDATE console_claims SET released_at = ? WHERE agent_id = ? AND released_at IS NULL", now, agentId);
       let n = 0;
       for (const p of patterns) n += this.run("UPDATE console_claims SET released_at = ? WHERE agent_id = ? AND pattern = ? AND released_at IS NULL", now, agentId, p);
       return n;
-    };
-    // Inside callOnce's transaction already when epoch is null.
-    return epoch === null ? run() : this.transaction(run, epoch);
+    }, epoch);
   },
   /** The owner releases any claim. */
   releaseClaim(this: ConsoleStore, id: number): boolean {
@@ -161,7 +159,7 @@ export const team = {
       // Read again here: either may have closed meanwhile.
       for (const id of [h.holder, h.held]) {
         const a = this.agent(id);
-        if (!a || a.state === "closed" || a.state === "error") throw new TeamError(`${a?.name ?? "That agent"} can no longer take part in a hold.`);
+        if (!isOpen(a)) throw new TeamError(`${a?.name ?? "That agent"} can no longer take part in a hold.`);
       }
       // And the cycle check against the holds as they are now.
       const cycle = holdCycle(

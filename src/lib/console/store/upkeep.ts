@@ -1,3 +1,4 @@
+import type { SQLInputValue } from "node:sqlite";
 import type { ConsoleStore } from "../store.ts";
 import { json, type Row } from "./rows.ts";
 import type { ConsoleMail, ConsoleMailRow } from "../mail.ts";
@@ -8,8 +9,34 @@ type Outcome = { id: number; kind: string; state: string; result: unknown };
 const outcome = (r: Row): Outcome => ({ id: r.id as number, kind: r.kind as string, state: r.state as string, result: json(r.result) });
 
 // Work the owner asks the worker for outside any turn: folder cleanup and
-// connection checks; the store's backups; and the owner's e-mail queue.
+// connection checks; what a restart finds still running; the store's
+// backups; and the owner's e-mail queue.
 export const upkeep = {
+  /** At the worker's start, what an earlier worker was running: pushes,
+   * cleanups, checks and uploads fail visibly, file reads are read again,
+   * and image calls are interrupted (they stay charged and are never
+   * resubmitted: their job may have run). Returns how many image calls,
+   * and the staged copies no upload needs any more, for removal. */
+  failRunning(this: ConsoleStore, epoch: number): { imageCalls: number; staged: string[] } {
+    return this.transaction(() => {
+      const now = this.now();
+      const restarted = (what: string) => `The Console worker restarted during this ${what}`;
+      const fail = (table: string, set: string, ...args: SQLInputValue[]) => this.run(`UPDATE ${table} SET state = 'failed', ${set} WHERE state = 'running'`, ...args);
+      const staged = this.all("SELECT staged FROM console_uploads WHERE state IN ('running', 'queued') AND staged != ''").map((r) => r.staged as string);
+      fail("console_jobs", "message = ?, ended_at = ?", `${restarted("push")}. Push again.`, now);
+      fail("console_cleanups", "result = ?", JSON.stringify({ message: `${restarted("cleanup")}. Run it again.` }));
+      fail("console_checks", "result = ?", JSON.stringify({ note: `${restarted("check")}. Check again.`, checkedAt: now }));
+      fail("console_uploads", "message = ?, staged = ''", `${restarted("upload")}. Upload it again.`);
+      this.run("UPDATE console_file_reads SET state = 'pending' WHERE state = 'running'");
+      const imageCalls = this.run(
+        "UPDATE console_image_calls SET state = 'interrupted', message = ?, ended_at = ? WHERE state = 'open' AND epoch <> ?",
+        `${restarted("call")}: it stays charged and is not resubmitted.`, now, epoch,
+      );
+      // Queued uploads keep their staged copy (they are placed now).
+      return { imageCalls, staged: staged.filter((path) => !this.get("SELECT 1 FROM console_uploads WHERE staged = ?", path)) };
+    }, epoch);
+  },
+
   /** A scan, or a delete of chosen keys; the worker runs it. */
   queueCleanup(this: ConsoleStore, kind: "scan" | "delete", keys: string[] = []): number {
     return this.insert("INSERT INTO console_cleanups (kind, keys, state, created_at) VALUES (?, ?, 'pending', ?)", kind, JSON.stringify(keys), this.now());
@@ -28,10 +55,6 @@ export const upkeep = {
       // Old scans and their results are not kept.
       this.run("DELETE FROM console_cleanups WHERE created_at < ?", this.now() - DAY_MS);
     }, epoch);
-  },
-  /** A cleanup an earlier worker was running fails visibly. */
-  failEarlierCleanups(this: ConsoleStore, epoch: number) {
-    this.write(epoch, "UPDATE console_cleanups SET state = 'failed', result = ? WHERE state = 'running'", JSON.stringify({ message: "The Console worker restarted during this cleanup. Run it again." }));
   },
 
   /** Check connection for an agent kind; the worker runs its probes. One
@@ -53,14 +76,6 @@ export const upkeep = {
   },
   finishCheck(this: ConsoleStore, epoch: number, id: number, state: "done" | "failed", result: unknown) {
     this.write(epoch, "UPDATE console_checks SET state = ?, result = ? WHERE id = ?", state, JSON.stringify(result), id);
-  },
-  /** A check an earlier worker was running fails visibly. */
-  failEarlierChecks(this: ConsoleStore, epoch: number) {
-    this.write(
-      epoch,
-      "UPDATE console_checks SET state = 'failed', result = ? WHERE state = 'running'",
-      JSON.stringify({ note: "The Console worker restarted during this check. Check again.", checkedAt: this.now() }),
-    );
   },
 
   backupState(this: ConsoleStore): { succeededAt: number; failedAt: number } {

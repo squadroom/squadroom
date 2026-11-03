@@ -28,14 +28,13 @@ type Paused = { scope: "all" | "project" | "tab"; id: string | null; name: strin
 // Pause and Resume, usage holds and spend limits, the ACP network switch,
 // worker flags and logins out of usage.
 export const pause = {
-  /** A worker-wide state the page shows (for example why Codex is off). */
-  setFlag(this: ConsoleStore, epoch: number, key: string, value: string | null) {
-    this.transaction(() => this.putFlag(key, value), epoch);
-  },
-  /** setFlag's work, in the caller's transaction (null deletes it). */
-  putFlag(this: ConsoleStore, key: string, value: string | null) {
-    if (value === null) this.run("DELETE FROM console_flags WHERE key = ?", key);
-    else this.run("INSERT INTO console_flags (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+  /** A Console-wide state the page shows (for example why Codex is off);
+   * null deletes it. The worker passes its lease epoch. */
+  setFlag(this: ConsoleStore, key: string, value: string | null, epoch?: number) {
+    this.transaction(() => {
+      if (value === null) this.run("DELETE FROM console_flags WHERE key = ?", key);
+      else this.run("INSERT INTO console_flags (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+    }, epoch);
   },
   flag(this: ConsoleStore, key: string): string | null {
     return (this.get("SELECT value FROM console_flags WHERE key = ?", key)?.value as string) ?? null;
@@ -83,7 +82,7 @@ export const pause = {
         this.run(`UPDATE console_holds SET released_at = ? WHERE released_at IS NULL AND tab_id IN (SELECT id FROM console_tabs ${where})`, now, ...args);
       };
       if (scope === "all") {
-        this.putFlag(PAUSE_ALL, paused ? (reason ?? "") : null);
+        this.setFlag(PAUSE_ALL, paused ? (reason ?? "") : null);
         if (!paused) {
           this.run("UPDATE console_projects SET paused = 0, pause_reason = NULL");
           resumeTabs("");
@@ -105,13 +104,11 @@ export const pause = {
   pauseTab(this: ConsoleStore, epoch: number, tabId: string, reason: string) {
     this.write(epoch, "UPDATE console_tabs SET paused = 1, pause_reason = ? WHERE id = ? AND paused = 0", reason, tabId);
   },
-  /** The worker lifts its own pause (only if the reason is still its own). */
-  unpauseTab(this: ConsoleStore, epoch: number, tabId: string, reasonPrefix: string) {
-    this.transaction(() => this.liftPause(tabId, reasonPrefix), epoch);
-  },
-  /** A tab's pause is lifted if its reason starts with `prefix`. */
-  liftPause(this: ConsoleStore, tabId: string, prefix: string) {
-    this.run("UPDATE console_tabs SET paused = 0, pause_reason = NULL WHERE id = ? AND paused = 1 AND substr(pause_reason, 1, ?) = ?", tabId, prefix.length, prefix);
+  /** A tab's pause is lifted if its reason starts with `prefix`: the
+   * worker lifts its own pause this way (with its lease epoch), and Reset
+   * spend a spend pause. */
+  liftPause(this: ConsoleStore, tabId: string, prefix: string, epoch?: number) {
+    this.write(epoch, "UPDATE console_tabs SET paused = 0, pause_reason = NULL WHERE id = ? AND paused = 1 AND substr(pause_reason, 1, ?) = ?", tabId, prefix.length, prefix);
   },
   /** Stop now: running turns stop; queued ones stay for Resume. */
   stopRunning(this: ConsoleStore, agentIds: string[]): number {
@@ -243,7 +240,7 @@ export const pause = {
       const before = this.consoleSpend();
       const after = limitUsd ?? before.defaultUsd;
       if (after > before.limitUsd && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
-      this.putFlag(CONSOLE_SPEND_LIMIT, limitUsd === null ? null : String(limitUsd));
+      this.setFlag(CONSOLE_SPEND_LIMIT, limitUsd === null ? null : String(limitUsd));
       const reason = before.usd < after ? consoleSpendRaisedReason(before.usd, after) : consoleSpendPauseReason(before.usd, after);
       this.run("UPDATE console_tabs SET pause_reason = ? WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", reason, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
     });
@@ -252,7 +249,7 @@ export const pause = {
    * from now, and the tabs paused at its limit resume. */
   resetConsoleSpend(this: ConsoleStore) {
     this.transaction(() => {
-      this.putFlag(CONSOLE_SPEND_FROM, String(this.now()));
+      this.setFlag(CONSOLE_SPEND_FROM, String(this.now()));
       this.run("UPDATE console_tabs SET paused = 0, pause_reason = NULL WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
     });
   },

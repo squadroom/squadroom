@@ -104,7 +104,7 @@ export interface TabSpend {
   defaultUsd: number;
 }
 
-export function tabSpend(store: ConsoleStore, tab: Pick<ConsoleTab, "id" | "spendLimitUsd">): TabSpend {
+export function tabSpendView(store: ConsoleStore, tab: Pick<ConsoleTab, "id" | "spendLimitUsd">): TabSpend {
   return { usd: store.tabSpend(tab.id), limitUsd: tab.spendLimitUsd ?? LIMITS.tabSpendUsd, isDefault: tab.spendLimitUsd === null, defaultUsd: LIMITS.tabSpendUsd };
 }
 
@@ -130,9 +130,11 @@ export interface ProjectView {
   codexRunning: number;
 }
 
-/** The team timeline: messages between a tab's agents. */
+/** The team timeline: messages between a tab's agents, each cut at 2,000
+ * characters. */
 function timelineView(store: ConsoleStore, tabId: string): TimelineEntry[] {
-  return store.timeline(tabId, 100).map((m) => ({
+  // A character more than is shown, so a longer body is still marked as cut.
+  return store.timeline(tabId, 100, 2001).map((m) => ({
     id: m.id,
     from: m.fromName,
     to: m.toName,
@@ -212,6 +214,7 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
   const tabs = store.tabs(projectId);
   const latest = new Map(store.latestTurns(projectId).map((t) => [t.agentId, t]));
   const claims = new Map(tabs.map((t) => [t.id, store.claims(t.id)]));
+  const holds = new Map(tabs.map((t) => [t.id, store.holds(t.id)]));
   const open = store.openTurns();
   const kinds = new Map(store.agents().map((a) => [a.id, a.kind]));
   return {
@@ -223,14 +226,15 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
         ...t,
         timeline: timelineView(store, t.id),
         openAsks: store.openAsks(t.id),
-        holds: store.holds(t.id),
+        holds: holds.get(t.id) ?? [],
         claims: claims.get(t.id) ?? [],
         routes: store.routes(t.id),
-        spend: tabSpend(store, t),
+        spend: tabSpendView(store, t),
         /** Its steps and the current one, or null. */
         steps: store.tabSteps(t.id),
       })),
     closedTabs: tabs.filter((t) => t.archivedAt !== null).map((t) => ({ id: t.id, name: t.name, archivedAt: t.archivedAt! })),
+    // A failed agent is listed, with its error.
     agents: store
       .agents(projectId)
       .filter((a) => a.state !== "closed")
@@ -239,7 +243,8 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
         return {
           ...a,
           claims: (claims.get(a.tabId) ?? []).filter((c) => c.agentId === a.id).map((c) => ({ id: c.id, pattern: c.pattern, note: c.note })),
-          heldBy: store.heldBy(a),
+          // Who holds it: the oldest active hold, as `store.heldBy` reads it.
+          heldBy: (holds.get(a.tabId) ?? []).find((h) => h.held === a.id) ?? null,
           merging: store.merging(a.id),
           status: agentStatus(a, currentTurn(open, a.id)),
           turn: t && { id: t.id, status: t.status, reason: t.reason, startedAt: t.startedAt, endedAt: t.endedAt, usage: t.usage },
@@ -302,7 +307,7 @@ export function needsView(store: ConsoleStore) {
     // limit beside Reset spend.
     paused: store.pausedList().map((p) => {
       const tab = p.scope === "tab" && p.id ? store.tab(p.id) : undefined;
-      return { ...p, spend: tab ? tabSpend(store, tab) : null };
+      return { ...p, spend: tab ? tabSpendView(store, tab) : null };
     }),
     notices: store.notices(),
     interrupted: store.interruptedTurns().map((t) => ({
@@ -355,9 +360,9 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
   };
 }
 
-/** One agent's changes view: each turn's commit (without its patch, which
- * the dialog asks for when it is opened), the branch against its base, and
- * its latest push. */
+/** One agent's changes view: each turn's commit and the branch against its
+ * base (without their patches, which the dialog asks for when one is
+ * opened), and its latest push. */
 export function changesView(store: ConsoleStore, agentId: string) {
   const agent = store.agent(agentId);
   if (!agent) return null;
@@ -371,12 +376,18 @@ export function changesView(store: ConsoleStore, agentId: string) {
     branch: store.agentBase(agentId).branch,
     folder: agent.folder,
     commits: store.commits(agentId),
-    diff,
+    diff: diff && { base: diff.base, head: diff.head, stat: diff.stat, files: diff.files, updatedAt: diff.updatedAt },
     push: store.latestJob(agentId) ?? null,
     // The approve gate: its approval, and the tab's Look only agents with
     // whether each has reviewed the current head.
     approval: approvalView(store, agent, diff),
   };
+}
+
+/** The branch's whole patch in the changes view, asked for when it is
+ * opened: "" before the agent has changed anything. */
+export function branchPatchView(store: ConsoleStore, agentId: string): { patch: string } | null {
+  return store.agent(agentId) ? { patch: store.diff(agentId)?.patch ?? "" } : null;
 }
 
 /** One commit's patch in the changes view, asked for when it is opened. */

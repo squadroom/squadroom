@@ -1,5 +1,6 @@
 import { readRunning, type BilledModel, type RunningUsage } from "../spend.ts";
 import type { ConsoleAgent, EventBody, EventKind, TurnStatus, TurnUsage } from "../types.ts";
+import type { SessionTotals } from "../session.ts";
 import type { ConsoleStore } from "../store.ts";
 import { OPEN } from "./rows.ts";
 import { SUMMARY_MAX } from "./turns.ts";
@@ -20,17 +21,17 @@ export const lifecycle = {
    * is kept with it. */
   startTurn(this: ConsoleStore, epoch: number, turnId: number, billing: TurnBilling | null = null): boolean {
     return this.transaction(() => {
+      const agent = this.agentOf(turnId);
       // Pause is checked in the same transaction, so a Pause cannot be
       // crossed by a turn being claimed at that moment; so is a usage hold,
       // which pauses its tab again only on the worker's next pass (a Resume
       // of its project or of everything lifts the pause, not the hold).
-      if (this.pausedFor(this.agentOf(turnId))) return false;
-      if (this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", this.agentOf(turnId).tabId)?.usage_hold != null) return false;
+      if (this.pausedFor(agent)) return false;
+      if (this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", agent.tabId)?.usage_hold != null) return false;
       // Only the head of the agent's queue, read now: a Send next or Edit
       // that committed first is what runs. A team turn held by a teammate
       // waits without blocking the owner's own messages, as the schedule
       // does.
-      const agent = this.agentOf(turnId);
       const held = !!this.heldBy(agent);
       if (this.queuedTurns(agent.id).find((q) => !(held && q.trigger === "team"))?.id !== turnId) return false;
       const now = this.now();
@@ -43,7 +44,10 @@ export const lifecycle = {
     }, epoch);
   },
   /** End a turn. Its delivered messages settle with it: done, with each
-   * unanswered ask answered by `finalText`; otherwise interrupted. */
+   * unanswered ask answered by `finalText`; otherwise interrupted.
+   * `totals`, its client's running usage totals, are kept only with its
+   * charge, in this transaction: totals saved without the charge would let
+   * the next turn be charged less than it used. */
   finishTurn(
     this: ConsoleStore,
     epoch: number,
@@ -53,6 +57,7 @@ export const lifecycle = {
     usage?: TurnUsage | null,
     finalText: string | null = null,
     charge: Charge | null = null,
+    totals: SessionTotals | null = null,
   ): boolean {
     return this.transaction(() => {
       const now = this.now();
@@ -67,6 +72,11 @@ export const lifecycle = {
         // offsets match what was delivered.
         this.run("UPDATE console_turns SET ended_seq = ?, final_text = ? WHERE id = ?", seq, finalText?.trim() || null, turnId);
         if (charge?.hold) this.holdForUsage(agent.tabId, charge.hold);
+        if (charge && totals)
+          this.run(
+            "INSERT INTO console_session_totals (agent_id, session_id, totals) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET session_id = excluded.session_id, totals = excluded.totals",
+            agent.id, totals.sessionId, JSON.stringify(totals.value),
+          );
         this.settle(turnId, status, finalText, now);
         const summary = !!this.turn(turnId)?.summary;
         // A summary is the agent's own handoff, never routed.
@@ -100,7 +110,7 @@ export const lifecycle = {
   },
   /** Inside a transaction: an uncharged turn's cost, and its tab's usage
    * hold when it is charged its full allowance. */
-  chargeTurn(this: ConsoleStore, turnId: number, charge: Charge) {
+  recordCharge(this: ConsoleStore, turnId: number, charge: Charge) {
     const changed = this.run("UPDATE console_turns SET cost_usd = ?, cost_basis = ? WHERE id = ? AND cost_usd IS NULL", charge.usd, charge.basis, turnId);
     if (changed && charge.hold) this.holdForUsage(this.agentOf(turnId).tabId, charge.hold);
   },
@@ -108,9 +118,9 @@ export const lifecycle = {
    * interrupted: they wait for the owner and are never replayed. A paid
    * turn whose prompt had reached the client is charged in the same
    * transaction (`charge`, from the agent, what the turn was priced as when
-   * it started (null for a turn from before that was kept) and what its
-   * client had reported: the allowance for what it did not, and its tab's
-   * usage hold), so no crash between the two leaves it uncharged. */
+   * it started (null when none was kept) and what its client had reported:
+   * the allowance for what it did not, and its tab's usage hold), so no
+   * crash between the two leaves it uncharged. */
   interruptEarlier(
     this: ConsoleStore,
     epoch: number,
@@ -125,7 +135,7 @@ export const lifecycle = {
           row.prompted === 1 && row.cost_usd === null
             ? charge({ id: t.id, agent: this.agentOf(t.id), billing: parse(row.billing) as TurnBilling | null, running: readRunning(parse(row.running)) })
             : null;
-        if (owed) this.chargeTurn(t.id, owed);
+        if (owed) this.recordCharge(t.id, owed);
         this.run("UPDATE console_turns SET status = 'interrupted', reason = ?, ended_at = ? WHERE id = ?", RESTARTED, this.now(), t.id);
         const seq = this.insertEvent(t.id, this.agentOf(t.id), "status", { status: "interrupted", reason: RESTARTED }, this.now());
         this.run("UPDATE console_turns SET ended_seq = ? WHERE id = ?", seq, t.id);

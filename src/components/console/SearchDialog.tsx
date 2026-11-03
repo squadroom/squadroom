@@ -28,7 +28,7 @@ export default function SearchDialog({
   const search = useCallback(async (text: string) => {
     setStatus("Searching…");
     try {
-      setResults(((await api(undefined, `?search=${encodeURIComponent(text)}`)) as { results: Results }).results);
+      setResults((await api<{ results: Results }>(undefined, `?search=${encodeURIComponent(text)}`)).results);
       setStatus("");
     } catch (e) {
       setStatus((e as Error).message);

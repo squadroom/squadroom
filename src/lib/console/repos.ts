@@ -17,6 +17,7 @@ import {
   replyToReviewThread,
   reviewThreadOwner,
   STORED_OBJECTS,
+  type GitHubApi,
 } from "./git.ts";
 import { CODEX_REVIEW, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { agentModel } from "./agents.ts";
@@ -130,6 +131,10 @@ export class Repos {
     }).catch(() => {});
     return next;
   }
+  /** The GitHub client's calls with this token. */
+  private github(token: string): GitHubApi {
+    return { token, fetch: this.o.fetch, url: this.o.githubApi };
+  }
   /** The Git token for a project: its own override, or the global one. */
   private token(projectId: string): string {
     const token = keyFor(this.o.keysFile, TOKEN_KEY, projectId).value;
@@ -203,7 +208,7 @@ export class Repos {
    * ruleset names it exactly, and the mirror is up to date. */
   async prepare(project: ConsoleProject) {
     const token = this.token(project.id);
-    await checkGitHub(project.repo!, project.baseBranch, token, this.o.fetch);
+    await checkGitHub(project.repo!, project.baseBranch, this.github(token));
     await this.serial(project.id, () => this.mirror(project).update(token));
   }
 
@@ -229,7 +234,7 @@ export class Repos {
       const mirror = this.mirror(project);
       return this.serial(project.id, async () => {
         const token = this.token(project.id);
-        await checkGitHub(project.repo!, project.baseBranch, token, this.o.fetch);
+        await checkGitHub(project.repo!, project.baseBranch, this.github(token));
         await mirror.update(token);
         this.checkDisk(await mirror.size());
         await mirror.bundleBase(project.baseBranch, bundle);
@@ -449,7 +454,7 @@ export class Repos {
     const { branch } = this.o.store.agentBase(agent.id);
     if (!branch || agent.permission !== "edit") throw new GitError(`${agent.name} has no console/ branch of its own.`);
     const token = this.token(project.id);
-    const pr = await findPullRequest(project.repo!, branch, project.baseBranch, token, this.o.fetch, this.o.githubApi);
+    const pr = await findPullRequest(project.repo!, branch, project.baseBranch, this.github(token));
     if (!pr) throw new GitError(`${branch} has no open pull request yet. Push it with team_push (the owner approves), which opens one.`);
     return { pr, token, branch };
   }
@@ -458,12 +463,12 @@ export class Repos {
    * Nothing is written. */
   async readAgentPullRequest(agent: ConsoleAgent, project: ConsoleProject, focus: { comment?: number; thread?: string } = {}): Promise<string> {
     const { pr, token } = await this.agentPullRequest(agent, project);
-    const review = await readPullRequest(project.repo!, pr.number, token, this.o.fetch, this.o.githubApi);
+    const review = await readPullRequest(project.repo!, pr.number, this.github(token));
     // One thread asked for: all of its replies, past the first 20.
     if (focus.thread) {
       const t = review.threads.find((x) => x.id === focus.thread);
       if (t?.moreComments) {
-        const all = await readReviewThreadComments(t.id, token, this.o.fetch, this.o.githubApi);
+        const all = await readReviewThreadComments(t.id, this.github(token));
         t.comments = all.comments;
         t.moreComments = all.more ? 1 : 0;
       }
@@ -476,11 +481,11 @@ export class Repos {
    * and the thread belongs to that pull request. */
   async checkReplyOnAgentPullRequest(agent: ConsoleAgent, project: ConsoleProject, threadId: string): Promise<number> {
     const { pr, token } = await this.agentPullRequest(agent, project);
-    const review = await readPullRequest(project.repo!, pr.number, token, this.o.fetch, this.o.githubApi);
+    const review = await readPullRequest(project.repo!, pr.number, this.github(token));
     const head = await this.clone(agent).head().catch(() => null);
     if (head && head !== review.headSha)
       throw new GitError(`Your folder has commits GitHub does not have yet (it is at ${head.slice(0, 8)}, the pull request at ${review.headSha.slice(0, 8)}). Push with team_push, then reply in your next turn once the push shows as done.`);
-    const owner = await reviewThreadOwner(threadId, token, this.o.fetch, this.o.githubApi);
+    const owner = await reviewThreadOwner(threadId, this.github(token));
     if (owner !== `${project.repo!.toLowerCase()}#${pr.number}`) throw new GitError(`That thread is not on your pull request #${pr.number}.`);
     return pr.number;
   }
@@ -490,7 +495,7 @@ export class Repos {
     const token = this.token(project.id);
     const body = `${message}\n\n_— ${agent.name}, via Squadroom_`;
     if (this.o.redactor.holdsSecret(body) || REDACTION_MARK.test(body)) throw new GitError("The reply contains a credential, so it was not sent.");
-    const { resolveError } = await replyToReviewThread(threadId, body, resolve, token, this.o.fetch, this.o.githubApi);
+    const { resolveError } = await replyToReviewThread(threadId, body, resolve, this.github(token));
     if (resolveError) return `Replied on pull request #${number}, but the thread could not be resolved (${resolveError}). Do not reply again; the owner can resolve it on GitHub.`;
     return `Replied on pull request #${number}${resolve ? " and resolved the thread" : ""}.`;
   }
@@ -519,7 +524,7 @@ export class Repos {
       );
     const token = this.token(project.id);
     // The base branch must still be protected by name before every push.
-    await checkGitHub(project.repo!, project.baseBranch, token, this.o.fetch);
+    await checkGitHub(project.repo!, project.baseBranch, this.github(token));
     // Nothing an agent was handed may leave the Mac: every object of the
     // branch that GitHub does not have yet (by the owner's mirror, never by
     // a ref the agent controls) is read raw, binary or not, for every known
@@ -571,10 +576,10 @@ export class Repos {
       // An open pull request takes the agent's new title and description;
       // the latest report never overwrites one already on GitHub.
       const update = { ...(job.request?.title ? { title } : {}), ...(job.request?.body ? { body } : {}) };
-      const pr = await openPullRequest(project.repo!, { branch, base: project.baseBranch, title, body }, token, this.o.fetch, this.o.githubApi, update);
+      const pr = await openPullRequest(project.repo!, { branch, base: project.baseBranch, title, body }, this.github(token), update);
       let review = "";
       if (this.o.codexReview && wantsReview(job.request, pr.created))
-        review = await commentOnPullRequest(project.repo!, pr.number, CODEX_REVIEW, token, this.o.fetch, this.o.githubApi).then(
+        review = await commentOnPullRequest(project.repo!, pr.number, CODEX_REVIEW, this.github(token)).then(
           () => " Codex was asked to review it.",
           (error: unknown) => ` Codex could not be asked to review it: ${error instanceof Error ? error.message : String(error)}`,
         );

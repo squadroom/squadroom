@@ -21,7 +21,7 @@ import { sweepUploadLeftovers } from "./agent-files.ts";
 import { currentStepFiles } from "./templates.ts";
 import { ConsoleStore, LEASE_LOST, NEEDS_MAIL, type TurnRow } from "./store.ts";
 import { CODEX_DISABLED, LIMITS, type ConsoleAgent } from "./types.ts";
-import type { Credential, OwnerAnswer, Runtime } from "./worker/shared.ts";
+import { sessionOutdated, type Credential, type OwnerAnswer, type Runtime } from "./worker/shared.ts";
 import { holds } from "./worker/holds.ts";
 import { images } from "./worker/images.ts";
 import { jobs } from "./worker/jobs.ts";
@@ -36,9 +36,10 @@ import { consoleMirrorsDir } from "./config.ts";
 
 // The Console worker: the only process that starts or drives an
 // agent. It holds its own lease in the Console's store, sweeps every `agent`
-// process before any agent starts, keeps one long-lived Claude Code process
-// per Claude window (at most `liveProcesses`) and one Codex App Server for
-// every Codex window (a thread each), runs queued turns within the global and
+// process before any agent starts, keeps one long-lived process per Claude
+// Code or ACP agent window (at most `liveProcesses` between them) and one
+// Codex App Server per login (the ChatGPT one, and one per OpenAI API key;
+// a thread per Codex window), runs queued turns within the global and
 // per-login limits, enforces each turn's deadline, inactivity and output
 // limits (time waiting for the owner excluded), answers permission prompts
 // itself or asks the owner (Needs you), prepares GitHub projects and clones,
@@ -207,10 +208,10 @@ export class ConsoleWorker {
       graceMs: this.grace,
       stopped: () => this.stopped,
       flag: (key) => this.store.flag(key),
-      setFlag: (key, value) => void this.safe(() => this.store.setFlag(this.epoch!, key, value)),
+      setFlag: (key, value) => void this.safe(() => this.store.setFlag(key, value, this.epoch!)),
       realInside: options.realInside ?? realInside,
       folders: () => this.allFolders(),
-      codexDenied: (agent) => this.codexDenied(agent),
+      deniedFolders: (agent) => this.deniedFolders(agent),
       // In a project: a folder being made, or an agent waiting for one (its
       // project's ACP sessions are retired first, and none starts meanwhile).
       creatingFolders: (projectId) =>
@@ -404,13 +405,11 @@ export class ConsoleWorker {
       if (agent?.folder && !stepped) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
       this.safe(() => this.store.setSettling(epoch, id, null));
     }
-    // Image calls an earlier worker left open stay charged, never resubmitted.
-    if (this.store.failEarlierImageCalls(epoch)) this.log("Image calls from before the restart stay charged and are not resubmitted.");
-    this.store.failEarlierJobs(epoch);
-    this.store.failEarlierCleanups(epoch);
-    this.store.failEarlierChecks(epoch);
+    // What an earlier worker was running fails visibly; its image calls stay
+    // charged, never resubmitted.
+    const { imageCalls, staged } = this.store.failRunning(epoch);
+    if (imageCalls) this.log("Image calls from before the restart stay charged and are not resubmitted.");
     this.store.expireOpenRequests(epoch);
-    const staged = this.store.failEarlierUploads(epoch);
     this.leading(epoch);
     for (const path of staged) rmSync(path, { force: true });
     this.leading(epoch);
@@ -421,7 +420,7 @@ export class ConsoleWorker {
       this.options.uploadsDir ? { dir: this.options.uploadsDir, inUse: new Set(this.store.stagedInUse()), now: this.now() } : undefined,
     ).catch((error: unknown) => this.log(`Upload leftovers could not all be removed: ${message(error)}`));
     // A Codex problem found by an earlier worker is checked again.
-    this.store.setFlag(epoch, CODEX_DISABLED, null);
+    this.store.setFlag(CODEX_DISABLED, null, epoch);
     // Permission prompts may wait for the owner, so requests have no time limit.
     this.mcp = await startMcpServer(this.backend(), { name: "console", version: "1.0.0" }, { requestTimeoutMs: 0 });
     this.leading(epoch);
@@ -548,7 +547,7 @@ export class ConsoleWorker {
       this.runRefreshes();
       const open = this.store.openTurns();
       this.closeAgents();
-      this.freshStarts();
+      this.freshStarts(open);
       this.networkChanges();
       this.usageHolds();
       this.spendHolds();
@@ -557,8 +556,8 @@ export class ConsoleWorker {
       this.enforceLimits();
       this.schedule(open);
       this.stallCheck(open);
-      this.clearHoldStalls();
-      this.runJobs();
+      this.clearHoldStalls(open);
+      this.runJobs(open);
       this.runFiles();
       this.runCleanups();
       this.runChecks();
@@ -583,8 +582,7 @@ export class ConsoleWorker {
       // sandbox's folder list, or the login or key): the process is retired,
       // and the replacement waits for it to exit within the live-process
       // limit.
-      const same = rt.sessionLogin === credential.login && rt.sessionCredential === credential.print;
-      if (!current || (!own.stale(current) && same)) return true;
+      if (!current || !sessionOutdated(rt, current, credential)) return true;
       if (!rt.turn) this.retire(rt);
       return false;
     }
@@ -666,8 +664,6 @@ export class ConsoleWorker {
         this.safe(() => this.store.finishTurn(epoch, row.id, "failed", refused));
         continue;
       }
-      // A process being ended, folders being made: the driver says wait.
-      if (driver.waiting(agent)) continue;
       // A tab at its spend limit runs no further turn of any model, Resume
       // or not, until the owner resets its spend; at the Console-wide
       // limit, no further API-key turn anywhere.
@@ -679,6 +675,8 @@ export class ConsoleWorker {
         this.safe(() => this.store.finishTurn(epoch, row.id, "failed", this.redactor.text(message(error))));
         continue;
       }
+      // A process being ended, folders being made: the driver says wait.
+      if (driver.waiting(agent, credential.credentials)) continue;
       const running = this.running();
       // "Queued" while a limit is reached; the window shows it.
       if (running.length >= this.limits.runningTurns) return;

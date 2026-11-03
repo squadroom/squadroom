@@ -97,12 +97,12 @@ export const projects = {
   archive(this: ConsoleStore, scope: "project" | "tab", id: string): string[] {
     const closed = this.transaction(() => {
       const now = this.now();
-      let inScope: string[];
+      let inScope: ConsoleAgent[];
       if (scope === "project") {
         const p = this.project(id);
         if (!p) throw new Error("That project does not exist.");
         if (p.archivedAt !== null) throw new Error("That project is already archived.");
-        inScope = this.agents(id).map((a) => a.id);
+        inScope = this.agents(id);
         this.run("UPDATE console_projects SET archived_at = ? WHERE id = ?", now, id);
       } else {
         const t = this.tab(id);
@@ -111,16 +111,17 @@ export const projects = {
         if (this.project(t.projectId)?.archivedAt != null) throw new Error("That project is archived.");
         if (!this.tabs(t.projectId).some((o) => o.id !== id && o.archivedAt === null))
           throw new Error("A project keeps at least one open tab. Archive the project instead.");
-        inScope = this.agents(t.projectId).filter((a) => a.tabId === id).map((a) => a.id);
+        inScope = this.agents(t.projectId).filter((a) => a.tabId === id);
         this.run("UPDATE console_tabs SET archived_at = ? WHERE id = ?", now, id);
       }
-      const open = inScope.filter((a) => this.agent(a)!.state !== "closed");
+      // An agent whose setup failed is closed too.
+      const open = inScope.filter((a) => a.state !== "closed").map((a) => a.id);
       this.closeRows(open, "discarded");
       // The whole team's mail is discarded: waiting, in a running turn (its
       // stop would otherwise mark it interrupted) or already interrupted,
       // for agents closed now or earlier.
-      for (const agentId of inScope)
-        this.run("UPDATE console_messages SET state = 'discarded', ended_at = ? WHERE to_agent = ? AND state IN ('queued', 'in_turn', 'interrupted')", now, agentId);
+      for (const a of inScope)
+        this.run("UPDATE console_messages SET state = 'discarded', ended_at = ? WHERE to_agent = ? AND state IN ('queued', 'in_turn', 'interrupted')", now, a.id);
       return open;
     });
     for (const agentId of closed) this.requestStop(agentId, true);
@@ -176,6 +177,12 @@ export const projects = {
   },
   session(this: ConsoleStore, agentId: string): string | null {
     return (this.get("SELECT session_id FROM console_sessions WHERE agent_id = ?", agentId)?.session_id as string | undefined) ?? null;
+  },
+  /** The running totals kept with the last charged turn of this agent's
+   * session (`finishTurn`); null when none were kept for that session. */
+  sessionTotals(this: ConsoleStore, agentId: string, sessionId: string): unknown {
+    const row = this.get("SELECT totals FROM console_session_totals WHERE agent_id = ? AND session_id = ?", agentId, sessionId);
+    return row ? JSON.parse(row.totals as string) : null;
   },
 
   // ── Worker writes (fenced by the lease epoch) ──────────────────────────

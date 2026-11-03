@@ -84,6 +84,11 @@ export interface Credential {
   /** Which entry of the key file it came from (none for an account login). */
   scope?: "project" | "global";
 }
+/** The runtime's session was started with settings that no longer match:
+ * the agent's (Ask me first, the folders it denies) or another credential.
+ * It is replaced before its next turn. */
+export const sessionOutdated = (rt: Runtime, agent: ConsoleAgent, credential: Credential) =>
+  !!rt.session && (rt.session.stale(agent) || rt.sessionLogin !== credential.login || rt.sessionCredential !== credential.print);
 export interface OwnerAnswer {
   allow: boolean;
   always: boolean;

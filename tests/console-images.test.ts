@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { getEventListeners } from "node:events";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DESIGN_MODELS } from "../src/config/design-models.ts";
@@ -8,6 +9,7 @@ import { IMAGE_TOOLS, ImageError, listPrice, parseImageCall } from "../src/lib/c
 import { writeKeyFile } from "../src/lib/console/keys.ts";
 import type { Launcher } from "../src/lib/console/launcher.ts";
 import { overviewView } from "../src/lib/console/overview.ts";
+import { pause } from "../src/lib/console/worker/images.ts";
 import { editSize, KREA_API } from "../src/lib/shared/krea.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 
@@ -121,6 +123,17 @@ test("image tools: argument checks, the models and prices in the descriptions, a
   assert.equal(listPrice(0.015), "$0.015");
   assert.equal(needsFreshCode({ action: "setImageTools", projectId: "p", on: true }), true);
   assert.equal(needsFreshCode({ action: "setImageTools", projectId: "p", on: false }), false);
+});
+
+test("a job's polls leave no abort listener behind; an abort still ends the wait at once", async () => {
+  const controller = new AbortController();
+  for (let i = 0; i < 20; i++) await pause(1, controller.signal);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  const waiting = pause(60_000, controller.signal);
+  assert.equal(getEventListeners(controller.signal, "abort").length, 1);
+  controller.abort();
+  await waiting;
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 });
 
 test("image tools are offered to Claude Code at Edit only, with the switch on and a capped Krea key; an MCP round trip lists them", async (t) => {

@@ -46,11 +46,13 @@ function packageCacheEnv(dir: string): Record<string, string> {
 const DOCUMENTS_ONLY_DENY = ["Bash", "WebFetch", "WebSearch", "Task", "NotebookEdit"];
 
 /** `--settings` for one window: flags only, with `--setting-sources ""`. */
-export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false, apiKey = false) {
+export function claudeSettings(folder: string, permission: Permission, paths: ConsolePaths, askFirst = false, documentsOnly = false, apiKey = false, others: string[] = []) {
   // Unreadable: the shared folder and each client's login, Kimi Code's
   // membership login too (only its own client reads it), and Claude Code's
-  // own state file.
-  const hidden = [paths.shared, `${paths.agentHome}/.codex`, `${paths.agentHome}/.claude`, `${paths.agentHome}/.kimi-code`];
+  // own state file. `others` (every other project's folder and teammate's
+  // clone) are outside the working folder already; naming them backs up
+  // that read block, as Codex's and the ACP sandbox's lists do.
+  const hidden = [paths.shared, `${paths.agentHome}/.codex`, `${paths.agentHome}/.claude`, `${paths.agentHome}/.kimi-code`, ...others];
   const hiddenFiles = [`${paths.agentHome}/.claude.json`];
   return {
     sandbox: {

@@ -22,7 +22,7 @@ export default function CleanupDialog() {
     };
   }, []);
   const wait = async (cleanupId: number) => {
-    const c = await awaitJob(`?cleanup=${cleanupId}`, {
+    const c = await awaitJob<{ state: string; result?: { message?: string } }>(`?cleanup=${cleanupId}`, {
       delay: (i) => (i ? 1000 : 300),
       limitMs: 10 * 60_000,
       alive: () => open.current,
@@ -38,7 +38,7 @@ export default function CleanupDialog() {
     setBusy(true);
     setStatus("Looking…");
     try {
-      const { cleanupId } = await api({ action: "cleanupScan" });
+      const { cleanupId } = await api<{ cleanupId: number }>({ action: "cleanupScan" });
       const result = (await wait(cleanupId)) as { items: CleanupItem[] };
       setItems(result.items);
       // Anything with commits that would be lost starts unticked.
@@ -57,7 +57,7 @@ export default function CleanupDialog() {
     setBusy(true);
     setStatus("Removing…");
     try {
-      const { cleanupId } = await api({ action: "cleanupDelete", keys });
+      const { cleanupId } = await api<{ cleanupId: number }>({ action: "cleanupDelete", keys });
       const done = (await wait(cleanupId)) as CleanupDone;
       setStatus(`Removed ${done.removed.length}.${done.skipped.length ? ` Left ${done.skipped.length}: ${done.skipped.map((s) => `${s.key} (${s.reason})`).join("; ")}` : ""}`);
       setItems((list) => (list ?? []).filter((i) => !done.removed.includes(i.key)));

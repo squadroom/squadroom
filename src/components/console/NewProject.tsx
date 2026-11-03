@@ -7,6 +7,10 @@ import Dialog from "./Dialog";
 import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
+// New project and New tab. A project's agents work on a GitHub repository,
+// a folder on this Mac, or no files at all; a new tab starts empty or from
+// a template.
+
 export function NewProject({ onClose, onCreate }: { onClose: () => void; onCreate: (fields: CommandFields<"createProject">) => Promise<void> }) {
   const [name, setName] = useState("");
   const [source, setSource] = useState<"github" | "folder" | "none">("github");

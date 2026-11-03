@@ -8,6 +8,11 @@ import Dialog from "./Dialog";
 import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
+/** Each member row's key, so removing one keeps the others' open prompts
+ * and focus with their own rows. */
+let memberKey = 0;
+const memberKeys = (setup: TeamSetup) => setup.members.map(() => ++memberKey);
+
 /** The coding team's setup screen (roles): the Orchestrator's AI, the
  * members it divides the work among (each with a role whose prompt can be
  * edited for that agent), and an optional goal it starts on by itself once
@@ -15,6 +20,7 @@ import styles from "./console.module.css";
 export default function TeamSetupDialog(props: { codexOff: string | null; takenNames: string[]; roles: RoleDef[]; onClose: () => void; onCreate: (setup: TeamSetup) => Promise<void> }) {
   const { codexOff, takenNames, roles, onClose, onCreate } = props;
   const [setup, setSetup] = useState<TeamSetup>(() => defaultTeamSetup(!!codexOff, takenNames, roles));
+  const [keys, setKeys] = useState(() => memberKeys(setup));
   const checked = checkTeamSetup(setup, { takenNames, codexOff: !!codexOff, roles });
   const { busy, guard } = useBusy();
   const member = (i: number, change: Partial<TeamMemberSetup>) =>
@@ -42,8 +48,11 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
   );
   const orchestrated = setup.orchestrated !== false;
   /** Switching the kind of team starts from that kind's preset; the goal stays. */
-  const switchTo = (pair: boolean) =>
-    setSetup((s) => ({ ...(pair ? pairTeamSetup : defaultTeamSetup)(!!codexOff, takenNames, roles), goal: s.goal }));
+  const switchTo = (pair: boolean) => {
+    const preset = (pair ? pairTeamSetup : defaultTeamSetup)(!!codexOff, takenNames, roles);
+    setSetup((s) => ({ ...preset, goal: s.goal }));
+    setKeys(memberKeys(preset));
+  };
   return (
     <Dialog title="Set up a coding team" onClose={onClose}>
       <div className={styles.teamRow} role="radiogroup" aria-label="Kind of team">
@@ -72,7 +81,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
       {setup.members.map((m, i) => {
         const who = m.name || `Member ${i + 1}`;
         return (
-          <div key={i} className={styles.teamMember}>
+          <div key={keys[i]} className={styles.teamMember}>
             <div className={styles.teamRow}>
               <input aria-label={`Member ${i + 1}: name`} value={m.name} maxLength={NAME_MAX} placeholder="Name" onChange={(e) => member(i, { name: e.target.value })} />
               <select aria-label={`${who}: role`} value={m.roleId} onChange={(e) => pickRole(i, e.target.value)}>
@@ -89,7 +98,13 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
                 <option value="look">{PERMISSION_LABELS.look}</option>
               </select>
               <input aria-label={`${who}: note`} value={m.note} maxLength={NOTE_MAX} placeholder="Strengths (frontend, tests…)" onChange={(e) => member(i, { note: e.target.value })} />
-              <button aria-label={`Remove ${who}`} onClick={() => setSetup((s) => ({ ...s, members: s.members.filter((_, j) => j !== i) }))}>
+              <button
+                aria-label={`Remove ${who}`}
+                onClick={() => {
+                  setSetup((s) => ({ ...s, members: s.members.filter((_, j) => j !== i) }));
+                  setKeys((k) => k.filter((_, j) => j !== i));
+                }}
+              >
                 Remove
               </button>
             </div>
@@ -101,6 +116,8 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
         <button
           onClick={() => {
             const lead = roles.find((r) => r.id === "lead");
+            const key = ++memberKey;
+            setKeys((k) => [...k, key]);
             setSetup((s) => ({
               ...s,
               members: [

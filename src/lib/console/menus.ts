@@ -1,13 +1,13 @@
-import { SPEND_PAUSE, type ConsoleProject } from "@/lib/console/types";
-import { money, projectPlace } from "@/lib/console/ui";
-import type { ProjectView, templatesView } from "@/lib/console/views";
-import type { Run } from "./api";
-import type { Modal } from "./ConsoleModals";
-import type { MenuItem } from "./Menu";
+import type { Run } from "../../components/console/api.ts";
+import type { Modal } from "../../components/console/ConsoleModals.tsx";
+import type { MenuItem } from "../../components/console/Menu.tsx";
+import { SPEND_PAUSE, type ConsoleProject } from "./types.ts";
+import { money, projectPlace } from "./ui.ts";
+import type { ProjectView, templatesView } from "./views.ts";
 
 // The page's menus: a tab's, the project's and Add, each item once. Built
 // from what the page shows; each opens a dialog, starts a rename or runs a
-// command.
+// command. Pure (the page's types only), so they are tested.
 
 export interface MenuContext {
   view: ProjectView | null;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGENT_KINDS } from "../src/lib/console/agents.ts";
-import { parseSseFrames } from "../src/lib/console/sse.ts";
+import { followStream, parseSseFrames, type SseFrame } from "../src/lib/console/sse.ts";
 import type { ConsoleEvent } from "../src/lib/console/types.ts";
 import {
   EVENT_BYTES_MAX,
@@ -30,6 +30,7 @@ import {
   keepIfSame,
   templateSummary,
   timelineLine,
+  wholeInput,
   workerStatus,
   type EventWindow,
 } from "../src/lib/console/ui.ts";
@@ -50,6 +51,65 @@ test("SSE frames: data lines joined, the event name, the start comment, the unfi
   assert.deepEqual(parseSseFrames("data: half"), { frames: [], rest: "data: half" });
 });
 
+/** A stream answer whose body arrives in these chunks. */
+const streamed = (chunks: string[]) =>
+  new Response(
+    new ReadableStream({
+      start(c) {
+        for (const chunk of chunks) c.enqueue(new TextEncoder().encode(chunk));
+        c.close();
+      },
+    }),
+  );
+
+test("a followed stream hands over whole frames across chunks, reconnects after an end or a failure, and stops at a 401", async (t) => {
+  const answers: (() => Response)[] = [
+    () => streamed(['data: {"id":1}\n\nda', 'ta: {"id":2}\n\n']),
+    () => {
+      throw new TypeError("network down");
+    },
+    () => new Response("busy", { status: 503 }),
+    () => streamed(['data: {"id":3}\n\n']),
+    () => new Response("{}", { status: 401 }),
+  ];
+  const asked: { url: string; header: string | null }[] = [];
+  t.mock.method(globalThis, "fetch", async (url: string, init: RequestInit) => {
+    asked.push({ url, header: new Headers(init.headers).get("x-workspace-request") });
+    return answers.shift()!();
+  });
+  const frames: SseFrame[] = [];
+  let connection = 0;
+  const signedOut = new Promise<void>((resolve) => followStream(() => `/events?n=${++connection}`, (f) => frames.push(...f), resolve, 1));
+  await signedOut;
+  assert.deepEqual(
+    frames.map((f) => f.data),
+    ['{"id":1}', '{"id":2}', '{"id":3}'],
+  );
+  // The address is asked for again on each connection (to resume after the
+  // last event), always with the request header.
+  assert.deepEqual(
+    asked.map((a) => a.url),
+    ["/events?n=1", "/events?n=2", "/events?n=3", "/events?n=4", "/events?n=5"],
+  );
+  assert.ok(asked.every((a) => a.header === "1"));
+  // Signed out: no more connections.
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(asked.length, 5);
+});
+
+test("a stopped stream aborts its request and never reconnects", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", (_url: string, init: RequestInit) => {
+    calls++;
+    return new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+  });
+  const stop = followStream(() => "/events", () => assert.fail("no frames"), () => assert.fail("not signed out"), 1);
+  await new Promise((r) => setTimeout(r, 5));
+  stop();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls, 1);
+});
+
 test("Needs you counts every kind of item, the optional ones too", () => {
   assert.equal(needCount({ requests: [], interrupted: [] }), 0);
   const one = { id: 1, agentName: "A", kind: "permission" as const, tool: "Bash", summary: "ls" };
@@ -63,6 +123,14 @@ test("Needs you counts every kind of item, the optional ones too", () => {
     }),
     6,
   );
+});
+
+test("a request's input: whole JSON indented, anything else as stored", () => {
+  assert.equal(wholeInput('{"command":"ls\\nrm -rf x","n":1}'), '{\n  "command": "ls\\nrm -rf x",\n  "n": 1\n}');
+  // A cut input is not JSON: shown as stored, with its note.
+  const cut = '{"command":"long… (1,234 more characters)';
+  assert.equal(wholeInput(cut), cut);
+  assert.equal(wholeInput(""), "");
 });
 
 test("words and amounts: plural, money, elapsed", () => {

@@ -17,6 +17,10 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 
 /** `creating`: the worker has not made its folder yet. */
 export type AgentState = "creating" | "ready" | "error" | "closed";
+/** An agent that can still take part: not closed, and its setup did not
+ * fail. Where a failed agent still counts (its name is taken, the page
+ * lists it), the check is `state !== "closed"` and says so. */
+export const isOpen = (a: { state: AgentState } | null | undefined): boolean => !!a && a.state !== "closed" && a.state !== "error";
 export type TurnStatus =
   | "queued"
   | "running"
@@ -115,7 +119,7 @@ export interface ConsoleTurn {
 }
 export interface TurnUsage {
   /** Every input-side token: uncached input plus cache reads and writes
-   * (rows from before 2026-10-18 carry only this total). */
+   * (a row may carry only this total). */
   inputTokens?: number;
   /** The part of `inputTokens` read from the prompt cache. */
   cacheReadTokens?: number;

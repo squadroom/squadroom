@@ -2,6 +2,6 @@
   "name": "console-client-claude",
   "private": true,
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.282"
+    "@anthropic-ai/claude-code": "2.1.316"
   }
 }

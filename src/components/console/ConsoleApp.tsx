@@ -4,23 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FreshCode from "@/components/shared/FreshCode";
 import { BUILT_IN_ROLES, type RoleDef } from "@/lib/console/roles";
 import { gridShape } from "@/lib/console/transcript";
+import { addMenu, projectMenu, tabMenu, type MenuContext } from "@/lib/console/menus";
 import { focusTarget, readCollapsed, toggle, writeCollapsed, type TreeProject } from "@/lib/console/tree";
 import type { ConsoleProject } from "@/lib/console/types";
 import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, type Appearance, type SettingsSection } from "@/lib/console/ui";
+import { inOrder } from "@/lib/console/polled";
 import { pickProject, pickTab } from "@/lib/console/view-state";
-import type { ProjectView, WorkerView, templatesView } from "@/lib/console/views";
+import type { ProjectView, WorkerView, needsView, projectsView, templatesView, treeView } from "@/lib/console/views";
 import AgentWindow from "./AgentWindow";
 import { useRenewHeldUploads } from "./useComposer";
 import { useDialogFocus } from "./useDialogFocus";
-import { api, recall, remember, useCodeConfirm, usePolled, type Run } from "./api";
+import { api, recall, remember, useCodeConfirm, usePolled, type Run, type Versioned } from "./api";
 import ChangesView from "./ChangesView";
 import CleanupDialog from "./CleanupDialog";
 import ConsoleModals, { type Modal } from "./ConsoleModals";
 import FilePanel from "./FilePanel";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import KeysDialog from "./KeysDialog";
 import { MenuButton } from "./Menu";
-import { addMenu, projectMenu, tabMenu, type MenuContext } from "./menus";
 import OverviewDialog from "./OverviewDialog";
 import LogsDialog from "./LogsDialog";
 import NavTree, { ArchivedList } from "./NavTree";
@@ -48,6 +49,15 @@ const APPEARANCE_KEY = "console-appearance";
 /** The project and tab this device last had open, shown again on reload. */
 const PROJECT_KEY = "console-project";
 const TAB_KEY = "console-tab";
+
+/** The project list's answer, with Needs you, the tree, roles and templates. */
+type ListView = {
+  projects: ReturnType<typeof projectsView>;
+  needs: ReturnType<typeof needsView>;
+  tree: ReturnType<typeof treeView>;
+  roles: RoleDef[];
+  templates: ReturnType<typeof templatesView>;
+};
 
 export default function ConsoleApp() {
   const [projects, setProjects] = useState<ConsoleProject[]>([]);
@@ -132,17 +142,19 @@ export default function ConsoleApp() {
     remember(SIDEBAR_KEY, hidden ? "hidden" : null);
   };
 
-  // Polls can overlap: only the latest answer is applied, so Needs you
-  // (and its notifications) never step back to an older one.
-  const projectsAsked = useRef(0);
+  // Polls and the reload after a command can overlap: an answer older than
+  // one already applied is dropped, so Needs you (and its notifications)
+  // never step back, and a slow poll never replaces a command's fresh view.
+  const [askProjects] = useState(inOrder);
+  const [askProject] = useState(inOrder);
   /** The versions of the views this page has. */
   const listVersion = useRef<string | null>(null);
   const projectVersion = useRef<{ projectId: string; version: string | null } | null>(null);
   const loadProjects = useCallback(async () => {
-    const asked = ++projectsAsked.current;
+    const latest = askProjects();
     try {
-      const data = await api(undefined, listVersion.current ? `?version=${listVersion.current}` : "");
-      if (asked !== projectsAsked.current) return;
+      const data = await api<Versioned<ListView>>(undefined, listVersion.current ? `?version=${listVersion.current}` : "");
+      if (!latest()) return;
       setWorker((w) => keepIfSame(w, data.worker));
       // Unchanged since the last answer: nothing to render.
       if (data.unchanged) return;
@@ -164,7 +176,7 @@ export default function ConsoleApp() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, []);
+  }, [askProjects]);
   // The selection now, so a slow answer for a project left meanwhile is dropped.
   const selected = useRef(projectId);
   useEffect(() => {
@@ -172,10 +184,11 @@ export default function ConsoleApp() {
   }, [projectId]);
   const loadProject = useCallback(async () => {
     if (!projectId) return setView(null);
+    const latest = askProject();
     try {
       const known = projectVersion.current?.projectId === projectId ? projectVersion.current.version : null;
-      const data = await api(undefined, `?project=${encodeURIComponent(projectId)}${known ? `&version=${known}` : ""}`);
-      if (selected.current !== projectId) return;
+      const data = await api<Versioned<ProjectView>>(undefined, `?project=${encodeURIComponent(projectId)}${known ? `&version=${known}` : ""}`);
+      if (!latest() || selected.current !== projectId) return;
       if (data.unchanged) return setWorker((w) => keepIfSame(w, data.worker));
       if (data.project?.id !== projectId) return;
       projectVersion.current = { projectId, version: data.version ?? null };
@@ -184,7 +197,7 @@ export default function ConsoleApp() {
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [projectId]);
+  }, [projectId, askProject]);
 
   // Polling (the live stream also asks for a refresh whenever a turn
   // changes state).
@@ -240,16 +253,24 @@ export default function ConsoleApp() {
   // The focus happens once its window is on the page (after a project or
   // tab change has loaded).
   const focused = useRef(0);
+  /** The highlight's end, cleared by a newer highlight and when the page goes. */
+  const unhighlight = useRef<() => void>(undefined);
   useEffect(() => {
     if (!focus || focused.current === focus.n) return;
     const el = document.querySelector<HTMLElement>(`[data-agent-window="${focus.agentId}"]`);
     if (!el) return;
     focused.current = focus.n;
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    unhighlight.current?.();
     el.classList.add(styles.focused);
-    setTimeout(() => el.classList.remove(styles.focused), 1600);
+    const timer = setTimeout(() => el.classList.remove(styles.focused), 1600);
+    unhighlight.current = () => {
+      clearTimeout(timer);
+      el.classList.remove(styles.focused);
+    };
     el.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
   }, [focus, view, activeTab]);
+  useEffect(() => () => unhighlight.current?.(), []);
 
   /** ⋯ on a project's row: the project, with its menu open. */
   const openProjectMenu = (id: string) => {
@@ -617,17 +638,26 @@ export default function ConsoleApp() {
       {/* Last, on a layer of its own above every dialog, tray and panel: the
           confirmation a weighty command asks for. A new code is e-mailed as
           it opens, so the newest one is the one to type. */}
-      {codeAsk && (
-        <div className={`${styles.overlay} ${styles.codeOverlay}`}>
-          <FreshCode
-            className={styles.dialog}
-            sendOnOpen
-            title="Confirm with a code"
-            text="This action needs a code from your e-mail. One code covers such actions on this device for 8 hours. A new code is on its way to your address."
-            done={codeAsk.done}
-          />
-        </div>
-      )}
+      {codeAsk && <CodeDialog done={codeAsk.done} />}
+    </div>
+  );
+}
+
+/** The code a weighty command asks for: focus moves in, stays inside and
+ * goes back on close, and Escape cancels. A click outside does not: a stray
+ * tap would drop the command. */
+function CodeDialog({ done }: { done: (confirmed: boolean) => void }) {
+  const { box, overlay } = useDialogFocus(() => done(false));
+  return (
+    <div className={`${styles.overlay} ${styles.codeOverlay}`} onKeyDown={overlay.onKeyDown}>
+      <FreshCode
+        ref={box}
+        className={styles.dialog}
+        sendOnOpen
+        title="Confirm with a code"
+        text="This action needs a code from your e-mail. One code covers such actions on this device for 8 hours. A new code is on its way to your address."
+        done={done}
+      />
     </div>
   );
 }
@@ -635,9 +665,9 @@ export default function ConsoleApp() {
 /** The phone's drawer of projects and agents: a dialog, so focus moves in,
  * stays inside and comes back, and Escape closes it. */
 function Drawer({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
-  const { box, onKeyDown } = useDialogFocus(onClose);
+  const { box, overlay } = useDialogFocus(onClose);
   return (
-    <div className={styles.drawerOverlay} onClick={onClose} onKeyDown={onKeyDown}>
+    <div className={styles.drawerOverlay} {...overlay}>
       <div ref={box} tabIndex={-1} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Projects and agents" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>

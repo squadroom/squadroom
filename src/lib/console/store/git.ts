@@ -1,6 +1,6 @@
 import type { ConsoleCommit, ConsoleJob } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
-import { CIRCLE_BASELINE, job } from "./rows.ts";
+import { job } from "./rows.ts";
 
 type Author = { id: string; name: string };
 const files = (v: unknown) => JSON.parse((v as string) || "[]") as string[];
@@ -23,7 +23,7 @@ export const git = {
     );
     return (r?.sha as string | null | undefined) ?? null;
   },
-  /** Ended turns since the detector's baseline that were never checked for
+  /** Ended turns that were never checked for
    * progress (the worker stopped or crashed, or Git failed, before the
    * check), with where their agent's next turn began, if it has.
    * A turn of a project without a repository has no commit to start from. */
@@ -32,10 +32,9 @@ export const git = {
       `SELECT t.id, t.agent_id, t.commit_before,
          (SELECT n.commit_before FROM console_turns n WHERE n.agent_id = t.agent_id AND n.id > t.id AND n.commit_before IS NOT NULL ORDER BY n.id LIMIT 1) AS next_before
        FROM console_turns t JOIN console_agents a ON a.id = t.agent_id JOIN console_projects p ON p.id = a.project_id
-       WHERE t.progressed = 0 AND t.id > ? AND t.status NOT IN ('queued', 'running', 'waiting_for_owner')
+       WHERE t.progressed = 0 AND t.status NOT IN ('queued', 'running', 'waiting_for_owner')
          AND (p.source = 'none' OR (t.commit_before IS NOT NULL AND a.folder <> ''))
        ORDER BY t.id`,
-      Number(this.flag(CIRCLE_BASELINE) ?? 0),
     ).map((r) => ({
       turnId: r.id as number,
       agentId: r.agent_id as string,
@@ -167,7 +166,7 @@ export const git = {
    * A row replaced meanwhile (a newer commit) stays pending for that one. */
   refreshApplied(this: ConsoleStore, epoch: number, refreshId: number, reviewerId: string, author: Author, sha: string, current: boolean) {
     this.transaction(() => {
-      this.putShown(reviewerId, author, sha, current);
+      this.addShown(epoch, reviewerId, author, sha, current);
       this.run("UPDATE console_refreshes SET applied_at = ?, applied_seq = (SELECT COALESCE(MAX(id), 0) FROM console_events) WHERE id = ? AND sha = ? AND applied_at IS NULL", this.now(), refreshId, sha);
     }, epoch);
   },
@@ -179,15 +178,13 @@ export const git = {
   /** A teammate's commit a Look only agent's folder was given, not yet
    * told to it. The newest checked-out one is `current`. */
   addShown(this: ConsoleStore, epoch: number, agentId: string, author: Author, sha: string, current: boolean) {
-    this.transaction(() => this.putShown(agentId, author, sha, current), epoch);
-  },
-  /** addShown's work, in the caller's transaction. */
-  putShown(this: ConsoleStore, agentId: string, author: Author, sha: string, current: boolean) {
-    if (current) this.run("UPDATE console_shown SET current = 0 WHERE agent_id = ?", agentId);
-    this.run(
-      "INSERT INTO console_shown (agent_id, author_id, author_name, sha, current, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id, author_id) DO UPDATE SET author_name = excluded.author_name, sha = excluded.sha, current = excluded.current, created_at = excluded.created_at",
-      agentId, author.id, author.name, sha, current ? 1 : 0, this.now(),
-    );
+    this.transaction(() => {
+      if (current) this.run("UPDATE console_shown SET current = 0 WHERE agent_id = ?", agentId);
+      this.run(
+        "INSERT INTO console_shown (agent_id, author_id, author_name, sha, current, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(agent_id, author_id) DO UPDATE SET author_name = excluded.author_name, sha = excluded.sha, current = excluded.current, created_at = excluded.created_at",
+        agentId, author.id, author.name, sha, current ? 1 : 0, this.now(),
+      );
+    }, epoch);
   },
   shown(this: ConsoleStore, agentId: string): { authorId: string; name: string; sha: string; current: boolean }[] {
     return this.all("SELECT * FROM console_shown WHERE agent_id = ? ORDER BY created_at, author_id", agentId).map((r) => ({
@@ -302,8 +299,8 @@ export const git = {
     const r = this.get("SELECT * FROM console_jobs WHERE agent_id = ? ORDER BY id DESC LIMIT 1", agentId);
     return r && job(r);
   },
-  /** Each agent's latest successful push: the commit it pushed (null for a
-   * push recorded before pushes kept their commit) and when it ended. */
+  /** Each agent's latest successful push: the commit it pushed (null when
+   * none was recorded) and when it ended. */
   lastPushes(this: ConsoleStore, agentIds: string[]): Map<string, { head: string | null; at: number }> {
     const out = new Map<string, { head: string | null; at: number }>();
     if (!agentIds.length) return out;
@@ -327,9 +324,5 @@ export const git = {
   },
   finishJob(this: ConsoleStore, epoch: number, id: number, state: "done" | "failed", message: string, url: string | null = null, head: string | null = null) {
     this.write(epoch, "UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", state, message, url, head, this.now(), id);
-  },
-  /** Jobs an earlier worker was running fail visibly. */
-  failEarlierJobs(this: ConsoleStore, epoch: number) {
-    this.write(epoch, "UPDATE console_jobs SET state = 'failed', message = 'The Console worker restarted during this push. Push again.', ended_at = ? WHERE state = 'running'", this.now());
   },
 };

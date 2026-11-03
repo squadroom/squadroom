@@ -5,7 +5,7 @@ import { APPEARANCES, SETTINGS_SECTIONS, settingsHash, templateSummary, type App
 import type { Run } from "./api";
 import { Panel } from "./Dialog";
 import { EditTemplateDialog } from "./Settings";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import styles from "./console.module.css";
 
 // The Settings page, laid out like ChatGPT's and Claude's: its sections

@@ -1,4 +1,4 @@
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import { useDialogFocus } from "./useDialogFocus";
 import styles from "./console.module.css";
 
@@ -17,9 +17,9 @@ export function Panel({ title, children }: { title: string; children: React.Reac
  * stays inside it, and goes back to where it was on close (a dialog under
  * it, or the opener). */
 export default function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  const { box, onKeyDown } = useDialogFocus(onClose);
+  const { box, overlay } = useDialogFocus(onClose);
   return (
-    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label={title} onClick={onClose} onKeyDown={onKeyDown}>
+    <div className={styles.overlay} role="dialog" aria-modal="true" aria-label={title} {...overlay}>
       <div ref={box} tabIndex={-1} className={styles.dialog} onClick={(e) => e.stopPropagation()}>
         <header className={styles.dialogHeader}>
           <h2>{title}</h2>

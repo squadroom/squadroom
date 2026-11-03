@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { WorkerView } from "@/lib/console/views";
 import { workerStatus } from "@/lib/console/ui";
 import type { Run } from "./api";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import InlineRename from "./InlineRename";
 import { MenuButton, type MenuItem } from "./Menu";
 import styles from "./console.module.css";

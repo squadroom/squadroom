@@ -129,7 +129,7 @@ export const teamTools = {
         const patterns = claimPatterns(Array.isArray(args.paths) ? args.paths : []);
         return write(this, () =>
           this.store.callOnce(epoch, { turnId: t.id, agentId: me.id, key, tool: "team_release", summary: `team_release ${patterns.join(", ") || "all"}` }, () => {
-            const n = this.store.releaseClaims(null, me.id, patterns);
+            const n = this.store.releaseClaims(epoch, me.id, patterns);
             return n ? `Released ${n} claim${n === 1 ? "" : "s"}.` : "You held no such claim.";
           }),
         );
@@ -228,17 +228,20 @@ export const teamTools = {
    * instruction's limits and unless paused. */
   deliverMail(this: ConsoleWorker): void {
     const epoch = this.epoch!;
+    // Read once: a batch delivered below queues a turn only for its own
+    // agent, and no message comes from that turn yet.
+    const turns = this.store.openTurns();
+    const open = new Set(turns.map((t) => t.id));
     for (const agentId of this.store.agentsWithMail()) {
       const agent = this.store.agent(agentId);
       if (!agent || agent.state !== "ready" || this.store.pausedFor(agent)) continue;
       // On hold by a teammate: team messages wait.
       if (this.store.heldBy(agent)) continue;
-      if (this.runtimes.get(agentId)?.turn || this.store.openTurns().some((t) => t.agentId === agentId)) continue;
+      if (this.runtimes.get(agentId)?.turn || turns.some((t) => t.agentId === agentId)) continue;
       // A message waits until the turn that sent it has ended and its commit
       // is done, so a reviewer never reads the author's work half finished;
       // one batch holds one instruction's messages, so each instruction's
       // turn count stays right.
-      const open = new Set(this.store.openTurns().map((t) => t.id));
       const queued = this.store
         .queuedMessages(agentId)
         .filter((m) => !(m.fromTurn !== null && open.has(m.fromTurn)) && !this.runtimes.get(m.from)?.busy);

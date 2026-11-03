@@ -1,11 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import Icon, { type IconName } from "./Icon";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import Icon, { type IconName } from "@/components/shared/Icon";
 import styles from "./console.module.css";
 
-// The Console's menus: the status control, Add, and a tab's menu. A short
-// list over the page at a point (under a button, or where a tab was
-// right-clicked or long-pressed), worked with the mouse, touch or the
-// keyboard: arrows move, Enter chooses, Escape closes.
+// The Console's menus: the status control, the project's menu, Add, a tab's
+// menu and an agent window's ⋯. A short list over the page at a point
+// (under a button, or where a tab was right-clicked or long-pressed), worked
+// with the mouse, touch or the keyboard: arrows move, Enter chooses, Escape
+// closes. What each menu holds is built in `src/lib/console/menus.ts`.
 
 export interface MenuItem {
   label: string;
@@ -138,20 +139,22 @@ export function MenuButton({
     setAt(null);
     if (refocus) button.current?.focus();
   };
-  const place = () => {
+  const place = useCallback(() => {
     const r = button.current!.getBoundingClientRect();
     return { x: start ? r.left : r.right, y: r.bottom + 4, end: !start, from: button.current! };
-  };
+  }, [start]);
+  // A signal counts as used only once the menu opens: a render in between
+  // clears the timer, and the next run starts it again.
   const signalled = useRef(0);
   useEffect(() => {
     if (!openSignal || signalled.current === openSignal || !button.current) return;
-    signalled.current = openSignal;
     const timer = setTimeout(() => {
+      signalled.current = openSignal;
       setAt(place());
       onSignalled?.();
     }, 0);
     return () => clearTimeout(timer);
-  });
+  }, [openSignal, onSignalled, place]);
   return (
     <>
       <button

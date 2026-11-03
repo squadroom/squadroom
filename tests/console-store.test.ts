@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +9,7 @@ import { TurnEvents } from "../src/lib/console/events.ts";
 import { claudeSettings, decide, decideControl, inside, inStep, realInside } from "../src/lib/console/permissions.ts";
 import { ConsoleStore, LEASE_LOST } from "../src/lib/console/store.ts";
 import { backupDue, consoleBackupName, expiredConsoleBackups } from "../src/lib/console/backup.ts";
-import { CommandError, runCommand } from "../src/lib/console/commands.ts";
+import { CommandError, runCommand, storeFailure } from "../src/lib/console/commands.ts";
 import { projectView } from "../src/lib/console/views.ts";
 import { transcript, gridShape } from "../src/lib/console/transcript.ts";
 import { agentModel, reportsExpectedModel } from "../src/lib/console/agents.ts";
@@ -261,6 +261,15 @@ test("Claude settings: the sandbox, the read block, the hidden folders, and Look
     "Read(//Users/agent/.claude.json)",
   ]);
   assert.equal("denyWrite" in edit.sandbox.filesystem, false);
+  // Other projects' folders and teammates' clones, as Codex is given them.
+  const others = ["/Users/agent/work/q", "/Users/agent/work/p/b"];
+  const listed = claudeSettings("/Users/agent/work/p/a", "edit", paths, false, false, false, others);
+  for (const p of others) {
+    assert.ok(listed.sandbox.filesystem.denyRead.includes(p), p);
+    assert.ok(listed.permissions.deny.includes(`Read(/${p}/**)`), p);
+  }
+  assert.ok(!listed.sandbox.filesystem.denyRead.some((p) => p.startsWith("/Users/agent/work/p/a")));
+  assert.ok(!listed.permissions.deny.some((r) => r.includes("/Users/agent/work/p/a")));
   const look = claudeSettings("/Users/agent/work/p/a", "look", paths);
   assert.deepEqual((look.sandbox.filesystem as { denyWrite?: string[] }).denyWrite, ["/Users/agent/work/p/a"]);
   assert.ok(["Edit", "Write", "NotebookEdit"].every((t) => look.permissions.deny.includes(t)));
@@ -611,6 +620,103 @@ test("a store missing a column is refused with the reason, and left as it was", 
   assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 0);
   assert.equal(after.prepare("SELECT 1 FROM sqlite_master WHERE name = 'console_image_calls'").get(), undefined);
   after.close();
+});
+
+test("a store a newer build stamped is refused, and left as it was", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-schema-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "console.sqlite");
+  new ConsoleStore(path).close();
+  const raw = new DatabaseSync(path);
+  raw.exec("PRAGMA user_version = 99");
+  raw.close();
+  assert.throws(() => new ConsoleStore(path), /The Console store is version 99, newer than this build reads \(3\)\. Update Squadroom/);
+  const after = new DatabaseSync(path);
+  assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 99);
+  after.close();
+});
+
+test("a transaction inside another is part of it: it commits with it, its epoch is checked, and its own error undoes only its part", () => {
+  const store = new ConsoleStore(":memory:");
+  const epoch = store.takeLease("w", Date.now())!;
+  const names = () => store.projects().map((p) => p.name);
+  // The inner one commits only with the outer one.
+  assert.throws(() =>
+    store.transaction(() => {
+      store.createProject("Inner", "none");
+      throw new Error("outer fails");
+    }),
+  );
+  assert.deepEqual(names(), []);
+  // A nested write fenced by a stale epoch is refused, and so is the whole.
+  assert.throws(() => store.transaction(() => store.setFlag("x", "1", epoch + 1)), new RegExp(LEASE_LOST));
+  assert.equal(store.flag("x"), null);
+  // An inner error the outer one catches undoes the inner writes alone.
+  store.transaction(() => {
+    store.createProject("Kept", "none");
+    try {
+      store.transaction(() => {
+        store.createProject("Undone", "none");
+        throw new Error("inner fails");
+      });
+    } catch {
+      /* the outer one carries on */
+    }
+    store.setFlag("x", "1", epoch);
+  }, epoch);
+  assert.deepEqual(names(), ["Kept"]);
+  assert.equal(store.flag("x"), "1");
+  store.close();
+});
+
+test("delivering no messages is no turn", () => {
+  const store = new ConsoleStore(":memory:");
+  const epoch = store.takeLease("w", Date.now())!;
+  const project = store.createProject("P", "none");
+  const agent = store.createAgent({ tabId: store.tabs(project.id)[0].id, name: "A", role: "", kind: "claude-code", model: "claude-sonnet-5", effort: null, permission: "look" });
+  store.setAgentFolder(epoch, agent.id, "/tmp/a");
+  assert.equal(store.deliver(epoch, agent.id, [], "nothing"), null);
+  store.close();
+});
+
+test("a store failure is told by its error code, whatever its message says", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE t (a PRIMARY KEY); INSERT INTO t VALUES (1)");
+  const thrown = (work: () => unknown) => {
+    try {
+      work();
+    } catch (error) {
+      return error;
+    }
+    assert.fail("expected an error");
+  };
+  // node:sqlite's messages never say "sqlite": the code does.
+  for (const error of [thrown(() => db.exec("INSERT INTO t VALUES (1)")), thrown(() => db.prepare("SELECT nope FROM t").all())]) {
+    assert.doesNotMatch((error as Error).message, /sqlite/i);
+    assert.ok(storeFailure(error), (error as Error).message);
+  }
+  db.close();
+  assert.ok(storeFailure(thrown(() => readFileSync(join(tmpdir(), "console-no-such-file", "x")))));
+  assert.ok(!storeFailure(new CommandError("That tab is closed.")));
+  assert.ok(!storeFailure(new Error("That template no longer exists.")));
+});
+
+test("a tab from a template is made with its steps and team, or not at all", () => {
+  const store = new ConsoleStore(":memory:");
+  const project = store.createProject("P", "folder");
+  const addRoute = store.addRoute;
+  store.addRoute = () => {
+    throw new Error("route refused");
+  };
+  assert.throws(() => runCommand(store, { action: "createTab", projectId: project.id, name: "Docs", templateId: "document-review" }), /route refused/);
+  assert.equal(store.tabs(project.id).length, 1);
+  assert.equal(store.agents(project.id).length, 0);
+  store.addRoute = addRoute;
+  const made = runCommand(store, { action: "createTab", projectId: project.id, name: "Docs", templateId: "document-review" }) as { tab: { id: string } };
+  assert.equal(store.agents(project.id).length, 2);
+  assert.equal(store.routes(made.tab.id).length, 2);
+  assert.ok(store.tabSteps(made.tab.id));
+  store.close();
 });
 
 const DAY = 24 * 60 * 60_000;

@@ -127,22 +127,22 @@ test("the push approval card shows the title and description that will be posted
 
 test("GitHub calls: an open pull request is reused, a new one is opened; a token without pull request access is named", async () => {
   const gh = github();
-  const first = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T", body: "B" }, "tok", gh.fetcher, "https://api.example");
+  const first = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T", body: "B" }, { token: "tok", fetch: gh.fetcher, url: "https://api.example" });
   assert.deepEqual(first, { number: 100, url: "https://github.com/owner/repo/pull/100", created: true, updated: false });
-  const again = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T2", body: "B2" }, "tok", gh.fetcher, "https://api.example");
+  const again = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T2", body: "B2" }, { token: "tok", fetch: gh.fetcher, url: "https://api.example" });
   assert.deepEqual([again.created, again.updated], [false, false]);
   assert.equal(gh.pulls.length, 1);
   // An open one takes the agent's new title and description when given.
-  const updated = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T3", body: "B3" }, "tok", gh.fetcher, "https://api.example", { title: "T3", body: "B3" });
+  const updated = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T3", body: "B3" }, { token: "tok", fetch: gh.fetcher, url: "https://api.example" }, { title: "T3", body: "B3" });
   assert.equal(updated.updated, true);
   assert.deepEqual([gh.pulls[0].title, gh.pulls[0].body], ["T3", "B3"]);
-  await commentOnPullRequest("owner/repo", 100, CODEX_REVIEW, "tok", gh.fetcher, "https://api.example");
+  await commentOnPullRequest("owner/repo", 100, CODEX_REVIEW, { token: "tok", fetch: gh.fetcher, url: "https://api.example" });
   assert.deepEqual(gh.comments, [{ number: 100, body: "@codex review" }]);
   assert.ok(gh.auth.every((a) => a === "Bearer tok"));
-  await assert.rejects(openPullRequest("owner/repo", { branch: "main", base: "main", title: "T", body: "B" }, "tok", gh.fetcher, "https://api.example"), /Only console\/ branches/);
+  await assert.rejects(openPullRequest("owner/repo", { branch: "main", base: "main", title: "T", body: "B" }, { token: "tok", fetch: gh.fetcher, url: "https://api.example" }), /Only console\/ branches/);
   const denied = github(false);
   await assert.rejects(
-    openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T", body: "B" }, "tok", denied.fetcher, "https://api.example"),
+    openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T", body: "B" }, { token: "tok", fetch: denied.fetcher, url: "https://api.example" }),
     /Pull requests: Read and write/,
   );
 });

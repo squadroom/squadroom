@@ -3,6 +3,7 @@ import { ROLE_DESCRIPTION_MAX, ROLE_NAME_MAX, ROLE_PROMPT_MAX, type RoleDef } fr
 import { PERMISSION_LABELS } from "@/lib/console/types";
 import type { Run } from "./api";
 import { Panel } from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 /** The role library: built-ins (rewrite a prompt, or reset it) and the
@@ -10,6 +11,7 @@ import styles from "./console.module.css";
 export default function RolesDialog({ roles, run }: { roles: RoleDef[]; run: Run }) {
   const blank: Partial<RoleDef> = { name: "", description: "", access: "edit", ai: "claude-code", prompt: "" };
   const [editing, setEditing] = useState<Partial<RoleDef> | null>(null);
+  const { busy, guard } = useBusy();
   const save = async () => {
     if (editing && (await run({ action: "saveRole", role: editing }))) setEditing(null);
   };
@@ -77,7 +79,7 @@ export default function RolesDialog({ roles, run }: { roles: RoleDef[]; run: Run
           </label>
           <div className={styles.dialogButtons}>
             <button onClick={() => setEditing(null)}>Back</button>
-            <button className={styles.primary} onClick={() => void save()}>
+            <button className={styles.primary} disabled={busy} onClick={() => guard(save)}>
               Save
             </button>
           </div>

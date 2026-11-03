@@ -67,6 +67,10 @@ export interface GaugeUpdate {
 
 /** What a session tells the worker about its running turn. Events about a
  * turn that has ended are dropped by the worker. */
+/** A client's running usage totals for one of its sessions, as it reports
+ * them (kept as JSON). */
+export type SessionTotals = { sessionId: string; value: unknown };
+
 export type SessionEvent =
   /** The login and the model are confirmed for this turn (no silent paid
    * fallback); its session id is kept for resume. */
@@ -115,6 +119,9 @@ export type SessionEvent =
       /** Failed before any model ran (the provider turned the prompt
        * away): its usage, none, is the whole turn's. */
       nothingRan?: boolean;
+      /** The client's running usage totals after this turn, kept with its
+       * charge (`storedTotals` reads them back). */
+      totals?: SessionTotals;
     }
   /** The client refused the turn after all (a late refusal): nothing ran. */
   | { kind: "refused"; reason: string }
@@ -135,6 +142,8 @@ export interface SessionContext {
   newToken(): string;
   /** The agent's saved client session, to resume. */
   storedSession(): string | null;
+  /** The running totals kept with that session's last charged turn, or null. */
+  storedTotals(sessionId: string): unknown;
   /** The agent's instructions (its window, folder and role). */
   system(): string;
   /** Its tab has steps: document turns, no commands. */
@@ -191,10 +200,11 @@ export interface DriverHost {
   /** A folder is being made now (anywhere, or one a sandbox of this
    * project would not know: in this project, or a new project's first). */
   creatingFolders(projectId?: string): boolean;
-  /** What a Codex thread of this agent denies: every other project's
-   * folder, and its own project's other clones by name (the agent's own
-   * project folder is never denied: that breaks Node). */
-  codexDenied(agent: ConsoleAgent): string[];
+  /** What this agent's Claude Code session and Codex thread deny reading:
+   * every other project's folder, and its own project's other clones by
+   * name (the agent's own project folder is never denied: that breaks
+   * Node). */
+  deniedFolders(agent: ConsoleAgent): string[];
 }
 
 /** One kind of client. */
@@ -212,8 +222,10 @@ export interface AgentDriver {
   open(ctx: SessionContext): AgentSession;
   /** A reason every turn of this kind fails now (the kind is off). */
   refusal(agent: ConsoleAgent): string | null;
-  /** Turns of this kind wait now (a process ending, folders being made). */
-  waiting(agent: ConsoleAgent): boolean;
+  /** Turns of this kind wait now (a process ending, folders being made).
+   * `credentials`: what the turn's session would be given (Codex: which
+   * API key's server it runs on). */
+  waiting(agent: ConsoleAgent, credentials: Record<string, string>): boolean;
   /** Whose new folders a running turn of this kind must not see appear:
    * its sandbox lists the folders that existed when it started. "project":
    * its own project's, and a new project's first folder (Codex names each
@@ -237,6 +249,15 @@ export interface AgentDriver {
 }
 
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** Handle a client's events: a failure is logged, never thrown into the
+ * stream reader that called it. */
+export function guarded(log: (line: string) => void, handle: () => void) {
+  try {
+    handle();
+  } catch (error) {
+    log(`event handling failed: ${errorMessage(error)}`);
+  }
+}
 /** Protocol readers' guards: a string, a whole non-negative count, a plain
  * object. */
 export const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -367,14 +388,45 @@ export abstract class ClientProcess {
   }
 }
 
+/** A reply that came after its call's timeout: the result, or the
+ * refusal (then nothing was accepted after all). */
+export type LateReply = (reply: { result: Record<string, unknown> } | { refused: string }) => void;
+
+/** How a JSON-RPC call is made (`RpcProcess.request`). */
+export interface RpcCallOptions {
+  /** 0: no timeout. */
+  timeoutMs: number;
+  /** Whether the request reached the program's input: false when the
+   * program is gone, an error when the write failed with the program still
+   * running (then whether it read the request cannot be known). */
+  written?: (outcome: "written" | "gone" | "unknown") => void;
+  /** Told as the reply is read, before the next line is. */
+  answered?: () => void;
+  /** After a timeout, still handed the reply should it come, once. */
+  late?: LateReply;
+}
+
 /** A JSON-RPC client (Codex's App Server, ACP): the program's requests and
- * notifications go to their handlers, replies to its own calls to `reply`.
- * `envelope` is what every message carries (ACP: `jsonrpc: "2.0"`). */
+ * notifications go to their handlers, and the replies to its own calls
+ * settle them. `envelope` is what every message carries (ACP:
+ * `jsonrpc: "2.0"`). */
 export abstract class RpcProcess extends ClientProcess {
   onNotification: (method: string, params: Record<string, unknown>) => void = () => {};
   onRequest: (id: number | string, method: string, params: Record<string, unknown>) => void = () => {};
   protected envelope: Record<string, unknown> = {};
-  protected abstract reply(message: Record<string, unknown>): void;
+  private nextId = 1;
+  private calls = new Map<
+    number,
+    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: () => void }
+  >();
+  /** Calls that timed out whose caller still wants the reply. */
+  private late = new Map<number, LateReply>();
+  /** What a call gets when the program has ended. */
+  protected abstract gone(): Error;
+  /** What a call gets when its reply does not come in time. */
+  protected abstract timedOut(method: string): Error;
+  /** An error reply's error; null when the reply is a result. */
+  protected abstract refusal(message: Record<string, unknown>): Error | null;
   protected received(message: Record<string, unknown>) {
     const id = message.id;
     const method = typeof message.method === "string" ? message.method : null;
@@ -382,6 +434,62 @@ export abstract class RpcProcess extends ClientProcess {
     if (method && id !== undefined && id !== null) return this.onRequest(id as number | string, method, params);
     if (method) return this.onNotification(method, params);
     this.reply(message);
+  }
+  protected ended() {
+    for (const call of this.calls.values()) {
+      if (call.timer) clearTimeout(call.timer);
+      call.reject(this.gone());
+    }
+    this.calls.clear();
+    this.late.clear();
+  }
+  private reply(message: Record<string, unknown>) {
+    const id = message.id;
+    if (typeof id !== "number") return;
+    const error = this.refusal(message);
+    const result = isObject(message.result) ? message.result : {};
+    const call = this.calls.get(id);
+    if (!call) {
+      // A reply after its call timed out goes to the caller that asked for
+      // it: an error reply means nothing was accepted after all.
+      const late = this.late.get(id);
+      this.late.delete(id);
+      late?.(error ? { refused: error.message } : { result });
+      return;
+    }
+    this.calls.delete(id);
+    if (call.timer) clearTimeout(call.timer);
+    // Told at once, before the next line is read (a promise settles only
+    // after this read), so what the program says later is not this call's.
+    call.answered?.();
+    if (error) call.reject(error);
+    else call.resolve(result);
+  }
+  /** One request; rejects with `gone`, `timedOut` or the refusal. */
+  protected request(method: string, params: unknown, options: RpcCallOptions): Promise<Record<string, unknown>> {
+    if (this.exited) {
+      options.written?.("gone");
+      return Promise.reject(this.gone());
+    }
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = options.timeoutMs
+        ? setTimeout(() => {
+            this.calls.delete(id);
+            if (options.late && !this.exited) this.late.set(id, options.late);
+            reject(this.timedOut(method));
+          }, options.timeoutMs)
+        : null;
+      this.calls.set(id, { resolve, reject, timer, answered: options.answered });
+      this.write({ ...this.envelope, id, method, params }).then(
+        () => options.written?.("written"),
+        () => options.written?.(this.exited ? "gone" : "unknown"),
+      );
+    });
+  }
+  /** The caller no longer wants a late reply. */
+  forget(late: LateReply) {
+    for (const [id, fn] of this.late) if (fn === late) this.late.delete(id);
   }
   notify(method: string, params?: unknown) {
     this.send(params === undefined ? { ...this.envelope, method } : { ...this.envelope, method, params });
@@ -404,8 +512,8 @@ export abstract class OwnProcessDriver<H extends DriverHost = DriverHost> {
   readonly host: H;
   readonly live = new Set<ClientProcess>();
   readonly endings = new Set<Ending>();
-  /** Each process ended by `terminate`, once. */
-  private terminated = new WeakMap<ClientProcess, Ending>();
+  /** Each process's one `Ending`, whether `retire` or `terminate` began it. */
+  private ending = new WeakMap<ClientProcess, Ending>();
   abstract readonly label: string;
   constructor(host: H) {
     this.host = host;
@@ -434,18 +542,24 @@ export abstract class OwnProcessDriver<H extends DriverHost = DriverHost> {
   /** Take a process out of service: it stays tracked until it has exited,
    * with TERM, then KILL resent each grace period, and shutdown ends it. */
   retire(proc: ClientProcess) {
-    if (proc.exited || [...this.endings].some((e) => e.proc === proc)) return;
-    this.endings.add(new Ending(this.host, proc));
+    this.end(proc);
   }
-  /** A session's `terminate`: its process ended (`immediate`: KILL at once). */
+  /** A session's `terminate`: its process ended (`immediate`: KILL at once).
+   * One already being ended (closed, or terminated before) keeps its
+   * `Ending`: no second TERM and KILL schedule. */
   terminate(proc: ClientProcess, immediate?: boolean): Promise<{ contained: boolean; collateral: string[] }> {
-    let ending = this.terminated.get(proc);
-    if (!ending && !proc.exited) {
+    return (this.end(proc, immediate)?.done ?? Promise.resolve()).then(() => ({ contained: true, collateral: [] }));
+  }
+  /** The process's `Ending`, begun on the first call; none once it has exited. */
+  private end(proc: ClientProcess, immediate?: boolean): Ending | undefined {
+    if (proc.exited) return undefined;
+    let ending = this.ending.get(proc);
+    if (!ending) {
       ending = new Ending(this.host, proc, immediate);
-      this.terminated.set(proc, ending);
+      this.ending.set(proc, ending);
       this.endings.add(ending);
     }
-    return (ending?.done ?? Promise.resolve()).then(() => ({ contained: true, collateral: [] }));
+    return ending;
   }
   retiring() {
     return [...this.endings].filter((e) => !e.proc.exited).length;
