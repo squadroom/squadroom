@@ -268,7 +268,8 @@ The longer version, with the threat model, is in
   home folder, through a root-owned launcher that passes only the one
   credential an agent needs. Claude Code runs in its sandbox, Codex under
   per-thread permission profiles, and ACP agents inside a macOS sandbox
-  profile. File writes are limited to the agent's own clone.
+  profile. File writes are limited to the agent's own clone (see the known
+  limits in [docs/architecture.md](docs/architecture.md)).
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,
   only to repositories whose base branch is protected by a ruleset the
