@@ -53,6 +53,8 @@ browser ──https──▶ TLS proxy (e.g. Tailscale Serve) ──▶ web serv
   its pin in `src/lib/console/clients.ts`. To change a version, edit both:
   the pin, and the client's `package.json`, then run
   `npm install --package-lock-only --ignore-scripts` in its folder.
+  Dependabot opens pull requests that raise these pins; they are merged
+  after a live check, and the pin in `clients.ts` has to move with them.
 
 ## The store
 

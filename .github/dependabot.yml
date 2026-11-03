@@ -1,5 +1,5 @@
 # Weekly update pull requests for npm packages and the workflow's actions.
-# Each one goes through the same checks and maintainer review as any other.
+# Each one goes through the same checks as any other pull request.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -13,6 +13,32 @@ updates:
         patterns: ["react", "react-dom"]
       next:
         patterns: ["next", "@next/env", "eslint-config-next"]
+  # Each agent client's pin, one folder per client. The pin in
+  # src/lib/console/clients.ts has to move with each of these.
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/claude
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/codex
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/gemini
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/grok
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/kimi
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /scripts/console/clients/opencode
+    schedule:
+      interval: weekly
   - package-ecosystem: github-actions
     directory: /
     schedule:

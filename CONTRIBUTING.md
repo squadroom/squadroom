@@ -11,9 +11,9 @@ Squadroom is a small project. Issues and pull requests are welcome.
 3. **Checks must pass.** CI runs the four checks below on every pull
    request, and a `macos` job that runs the launcher, sandbox and setup
    tests (`npm run test:macos`).
-4. **Maintainer review is required.** `main` is protected: every pull
-   request needs an approving review from the maintainer (see
-   [`.github/CODEOWNERS`](.github/CODEOWNERS)) before it is merged.
+4. **The maintainer merges.** `main` is protected: every pull request
+   needs the two CI jobs, `checks` and `macos`, to pass, and the
+   maintainer merges it.
 
 For anything large, open an issue first so we can agree on the approach.
 

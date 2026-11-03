@@ -2,7 +2,7 @@
   "name": "squadroom",
   "version": "0.1.0",
   "private": true,
-  "description": "A browser console for running a squad of coding agents, each as a sandboxed macOS user in its own Git clone.",
+  "description": "A browser console that runs a team of coding agents as a separate macOS user, each in its own Git clone (macOS).",
   "license": "MIT",
   "homepage": "https://squadroom.github.io",
   "repository": {
