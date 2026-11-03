@@ -310,7 +310,7 @@ export class ConsoleWorker {
         }
         // Recording the outcome is a store write like any other: a failure
         // stops the worker and its agents (safe), never an unhandled error.
-        this.safe(() => this.store.recordBackup(written ? "succeeded" : "failed", now));
+        this.safe(() => this.store.recordBackup(this.epoch!, written ? "succeeded" : "failed", now));
         if (written) this.log(`backup written: ${written}`);
         // At most one e-mail a UTC day: its key names the day.
         else if (this.options.mail) this.safe(() => this.store.enqueueMail(backupFailedKey(now), { kind: "backup_failed" }, now, this.epoch!));
@@ -326,7 +326,9 @@ export class ConsoleWorker {
     // beside the worker raises no alert.
     if (this.options.health) this.timers.push(setInterval(() => void this.heartbeat(), this.options.healthMs ?? 5 * 60_000));
     // Retention: turns older than RETENTION_DAYS are compacted, a few at a
-    // time, so the store does not grow without bound.
+    // time: their streamed thinking, tool output and earlier text go. The
+    // turns themselves, their prompts, commits with patches and request
+    // inputs are kept.
     this.timers.push(
       setInterval(() => {
         if (this.stopped || this.epoch === null) return;
@@ -627,7 +629,7 @@ export class ConsoleWorker {
       const members = this.store.waitFor(agent.id);
       if (members.length) {
         if (members.some((id) => this.store.agent(id)?.state === "creating")) continue;
-        this.safe(() => this.store.clearWaitFor(agent.id));
+        this.safe(() => this.store.clearWaitFor(epoch, agent.id));
       }
       // A team turn that waited (a slot, a push) still keeps to its
       // instruction's wall time.

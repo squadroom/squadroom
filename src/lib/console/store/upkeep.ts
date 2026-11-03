@@ -67,12 +67,15 @@ export const upkeep = {
     const r = this.get("SELECT succeeded_at, failed_at FROM console_backup WHERE id = 1");
     return { succeededAt: (r?.succeeded_at as number) ?? 0, failedAt: (r?.failed_at as number) ?? 0 };
   },
-  recordBackup(this: ConsoleStore, outcome: "succeeded" | "failed", at: number) {
-    const state = { ...this.backupState(), [outcome === "succeeded" ? "succeededAt" : "failedAt"]: at };
-    this.run(
-      "INSERT INTO console_backup (id, succeeded_at, failed_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET succeeded_at = excluded.succeeded_at, failed_at = excluded.failed_at",
-      state.succeededAt, state.failedAt,
-    );
+  /** The worker's, fenced by its lease epoch. */
+  recordBackup(this: ConsoleStore, epoch: number, outcome: "succeeded" | "failed", at: number) {
+    this.transaction(() => {
+      const state = { ...this.backupState(), [outcome === "succeeded" ? "succeededAt" : "failedAt"]: at };
+      this.run(
+        "INSERT INTO console_backup (id, succeeded_at, failed_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET succeeded_at = excluded.succeeded_at, failed_at = excluded.failed_at",
+        state.succeededAt, state.failedAt,
+      );
+    }, epoch);
   },
 
   /** One row per incident key: a repeat of the incident adds nothing. The

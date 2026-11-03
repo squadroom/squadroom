@@ -238,7 +238,7 @@ export const teamGit = {
           ...request,
           ...(request.title ? { title: this.redactor.text(request.title) } : {}),
           ...(request.body ? { body: this.redactor.text(request.body) } : {}),
-        }),
+        }, c.epoch),
       );
       const result = `Approved. ${branch} is pushed after this turn ends and its changes are committed (push ${job.id}), then its pull request is opened or updated; the result shows in your window.`;
       record(this, c, "team_push", `team_push ${branch}`, result);

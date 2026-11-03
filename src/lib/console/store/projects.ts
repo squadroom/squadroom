@@ -216,8 +216,8 @@ export const projects = {
   waitFor(this: ConsoleStore, agentId: string): string[] {
     return (json(this.get("SELECT start_after FROM console_agents WHERE id = ?", agentId)?.start_after) as string[] | null) ?? [];
   },
-  clearWaitFor(this: ConsoleStore, agentId: string) {
-    this.run("UPDATE console_agents SET start_after = NULL WHERE id = ?", agentId);
+  clearWaitFor(this: ConsoleStore, epoch: number, agentId: string) {
+    this.write(epoch, "UPDATE console_agents SET start_after = NULL WHERE id = ?", agentId);
   },
   /** A merge from team_pull waiting for its conflicts: from whom, which files. */
   setMerging(this: ConsoleStore, epoch: number, agentId: string, merging: Merging | null) {

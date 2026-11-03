@@ -13,7 +13,11 @@ export function useNotifications(needs: NeedsLike, loaded: boolean) {
   const [state, setState] = useState<"unsupported" | "off" | "on" | "blocked">("off");
   const seen = useRef<Set<string> | null>(null);
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
-  const workers = typeof navigator !== "undefined" && "serviceWorker" in navigator;
+  // A service worker that failed to register is not waited for: the page
+  // shows them itself, and if the browser refuses that too they are shown
+  // as unavailable rather than left silently off.
+  const [workerFailed, setWorkerFailed] = useState(false);
+  const workers = typeof navigator !== "undefined" && "serviceWorker" in navigator && !workerFailed;
   useEffect(() => {
     const first = setTimeout(() => {
       if (typeof Notification === "undefined") return setState("unsupported");
@@ -37,7 +41,7 @@ export function useNotifications(needs: NeedsLike, loaded: boolean) {
     navigator.serviceWorker
       .register("/console/sw.js", { scope: "/console/" })
       .then(setRegistration)
-      .catch(() => {});
+      .catch(() => setWorkerFailed(true));
   }, [state, registration, workers]);
   useEffect(() => {
     // Tracked whether or not they are on, so turning them on never floods.
@@ -64,11 +68,13 @@ export function useNotifications(needs: NeedsLike, loaded: boolean) {
       try {
         new Notification(n.title, options);
       } catch {
-        // A browser that shows them only through a service worker.
+        // A browser that shows them only through a service worker, which
+        // did not register.
+        if (workerFailed) setState("unsupported");
       }
     };
     show.forEach(notify);
-  }, [needs, loaded, state, registration, workers]);
+  }, [needs, loaded, state, registration, workers, workerFailed]);
   const toggle = () => {
     if (state === "on") {
       remember(NOTIFY_KEY, "off");

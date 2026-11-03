@@ -334,8 +334,6 @@ export function searchView(store: ConsoleStore, text: string) {
   };
 }
 
-/** One agent's changes view: each turn's commit, the branch against its
- * base, and its latest push. */
 function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType<ConsoleStore["diff"]>) {
   // The head is the shown diff's, so Approve names the commit whose
   // changes the owner sees (read once, not again).
@@ -354,6 +352,9 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
   };
 }
 
+/** One agent's changes view: each turn's commit (without its patch, which
+ * the dialog asks for when it is opened), the branch against its base, and
+ * its latest push. */
 export function changesView(store: ConsoleStore, agentId: string) {
   const agent = store.agent(agentId);
   if (!agent) return null;
@@ -373,6 +374,12 @@ export function changesView(store: ConsoleStore, agentId: string) {
     // whether each has reviewed the current head.
     approval: approvalView(store, agent, diff),
   };
+}
+
+/** One commit's patch in the changes view, asked for when it is opened. */
+export function commitPatchView(store: ConsoleStore, agentId: string, commitId: number): { patch: string } | null {
+  const patch = Number.isSafeInteger(commitId) ? store.commitPatch(agentId, commitId) : null;
+  return patch === null ? null : { patch };
 }
 
 /** The navigation tree: every project → tabs → agents by name, each with

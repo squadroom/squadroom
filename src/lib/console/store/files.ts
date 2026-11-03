@@ -31,9 +31,12 @@ export const files = {
     const r = this.get("SELECT * FROM console_file_reads WHERE id = ? AND created_at >= ?", id, this.now() - READ_KEPT_MS);
     return r && { id: r.id as number, agentId: r.agent_id as string, path: r.path as string, state: r.state as string, result: json(r.result) };
   },
-  /** Reads older than 15 minutes (with their content) are deleted. */
-  expireReads(this: ConsoleStore) {
-    this.run("DELETE FROM console_file_reads WHERE created_at < ?", this.now() - READ_KEPT_MS);
+  /** Reads older than 15 minutes (with their content) are deleted: by the
+   * worker fenced by its lease epoch, or inside the page's own queueRead. */
+  expireReads(this: ConsoleStore, epoch?: number) {
+    const sql = "DELETE FROM console_file_reads WHERE created_at < ?";
+    if (epoch === undefined) this.run(sql, this.now() - READ_KEPT_MS);
+    else this.write(epoch, sql, this.now() - READ_KEPT_MS);
   },
   /** Claim at most `limit` pending reads (the worker's free capacity). */
   claimReads(this: ConsoleStore, epoch: number, limit = 8): { id: number; agentId: string; path: string; helperId: number | null }[] {

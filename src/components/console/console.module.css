@@ -344,6 +344,17 @@
   border-radius: 10px;
   background: var(--owner);
 }
+/* Teammates' messages: on the agent's side, never in the owner's bubble. */
+.team {
+  align-self: flex-start;
+  max-width: 85%;
+  white-space: pre-wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--amberLine);
+  border-radius: 10px;
+  background: var(--soft);
+}
 .text {
   overflow-wrap: anywhere;
 }
@@ -921,7 +932,8 @@
   .text :global(.markdown) pre {
     font-size: 12.5px;
   }
-  .owner {
+  .owner,
+  .team {
     padding: 6px 9px;
   }
   .thinking summary,

@@ -167,7 +167,7 @@ export const jobs = {
   /** The file panel's reads (eight at a time) and uploads (four). */
   runFiles(this: ConsoleWorker): void {
     const epoch = this.epoch!;
-    this.safe(() => this.store.expireReads());
+    this.safe(() => this.store.expireReads(epoch));
     for (const read of this.safe(() => this.store.claimReads(epoch, 8 - this.reading.size)) ?? []) {
       if (this.reading.has(read.id)) continue;
       this.reading.add(read.id);
