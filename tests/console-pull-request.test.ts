@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPEN_PR_PROMPT, runCommand } from "../src/lib/console/commands.ts";
 import { commentOnPullRequest, openPullRequest } from "../src/lib/console/git.ts";
-import { CODEX_REVIEW, codexReviewSetting, pullRequestText, pushRequest, wantsReview } from "../src/lib/console/pull-request.ts";
+import { CODEX_REVIEW, codexReviewSetting, PUSH_SUMMARY_BODY, pullRequestText, pushRequest, pushSummary, wantsReview } from "../src/lib/console/pull-request.ts";
 import { harness, TOKEN } from "./helpers/console-harness.ts";
 
 // After a push the Console opens the pull request with a description and,
@@ -116,6 +116,15 @@ test("the pull request's text: the agent's own words first, else its latest repo
   assert.throws(() => codexReviewSetting({ CONSOLE_CODEX_REVIEW: "maybe" }), /on or off/);
 });
 
+test("the push approval card shows the title and description that will be posted, a long one cut and marked", () => {
+  assert.equal(pushSummary("console/a1-lead", { by: "agent" }), "Push console/a1-lead to GitHub and open its pull request\n\nNo description given: a new pull request is described by the agent's final message and its commits.");
+  assert.equal(pushSummary("console/a1-lead", { by: "agent", title: "Fix", body: "Why" }), 'Push console/a1-lead to GitHub and open its pull request: "Fix"\n\nDescription:\nWhy');
+  const long = `${"a".repeat(PUSH_SUMMARY_BODY)}HIDDEN`;
+  const shown = pushSummary("console/a1-lead", { by: "agent", title: "Fix", body: long });
+  assert.ok(shown.includes("a".repeat(PUSH_SUMMARY_BODY)) && !shown.includes("HIDDEN"));
+  assert.match(shown, /… \(cut here; the full description is in the request's input\)$/);
+});
+
 test("GitHub calls: an open pull request is reused, a new one is opened; a token without pull request access is named", async () => {
   const gh = github();
   const first = await openPullRequest("owner/repo", { branch: "console/a1-lead", base: "main", title: "T", body: "B" }, "tok", gh.fetcher, "https://api.example");
@@ -138,7 +147,7 @@ test("GitHub calls: an open pull request is reused, a new one is opened; a token
   );
 });
 
-test("team_push opens the pull request with the agent's description and asks Codex; Open pull request needs no second approval; Push branch updates it", async (t) => {
+test("team_push opens the pull request with the agent's description and asks Codex; the owner approves the text it posts, even after Open pull request; Push branch updates it", async (t) => {
   const bare = origin(t);
   const gh = github();
   const h = await harness(t, {}, false, {
@@ -157,7 +166,8 @@ test("team_push opens the pull request with the agent's description and asks Cod
   // The agent asks; the owner approves in Needs you.
   const asked = h.send(lead.id, call("team_push", { title: "Return to the builder after sign-in", body: "## What changed\nSign-in returns you." }));
   await h.until(() => h.store.openRequests().length === 1, "asked");
-  assert.match(h.store.openRequests()[0].summary, /open its pull request: "Return to the builder after sign-in"/);
+  // The card shows the title and the description that will be posted.
+  assert.match(h.store.openRequests()[0].summary, /open its pull request: "Return to the builder after sign-in"\n\nDescription:\n## What changed\nSign-in returns you\.$/);
   runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
   await h.ended(asked);
   const job = () => h.store.latestJob(lead.id)!;
@@ -175,17 +185,19 @@ test("team_push opens the pull request with the agent's description and asks Cod
   // The agent's login token never leaves in a description.
   assert.ok(!gh.pulls[0].body.includes(TOKEN));
 
-  // "Open pull request": an owner turn whose team_push is already approved.
+  // "Open pull request": an owner turn whose team_push asks Codex.
   const opened = (runCommand(h.store, { action: "openPullRequest", agentId: lead.id }) as { turnId: number }).turnId;
   assert.equal(h.store.turn(opened)!.prompt, OPEN_PR_PROMPT);
   assert.equal(h.store.pushApproved(opened), true);
   await h.ended(opened);
-  // The same approval, used by a turn the fake can run: no Needs you item;
-  // the open pull request takes the new title, and the owner's ask brings
-  // a Codex review without review: true.
+  // The same ask, used by a turn the fake can run: the owner still sees the
+  // text before it is posted; the open pull request takes the new title,
+  // and the owner's ask brings a Codex review without review: true.
   const approved = h.store.queueTurn(lead.id, call("team_push", { title: "Again" }), null, { pushApproved: true }).id;
+  await h.until(() => h.store.openRequests().length === 1, "asked again");
+  assert.match(h.store.openRequests()[0].summary, /open its pull request: "Again"\n\nNo description given/);
+  runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
   await h.ended(approved);
-  assert.equal(h.store.openRequests().length, 0);
   await h.until(() => job().id !== firstJob && ["done", "failed"].includes(job().state), "pushed again");
   assert.match(job().message!, /Updated the title and description of pull request #100\. Codex was asked to review it\./);
   assert.equal(gh.pulls.length, 1);
@@ -223,7 +235,10 @@ test("with Codex reviews off (the default), the pull request is opened and no on
   const lead = h.agent("Lead");
   await h.until(() => h.store.agent(lead.id)!.state === "ready", "folder");
   await h.ended(h.send(lead.id, "write fix.txt"));
-  await h.ended(h.store.queueTurn(lead.id, call("team_push", { title: "Fix", body: "Details", review: true }), null, { pushApproved: true }).id);
+  const pushing = h.store.queueTurn(lead.id, call("team_push", { title: "Fix", body: "Details", review: true }), null, { pushApproved: true }).id;
+  await h.until(() => h.store.openRequests().length === 1, "asked");
+  runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
+  await h.ended(pushing);
   const job = () => h.store.latestJob(lead.id)!;
   await h.until(() => ["done", "failed"].includes(job()?.state ?? ""), "pushed");
   assert.equal(job().state, "done", job().message ?? "");

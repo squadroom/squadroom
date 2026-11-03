@@ -67,8 +67,9 @@ export class Redactor {
     for (const secret of this.secrets) if (input.includes(secret)) return true;
     return false;
   }
-  /** Whether raw bytes (a Git blob, say) hold any exact value handed to an
-   * agent, whatever their encoding. */
+  /** Whether raw bytes (a Git blob, say) hold any value handed to an agent,
+   * byte for byte as UTF-8. Exact bytes only: the same value encoded
+   * another way (base64, UTF-16, split across lines) is not found. */
   holdsSecretBytes(input: Buffer): boolean {
     for (const secret of this.secrets) if (input.includes(Buffer.from(secret, "utf8"))) return true;
     return false;

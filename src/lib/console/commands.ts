@@ -18,7 +18,7 @@ import { allTemplates, rolesView, templatesView } from "./views.ts";
 
 /** What "Open pull request" sends the agent. */
 export const OPEN_PR_PROMPT =
-  "Open a pull request for your work: call team_push with a short title and a description in Markdown (what changed and why, the files, the checks you ran and their results, what the owner should test, and anything left open). It is already approved. If your folder has unfinished work, say so in the description.";
+  "Open a pull request for your work: call team_push with a short title and a description in Markdown (what changed and why, the files, the checks you ran and their results, what the owner should test, and anything left open). The owner approves the title and description before they are posted. If your folder has unfinished work, say so in the description.";
 
 /** A Keys page write (`setKey`, `removeKey`): the key file, not the store. */
 export function runKeysCommand(store: ConsoleStore, keysPath: string, input: Record<string, unknown>): Record<string, unknown> {
@@ -538,8 +538,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       return { job: store.queuePush(agent.id, { by: "owner" }) };
     }
     case "openPullRequest": {
-      // The owner asks the agent to describe its work and push it:
-      // one click; the agent's team_push needs no second approval.
+      // The owner asks the agent to describe its work and push it; its
+      // team_push then shows the owner the text before anything is posted.
       const agent = store.agent(id(input.agentId, "Agent"));
       if (!agent || agent.state !== "ready") throw new CommandError("That agent is not ready.");
       if (store.project(agent.projectId)?.source !== "github") throw new CommandError("Only a GitHub project's agents open pull requests.");
