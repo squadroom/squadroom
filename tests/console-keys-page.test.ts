@@ -220,7 +220,7 @@ test("ACP kinds: Gemini and Grok on paid keys, Kimi Code on the agent account's 
   assert.deepEqual(panels.find((p) => p.kind === "gemini-cli")!.credentials.map((c) => c.name), ["GEMINI_API_KEY"]);
   assert.deepEqual(panels.find((p) => p.kind === "grok-build")!.credentials.map((c) => c.name), ["XAI_API_KEY"]);
   const kimi = panels.find((p) => p.kind === "kimi-code")!;
-  assert.deepEqual([kimi.credentials, kimi.accountLogin, kimi.pinned], [[], true, "2.3.0"]);
+  assert.deepEqual([kimi.credentials, kimi.accountLogin, kimi.pinned], [[], true, ACP_CLIENTS.kimi.version]);
   const gemini = agentModel("gemini-cli", "gemini-3.8-flash")!;
   const usage = { inputTokens: 1_000_000, outputTokens: 100_000 };
   const now = chargeTurn(gemini, usage, new Date("2026-10-21T00:00:00Z"))!.usd;
