@@ -48,6 +48,32 @@ test("a Claude request waits for the owner: Allow once, then Always for this age
   assert.ok(!h.store.hasRule(lead.id, "tool:Skill"));
 });
 
+test("a Claude request the Console fails to decide is denied, not left unanswered or thrown", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent();
+  await h.ready(lead.id);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  t.after(() => process.off("unhandledRejection", onUnhandled));
+  // The store fails while the request is decided (a locked database, say).
+  const hasRule = h.store.hasRule;
+  h.store.hasRule = () => {
+    throw new Error("database is locked");
+  };
+  try {
+    // A network request, which Claude Code asks for with a control request.
+    await h.ended(h.send(lead.id, "network"));
+  } finally {
+    h.store.hasRule = hasRule;
+  }
+  assert.equal(h.said(lead.id).at(-1), "network: deny");
+  assert.equal(h.store.openRequests().length, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(unhandled, []);
+});
+
 test("the approve tool refuses the Console's own tool names: an agent's own call can never pass for, or leave a rule for, a push", async (t) => {
   const h = await harness(t);
   await h.worker.start();

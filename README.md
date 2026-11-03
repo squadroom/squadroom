@@ -262,8 +262,9 @@ and how each part works in [docs/architecture.md](docs/architecture.md).
   listens on loopback only, but agents run on the same Mac, so every request
   needs a signed-in session; commands also need a same-origin `Origin`.
   Pages carry a Content-Security-Policy that keeps them to Squadroom's own
-  address and stops other sites framing them; it does allow inline scripts,
-  which Next.js needs.
+  address, its forms to its own address and stops other sites framing
+  them; it does allow inline scripts, which Next.js needs. Pages also ask
+  the browser to keep to https (HSTS) and not to guess content types.
 - **Agents run as a separate macOS user** (`agent`) that cannot read your
   home folder, through a root-owned launcher that passes only the one
   credential an agent needs. Claude Code runs in its sandbox, Codex under

@@ -147,10 +147,8 @@ want the API-key models. A window never switches between its login and
 a key: if the client reports the other one, the turn stops. Web search is
 off for the API-key models, because it is billed per search and Squadroom
 can't work out its cost from the usage the client reports. Each turn is
-charged once for its own usage. After the worker restarts, a Claude Code
-"(API key)" window's first turn can't be measured, so it is charged its
-full allowance and its tab pauses until you Resume. A turn that fails is
-charged what it reported plus the allowance for at least one request (one
+charged once for its own usage, also after the worker restarts. A turn
+that fails is charged what it reported plus the allowance for at least one request (one
 may have been under way), and its tab pauses too. A turn you stop is
 charged what it reported plus, for each request its report doesn't cover
 (at least one), a request the size of the largest it sent, with the

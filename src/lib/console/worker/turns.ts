@@ -2,7 +2,7 @@ import { agentKind, type AgentModel } from "../agents.ts";
 import { TurnEvents } from "../events.ts";
 import { uploadsNote } from "../files.ts";
 import { keyFor } from "../keys.ts";
-import { errorMessage as message } from "../session.ts";
+import { errorMessage as message, type SessionTotals } from "../session.ts";
 import { fingerprint, loginKey, NO_REQUESTS } from "../spend.ts";
 import type { TurnRow } from "../store.ts";
 import { MESSAGE_MAX, resendNote } from "../team.ts";
@@ -211,7 +211,7 @@ export const turns = {
     rt: Runtime,
     status: TurnStatus,
     reason: string | null,
-    options: { usage?: TurnUsage | null; completed?: boolean; commit?: boolean } = {},
+    options: { usage?: TurnUsage | null; completed?: boolean; commit?: boolean; totals?: SessionTotals } = {},
   ): void {
     const t = rt.turn;
     if (!t || this.epoch === null) return;
@@ -255,7 +255,8 @@ export const turns = {
       // routes and answers carry its start and their recipient reads the
       // rest with team_read.
       const final = status === "done" && t.lastText ? this.redactor.text(t.lastText) : null;
-      this.store.finishTurn(epoch, t.id, status, reason, usage ?? t.running.usage, final, charge);
+      // The client's running totals are kept with the charge, never alone.
+      this.store.finishTurn(epoch, t.id, status, reason, usage ?? t.running.usage, final, charge, options.totals);
     });
     if (charge) this.checkSpend(rt.agent, charge);
     // No repository, no commits: checked, never progress, even for a turn

@@ -144,10 +144,11 @@ export const sessions = {
   projectDirExists(this: ConsoleWorker, projectId: string | undefined): boolean {
     return !!projectId && existsSync(join(this.options.paths.agentHome, "work", projectId));
   },
-  /** What a Codex thread denies: every other project's folder that exists,
+  /** What a Claude Code session or Codex thread denies reading: every
+   * other project's folder that exists,
    * and its own project's other clones that still exist (a closed agent's
    * folder that Clean up removed drops out). */
-  codexDenied(this: ConsoleWorker, agent: ConsoleAgent): string[] {
+  deniedFolders(this: ConsoleWorker, agent: ConsoleAgent): string[] {
     const work = join(this.options.paths.agentHome, "work");
     const projects = this.store.projects().map((p) => join(work, p.id)).filter((dir) => dir !== join(work, agent.projectId) && existsSync(dir));
     const mates = this.store.agents(agent.projectId).map((a) => a.folder).filter((f) => f && f !== agent.folder && existsSync(f));
@@ -193,6 +194,7 @@ export const sessions = {
       permit: (tool, input, policy) => (me && rt.session === me ? this.permit(rt, tool, input, policy) : Promise.resolve({ allow: false, always: false, answer: null, reason: "This agent session has ended." })),
       newToken: () => this.newToken(agent.id, rt),
       storedSession: () => this.store.session(agent.id),
+      storedTotals: (sessionId) => this.store.sessionTotals(agent.id, sessionId),
       documentsOnly: !!this.store.tabSteps(agent.tabId),
       stepFiles: () => currentStepFiles(this.store.tabSteps(agent.tabId)),
       system: () => {
@@ -359,7 +361,7 @@ export const sessions = {
     // turn's. Ended any other way, a request may have been under way that
     // the usage does not cover, so the allowance is added for it, unless
     // the provider turned the prompt away before any model ran.
-    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" || !!ev.nothingRan });
+    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" || !!ev.nothingRan, totals: ev.totals });
   },
   /** What the turn's client has reported so far; a paid turn's is kept
    * with it, so a restart charges it from that. */
