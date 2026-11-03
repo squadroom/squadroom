@@ -8,7 +8,7 @@
 // 2.1.280 or newer. Its bundled model table lists Fable 5.1
 // (claude-fable-5-1) with a 2.1.251 minimum; the same table's 2.1.280 for
 // Opus 5.5 is the floor the API enforced.
-export const CLIENT_VERSIONS = { codex: "0.155.1", claude: "2.1.282" } as const;
+export const CLIENT_VERSIONS = { codex: "0.166.0", claude: "2.1.282" } as const;
 /** The Console's ACP clients: npm package and pinned version, installed
  * for the `agent` user by setup-agent-user.sh into the clients folder; the
  * key is the executable's name. Versions checked on npm 2026-10-21
