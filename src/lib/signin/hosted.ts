@@ -3,6 +3,7 @@
 // proxy on the same Mac). Such proxies deliver every request from
 // 127.0.0.1, and agents on the same Mac can make loopback requests too, so
 // loopback is never trusted.
+import { isIP } from "node:net";
 import type { ServerSettings } from "../../config/server-env.ts";
 
 /** A Console command or sign-in step (POST): the custom header, `Origin`
@@ -53,11 +54,47 @@ export function deviceLabel(userAgent: string | null): string {
   return "Browser";
 }
 
+/** Sign-in step 1's start, unless another site sent the browser there (a
+ * link that would end your session and start a new sign-in). The sign-in
+ * page's own link is same-origin; a typed address or bookmark is "none". A
+ * browser too old to send the header is let through. */
+export function startAllowed(headers: Pick<Headers, "get">): boolean {
+  const site = headers.get("sec-fetch-site");
+  return site === null || site === "same-origin" || site === "none";
+}
+
 /** The client address for rate limits: the last `X-Forwarded-For` entry,
- * which the trusted proxy in front adds; earlier entries are the
- * client's own claim. Limits also apply in total, whatever this says. */
+ * which the proxy in front adds (earlier entries are the client's own
+ * claim), when it is an IP address; otherwise one shared "unknown" bucket.
+ * A request straight to the loopback port without the header gets the
+ * address Next fills in, 127.0.0.1. The server cannot tell the proxy's
+ * requests from another process's on this Mac (both come from loopback),
+ * so a local process can pick its own address: that only moves it to
+ * another per-address bucket, and the checking steps' total limits apply
+ * whatever this says. */
 export function clientAddress(headers: Pick<Headers, "get">): string {
-  const forwarded = headers.get("x-forwarded-for");
-  const last = forwarded?.split(",").at(-1)?.trim();
-  return last && last.length <= 64 ? last : "unknown";
+  const last = headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  return last && isIP(last) ? last : "unknown";
+}
+
+/** A request body as text, or null when it is over `maxBytes`: refused by
+ * its declared length before reading, and read with a hard bound whatever
+ * that says. */
+export async function readCappedText(request: Request, maxBytes: number): Promise<string | null> {
+  if (Number(request.headers.get("content-length") ?? "0") > maxBytes) return null;
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }

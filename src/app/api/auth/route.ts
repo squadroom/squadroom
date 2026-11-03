@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { serverSettings } from "@/config/server-env";
-import { SESSION_COOKIE, clientAddress, cookieOptions, postAllowed } from "@/lib/signin/hosted";
+import { SESSION_COOKIE, clientAddress, cookieOptions, postAllowed, readCappedText } from "@/lib/signin/hosted";
 import { SESSION_MS, SignInError } from "@/lib/signin/signin";
 import { consoleSignIn } from "@/lib/console/web";
 
@@ -22,8 +22,8 @@ export async function POST(request: Request) {
   if (!postAllowed(request.headers, settings)) return json({ error: "Not found" }, 404);
   let input: Record<string, unknown>;
   try {
-    const text = await request.text();
-    if (text.length > 4_000) throw new Error();
+    const text = await readCappedText(request, 4_000);
+    if (text === null) throw new Error();
     input = JSON.parse(text);
     if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error();
   } catch {

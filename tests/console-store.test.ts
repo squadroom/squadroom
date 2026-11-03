@@ -95,6 +95,29 @@ test("a size-triggered flush also keeps a split credential whole", () => {
   assert.equal(text.at(-1), "[redacted …6789] done");
 });
 
+test("review M5: the cut and the split point stay fast on 512 KB written to defeat them", () => {
+  const r = new Redactor();
+  r.add("secret-value-0123456789");
+  // Every "AIza" starts a key shape that runs to the "!" just before the
+  // cut; one long run of key characters ends in "!". Both took tens of
+  // seconds when the patterns looked through the whole text.
+  const shapes = `${"AIza.".repeat(512 * 1024 / 5)}!`;
+  const run = `${"a.".repeat(256 * 1024)}!`;
+  const started = performance.now();
+  const cut = r.cut(`${shapes}tail`, shapes.length);
+  assert.deepEqual([cut.truncated, cut.text.endsWith("!")], [true, true]);
+  assert.match(r.shorten(`${shapes}tail`, shapes.length + 1), /!…$/);
+  assert.equal(r.splitPoint(run, run.length), run.length);
+  assert.ok(performance.now() - started < 500, `${performance.now() - started} ms`);
+  // The same as before near the cut: a key shape's start is dropped, a
+  // word that merely contains one is not, and a run is held back.
+  assert.equal(r.cut("key: ghp_abcdefghij", 15).text, "key: ");
+  assert.equal(r.cut("xsk-abc", 6).text, "xsk-ab");
+  assert.equal(r.cut(`${"x".repeat(5000)} sk-abc`, 5006).text, `${"x".repeat(5000)} `);
+  assert.equal(r.splitPoint("hi sk-ab", 8), 3);
+  assert.equal(r.splitPoint("a".repeat(3000), 3000), 3000 - r.reach);
+});
+
 test("permission inputs count toward the turn bound", () => {
   const events = new TurnEvents(sink(), new Redactor(), 0, { coalesceMs: 10, toolOutputBytes: 100, turnBytes: 300 });
   let full = 0;

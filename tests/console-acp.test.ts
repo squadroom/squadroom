@@ -452,6 +452,32 @@ test("Ask me first changed after the route's check: the command asks for the cod
   runCommand(store, body, { freshCode: true });
 });
 
+test("Ask me first holds for every project on the same GitHub repository", (t) => {
+  const store = new ConsoleStore(":memory:", () => 6_000_000);
+  t.after(() => store.close());
+  const github = (name: string, repo: string) =>
+    (runCommand(store, { action: "createProject", name, source: "github", repo }).project as { id: string }).id;
+  const guarded = github("Guarded", "https://github.com/owner/app");
+  runCommand(store, { action: "createAgent", tabId: store.tabs(guarded)[0].id, name: "Guard", kind: "claude-code", model: "haiku", permission: "edit", askFirst: true });
+  // A new project on that repository (the name's case aside) needs the code
+  // to make agents, teams or template tabs without Ask me first.
+  const again = github("Again", "Owner/App");
+  const tabId = store.tabs(again)[0].id;
+  for (const body of [
+    { action: "createAgent", tabId, name: "Loose", kind: "claude-code", model: "haiku", permission: "edit" },
+    { action: "createTeam", tabId },
+    { action: "createTab", projectId: again, name: "Review", templateId: "x" },
+  ])
+    assert.equal(needsFreshCode(body, freshCodeContext(store, body)), true, body.action);
+  const careful = { action: "createAgent", tabId, name: "Careful", kind: "claude-code", model: "haiku", permission: "edit", askFirst: true };
+  assert.equal(needsFreshCode(careful, freshCodeContext(store, careful)), false);
+  // Another repository, or a folder project, is not affected.
+  for (const id of [github("Other", "owner/other"), (runCommand(store, { action: "createProject", name: "F", source: "folder" }).project as { id: string }).id]) {
+    const body = { action: "createAgent", tabId: store.tabs(id)[0].id, name: "Plain", kind: "claude-code", model: "haiku", permission: "edit" };
+    assert.equal(needsFreshCode(body, freshCodeContext(store, body)), false);
+  }
+});
+
 test("a spend limit set on a tab: validated, rounded to the cent; a raise still under the spend keeps the spend pause with the new limit", (t) => {
   const store = new ConsoleStore(":memory:", () => 6_000_000);
   t.after(() => store.close());

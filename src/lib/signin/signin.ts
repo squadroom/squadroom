@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { ServerSettings } from "../../config/server-env.ts";
 
 // The sign-in. Step 1: your own GitHub OAuth app; only the one configured
@@ -20,15 +20,19 @@ export const CODE_INTERVAL_MS = 60_000;
 /** How long an e-mailed code is valid. */
 export const CODE_MS = 10 * 60_000;
 export const EMERGENCY_MS = 10 * 60_000;
+/** How long step 1's `state` (and its cookie) is good for. */
+export const STATE_MS = 10 * 60_000;
 const TOUCH_MS = 60_000;
 /** Requests per minute for each sign-in step, per client address, and in
  * total for the steps that check something (`callback`, `code`). `start`
  * only sets a state cookie and redirects, so it has no total limit: a total
- * there would let anyone stop the owner starting a sign-in. */
+ * there would let anyone stop the owner starting a sign-in. A request the
+ * per-address limit refuses does not count toward the total. */
 const PER_ADDRESS = 10;
 const IN_TOTAL = 30;
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const sha256url = (value: string) => createHash("sha256").update(value).digest("base64url");
 const secret = () => randomBytes(32).toString("base64url");
 const sameText = (a: string, b: string) => {
   const x = Buffer.from(a);
@@ -43,11 +47,12 @@ export const newCode = () => String(randomInt(0, 100_000_000)).padStart(8, "0");
 export interface CodeMailer {
   send(code: string): Promise<void>;
 }
-/** Step 1: the GitHub account behind an authorization code. */
+/** Step 1: the GitHub account behind an authorization code. `challenge`
+ * and `verifier` are PKCE's (S256): only this server can exchange the code. */
 export interface GitHubIdentity {
-  authorizeUrl(state: string): string;
+  authorizeUrl(state: string, challenge: string): string;
   /** The numeric account ID, or null. The user token is not kept. */
-  accountId(code: string): Promise<number | null>;
+  accountId(code: string, verifier: string): Promise<number | null>;
 }
 
 export type SignInFailure = "failed" | "code" | "locked" | "wait" | "expired" | "limited" | "unavailable" | "noMail";
@@ -110,7 +115,8 @@ export interface SignInStore {
 
 export interface SignInOptions {
   store: SignInStore;
-  settings: Pick<ServerSettings, "ownerGithubId">;
+  /** The client secret also keys the signature on step 1's `state`. */
+  settings: Pick<ServerSettings, "ownerGithubId" | "githubClientSecret">;
   /** Null when no mail is configured: GitHub alone signs in. */
   codes: CodeMailer | null;
   github: GitHubIdentity;
@@ -145,16 +151,38 @@ export class SignIn {
   }
 
   /** Step 1 begins: GitHub's authorization page, with a `state` the browser
-   * keeps in a cookie. */
+   * keeps in a cookie. The state is signed by this server and says when it
+   * expires, so the callback can tell one it issued from one made up,
+   * before it counts anything; nothing is stored. */
   start(): { url: string; state: string } {
-    const state = secret();
-    return { url: this.github.authorizeUrl(state), state };
+    const body = `${(this.now() + STATE_MS).toString(36)}.${secret()}`;
+    const state = `${body}.${this.mac(`state ${body}`)}`;
+    return { url: this.github.authorizeUrl(state, sha256url(this.verifier(state))), state };
+  }
+  /** Whether the callback's `state` is the browser's own (its cookie) and
+   * one this server issued that has not expired. */
+  stateValid(state: string | null, expected: string | undefined): boolean {
+    if (!state || !expected || state.length > 200 || !sameText(state, expected)) return false;
+    const [expires, nonce, mac, extra] = state.split(".");
+    if (extra !== undefined || !nonce || !mac || !sameText(mac, this.mac(`state ${expires}.${nonce}`))) return false;
+    return parseInt(expires, 36) > this.now();
+  }
+  /** PKCE's verifier for a state: derived, so it is never stored or sent
+   * to the browser. */
+  private verifier(state: string): string {
+    return this.mac(`pkce ${state}`);
+  }
+  /** A signature keyed from the client secret, which never leaves the
+   * server. */
+  private mac(text: string): string {
+    const key = createHmac("sha256", this.settings.githubClientSecret).update("squadroom sign-in state").digest();
+    return createHmac("sha256", key).update(text).digest("base64url");
   }
 
   /** Step 1 ends: only the configured GitHub account passes. With mail on it
    * gets a partial session (codes only, 10 minutes); without mail, a full
-   * session, which replaces the browser's current one (`current`, its
-   * cookie) so signing in again leaves no stale session behind. A GitHub
+   * session. Either replaces the browser's current one (`current`, its
+   * cookie), so signing in again leaves no stale session behind. A GitHub
    * sign-in never counts as a fresh confirmation for weighty commands.
    * Returns the new session's ID. */
   async finishGithub(
@@ -164,18 +192,16 @@ export class SignIn {
     device: string,
     current?: string,
   ): Promise<string> {
-    if (!code || !state || !expectedState || !sameText(state, expectedState))
-      throw new SignInError("failed");
+    if (!code || !state || !this.stateValid(state, expectedState)) throw new SignInError("failed");
     let account: number | null;
     try {
-      account = await this.github.accountId(code);
+      account = await this.github.accountId(code, this.verifier(state));
     } catch {
       throw new SignInError("failed");
     }
     if (account !== this.settings.ownerGithubId) throw new SignInError("failed");
-    if (this.codes) return this.newSession("partial", device, null);
     if (current && current.length <= 100) this.store.deleteSession(hash(current));
-    return this.newSession("full", device, null);
+    return this.newSession(this.codes ? "partial" : "full", device, null);
   }
 
   /** The session behind a cookie, or null when there is none or it expired. */
@@ -312,13 +338,13 @@ export class SignIn {
   }
 
   /** Rate limit for one sign-in step: per client address, and in total for
-   * every step but `start`. */
+   * every step but `start`. Callers check what they can first (the
+   * callback's state, the code step's session), so made-up requests use
+   * up nothing. */
   allow(step: "start" | "callback" | "code", address: string): boolean {
     const now = this.now();
-    const one = this.store.rateHit(`${step}:${address}`, PER_ADDRESS, 60_000, now);
-    if (step === "start") return one;
-    const all = this.store.rateHit(`${step}:*`, IN_TOTAL, 60_000, now);
-    return one && all;
+    if (!this.store.rateHit(`${step}:${address}`, PER_ADDRESS, 60_000, now)) return false;
+    return step === "start" || this.store.rateHit(`${step}:*`, IN_TOTAL, 60_000, now);
   }
 
   private confirmed(row: SessionRow, emailedCode = true): string | null {
@@ -367,14 +393,16 @@ export function githubIdentity(
 ): GitHubIdentity {
   const redirect = `${settings.publicOrigin}/api/auth/callback`;
   return {
-    authorizeUrl: (state) =>
+    authorizeUrl: (state, challenge) =>
       `https://github.com/login/oauth/authorize?${new URLSearchParams({
         client_id: settings.githubClientId,
         redirect_uri: redirect,
         state,
+        code_challenge: challenge,
+        code_challenge_method: "S256",
         allow_signup: "false",
       })}`,
-    async accountId(code) {
+    async accountId(code, verifier) {
       const exchange = await fetcher("https://github.com/login/oauth/access_token", {
         method: "POST",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -383,6 +411,7 @@ export function githubIdentity(
           client_secret: settings.githubClientSecret,
           code,
           redirect_uri: redirect,
+          code_verifier: verifier,
         }),
         signal: AbortSignal.timeout(15_000),
       });

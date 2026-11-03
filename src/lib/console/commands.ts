@@ -134,7 +134,8 @@ export interface FreshCodeContext {
   /** The Console-wide spend limit now. */
   consoleSpendLimit?: number;
   /** The project an agent, team or template tab is made in has an agent,
-   * open or closed, with Ask me first on. */
+   * open or closed, with Ask me first on (or another project on the same
+   * GitHub repository has). */
   askFirstInUse?: boolean;
 }
 
@@ -231,13 +232,22 @@ export function freshCodeContext(store: ConsoleStore, input: Record<string, unkn
     case "createAgent":
     case "createTeam": {
       const tab = typeof input.tabId === "string" ? store.tab(input.tabId) : undefined;
-      return { askFirstInUse: !!tab && store.askFirstInUse(tab.projectId) };
+      return { askFirstInUse: !!tab && askFirstInRepo(store, tab.projectId) };
     }
     case "createTab":
-      return { askFirstInUse: typeof input.projectId === "string" && store.askFirstInUse(input.projectId) };
+      return { askFirstInUse: typeof input.projectId === "string" && askFirstInRepo(store, input.projectId) };
     default:
       return {};
   }
+}
+
+/** Ask me first is used in the project, or in another project on the same
+ * GitHub repository: otherwise a new project on that repository would make
+ * agents without it, with no code. */
+function askFirstInRepo(store: ConsoleStore, projectId: string): boolean {
+  if (store.askFirstInUse(projectId)) return true;
+  const repo = store.project(projectId)?.repo?.toLowerCase();
+  return !!repo && store.projects().some((p) => p.id !== projectId && p.repo?.toLowerCase() === repo && store.askFirstInUse(p.id));
 }
 
 /** A command that needs a fresh code by the store as it is now, run
