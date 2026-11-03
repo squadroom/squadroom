@@ -72,6 +72,10 @@ CREATE INDEX IF NOT EXISTS console_tabs_project ON console_tabs (project_id);
 CREATE TABLE IF NOT EXISTS console_agents (id TEXT PRIMARY KEY, tab_id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, permission TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', branch TEXT, state TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, base_commit TEXT, merging TEXT, start_after TEXT, ask_first INTEGER NOT NULL DEFAULT 0, carry_summary TEXT, settling INTEGER);
 CREATE INDEX IF NOT EXISTS console_agents_project ON console_agents (project_id);
 CREATE TABLE IF NOT EXISTS console_sessions (agent_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, epoch INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+-- A client's running usage totals for its session (Claude Code's
+-- modelUsage on an API key), written only with the charge of the turn they
+-- end, so a restart charges the next turn only what comes after.
+CREATE TABLE IF NOT EXISTS console_session_totals (agent_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, totals TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS console_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, trigger TEXT NOT NULL, prompt TEXT NOT NULL, status TEXT NOT NULL, reason TEXT, stop_requested TEXT, epoch INTEGER, created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER, usage TEXT, bytes INTEGER NOT NULL DEFAULT 0, commit_before TEXT, commit_after TEXT, waited_ms INTEGER NOT NULL DEFAULT 0, acknowledged INTEGER NOT NULL DEFAULT 0, instruction_id INTEGER, resend_of INTEGER, push_approved INTEGER NOT NULL DEFAULT 0, progressed INTEGER NOT NULL DEFAULT 0, progress_mark INTEGER, next_at INTEGER, revised_at INTEGER, summary INTEGER NOT NULL DEFAULT 0, ended_seq INTEGER, prompted INTEGER NOT NULL DEFAULT 0, final_text TEXT, compacted INTEGER NOT NULL DEFAULT 0, cost_usd REAL, cost_basis TEXT, started_seq INTEGER, billing TEXT, running TEXT);
 CREATE INDEX IF NOT EXISTS console_turns_agent ON console_turns (agent_id, id);
 CREATE INDEX IF NOT EXISTS console_turns_status ON console_turns (status);

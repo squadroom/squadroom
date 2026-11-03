@@ -164,6 +164,31 @@ test("Ask me first: changes, commands and web access ask; reads and boundaries d
   assert.equal(decideCodexCommand({ command: ["npm", "test"] }).behavior, "deny");
 });
 
+test("a new teammate makes a Claude window's settings stale: its next turn restarts the process with the clone denied", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await h.ended(h.send(lead.id, "hello"));
+  const mate = h.agent("Mate");
+  await h.ready(mate.id);
+  await h.ended(h.send(lead.id, "hello"));
+  const own = h.store.agent(lead.id)!.folder;
+  const clone = h.store.agent(mate.id)!.folder;
+  const starts = readFileSync(join(own, "args.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l) as string[]);
+  assert.equal(starts.length, 2);
+  type Settings = { sandbox: { filesystem: { denyRead: string[] } }; permissions: { deny: string[] } };
+  const settings = (args: string[]) => JSON.parse(args[args.indexOf("--settings") + 1]) as Settings;
+  assert.ok(!settings(starts[0]).sandbox.filesystem.denyRead.includes(clone));
+  assert.ok(settings(starts[1]).sandbox.filesystem.denyRead.includes(clone));
+  assert.ok(settings(starts[1]).permissions.deny.includes(`Read(/${clone}/**)`));
+  assert.ok(!settings(starts[1]).sandbox.filesystem.denyRead.includes(own));
+  assert.ok(starts[1].includes("--resume"));
+});
+
 test("Ask me first on a Claude window: its next turn restarts the process with the setting, and a change waits for the owner", async (t) => {
   // One live process at most: the replacement waits for the retired one.
   const h = await harness(t, { liveProcesses: 1 });

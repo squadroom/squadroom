@@ -170,7 +170,7 @@ class CodexSession implements AgentSession {
     const host = this.driver.host;
     const { agent, model } = this.ctx;
     const tmp = join(agent.folder, CLONE_TMP);
-    const others = host.codexDenied(agent);
+    const others = host.deniedFolders(agent);
     const key = JSON.stringify({ others, permission: agent.permission, server: server.pid });
     if (this.thread && this.thread.key === key) return this.thread.id;
     await host.launcher.mkdir(agent.folder, CLONE_TMP);

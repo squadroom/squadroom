@@ -177,6 +177,12 @@ export const projects = {
   session(this: ConsoleStore, agentId: string): string | null {
     return (this.get("SELECT session_id FROM console_sessions WHERE agent_id = ?", agentId)?.session_id as string | undefined) ?? null;
   },
+  /** The running totals kept with the last charged turn of this agent's
+   * session (`finishTurn`); null when none were kept for that session. */
+  sessionTotals(this: ConsoleStore, agentId: string, sessionId: string): unknown {
+    const row = this.get("SELECT totals FROM console_session_totals WHERE agent_id = ? AND session_id = ?", agentId, sessionId);
+    return row ? JSON.parse(row.totals as string) : null;
+  },
 
   // ── Worker writes (fenced by the lease epoch) ──────────────────────────
   setAgentFolder(this: ConsoleStore, epoch: number, agentId: string, folder: string) {

@@ -127,15 +127,42 @@ test("Claude Code on an API key: each turn is charged once, across turns, a rest
   assert.equal(after.costBasis, "reported");
   assert.equal(after.costUsd, chargeTurn(SONNET_KEY, { inputTokens: 62, cacheReadTokens: 2, cacheWriteTokens: 0, outputTokens: 14 })!.usd);
 
-  // A new worker resuming the session knows none of its totals: its first
-  // turn is charged the allowance, the next only its own usage.
+  // A new worker resuming the session reads the totals kept with the last
+  // charged turn: its first turn is charged only its own usage, and the tab
+  // does not wait.
   await h.worker.stop();
   const next = h.newWorker();
   await next.start();
-  assert.equal((await run("hello")).costBasis, "allowance");
-  const settled = await run("hello");
-  assert.equal(settled.costBasis, "reported");
-  assert.equal(settled.costUsd, once);
+  for (const text of ["hello", "again"]) {
+    const row = await run(text);
+    assert.equal(row.costBasis, "reported", text);
+    assert.equal(row.costUsd, once, text);
+    assert.equal(h.store.tab(h.tab.id)!.paused, false, text);
+  }
+});
+
+test("Claude Code's running totals are kept only with a committed charge", async (t) => {
+  const h = await harness(t);
+  const paid = h.agent("Paid", "edit", "claude-sonnet-5@api-key");
+  const epoch = h.store.takeLease("test-worker", Date.now())!;
+  const totals = (input: number) => ({ sessionId: "sess-1", value: [{ model: "claude-sonnet-5", usage: { inputTokens: input, outputTokens: 1 }, webSearches: 0 }] });
+  const charge = { usd: 0.01, basis: "reported" as const };
+  const end = (totalsAfter: ReturnType<typeof totals>, owed: typeof charge | null = charge) => {
+    const turn = h.send(paid.id, "hello");
+    assert.ok(h.store.startTurn(epoch, turn));
+    return () => h.store.finishTurn(epoch, turn, "done", null, null, null, owed, totalsAfter);
+  };
+  // Kept with a charge, read back by session.
+  end(totals(10))();
+  assert.deepEqual(h.store.sessionTotals(paid.id, "sess-1"), totals(10).value);
+  assert.equal(h.store.sessionTotals(paid.id, "sess-other"), null);
+  // A turn ended without a charge keeps no totals.
+  end(totals(20), null)();
+  assert.deepEqual(h.store.sessionTotals(paid.id, "sess-1"), totals(10).value);
+  // The charge's write fails: the whole end rolls back, totals included.
+  h.store.db.exec("CREATE TRIGGER no_charge BEFORE UPDATE OF cost_usd ON console_turns WHEN new.cost_usd IS NOT NULL BEGIN SELECT RAISE(ABORT, 'charge refused'); END;");
+  assert.throws(end(totals(30)), /charge refused/);
+  assert.deepEqual(h.store.sessionTotals(paid.id, "sess-1"), totals(10).value);
 });
 
 test("Claude Code on an API key: only its key crosses, it must report that key, web search is off, and the turn is charged", async (t) => {
@@ -168,6 +195,10 @@ test("Claude Code on an API key: only its key crosses, it must report that key, 
   assert.equal(h.store.turn(free)!.costUsd, null);
   const subEnv = JSON.parse(readFileSync(join(h.store.agent(sub.id)!.folder, "env.json"), "utf8")) as string[];
   assert.ok(subEnv.includes("CLAUDE_CODE_OAUTH_TOKEN") && !subEnv.includes("ANTHROPIC_API_KEY"));
+  // The harness plants an OPENAI_API_KEY in the worker's own environment
+  // (and the key file has one): neither window's client sees it.
+  assert.equal(process.env.OPENAI_API_KEY?.startsWith("sk-ambient-"), true);
+  for (const names of [env, subEnv]) assert.ok(!names.includes("OPENAI_API_KEY"), names.join(","));
   const api = h.send(sub.id, "apikey");
   await h.ended(api);
   assert.match(h.store.turn(api)!.reason!, /API credentials/);
@@ -345,8 +376,11 @@ test("a stopped Claude Code API-key turn's unreported request is sized by its la
   await h.ready(paid.id);
   const stop = async (word: string) => {
     const turn = h.send(paid.id, word);
-    await h.until(() => h.store.turn(turn)?.status === "running", "running");
-    await new Promise((r) => setTimeout(r, 300));
+    // Stop only once the measured request (and the helper, if any) is kept
+    // with the turn; sooner, the charge has no input to size it by.
+    const kept = () => readRunning(JSON.parse(String(h.store.get("SELECT running FROM console_turns WHERE id = ?", turn)?.running ?? "null")));
+    const helper = () => h.store.get("SELECT id FROM console_helpers WHERE turn_id = ?", turn) !== undefined;
+    await h.until(() => kept().largest === 1_000 && (word !== "measuredhelperhang" || helper()), "request kept");
     runCommand(h.store, { action: "stop", agentId: paid.id });
     await h.ended(turn);
     const row = h.store.turn(turn)!;

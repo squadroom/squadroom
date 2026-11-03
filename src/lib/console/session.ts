@@ -67,6 +67,10 @@ export interface GaugeUpdate {
 
 /** What a session tells the worker about its running turn. Events about a
  * turn that has ended are dropped by the worker. */
+/** A client's running usage totals for one of its sessions, as it reports
+ * them (kept as JSON). */
+export type SessionTotals = { sessionId: string; value: unknown };
+
 export type SessionEvent =
   /** The login and the model are confirmed for this turn (no silent paid
    * fallback); its session id is kept for resume. */
@@ -115,6 +119,9 @@ export type SessionEvent =
       /** Failed before any model ran (the provider turned the prompt
        * away): its usage, none, is the whole turn's. */
       nothingRan?: boolean;
+      /** The client's running usage totals after this turn, kept with its
+       * charge (`storedTotals` reads them back). */
+      totals?: SessionTotals;
     }
   /** The client refused the turn after all (a late refusal): nothing ran. */
   | { kind: "refused"; reason: string }
@@ -135,6 +142,8 @@ export interface SessionContext {
   newToken(): string;
   /** The agent's saved client session, to resume. */
   storedSession(): string | null;
+  /** The running totals kept with that session's last charged turn, or null. */
+  storedTotals(sessionId: string): unknown;
   /** The agent's instructions (its window, folder and role). */
   system(): string;
   /** Its tab has steps: document turns, no commands. */
@@ -191,10 +200,11 @@ export interface DriverHost {
   /** A folder is being made now (anywhere, or one a sandbox of this
    * project would not know: in this project, or a new project's first). */
   creatingFolders(projectId?: string): boolean;
-  /** What a Codex thread of this agent denies: every other project's
-   * folder, and its own project's other clones by name (the agent's own
-   * project folder is never denied: that breaks Node). */
-  codexDenied(agent: ConsoleAgent): string[];
+  /** What this agent's Claude Code session and Codex thread deny reading:
+   * every other project's folder, and its own project's other clones by
+   * name (the agent's own project folder is never denied: that breaks
+   * Node). */
+  deniedFolders(agent: ConsoleAgent): string[];
 }
 
 /** One kind of client. */

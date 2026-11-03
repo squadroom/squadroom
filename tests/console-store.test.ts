@@ -261,6 +261,15 @@ test("Claude settings: the sandbox, the read block, the hidden folders, and Look
     "Read(//Users/agent/.claude.json)",
   ]);
   assert.equal("denyWrite" in edit.sandbox.filesystem, false);
+  // Other projects' folders and teammates' clones, as Codex is given them.
+  const others = ["/Users/agent/work/q", "/Users/agent/work/p/b"];
+  const listed = claudeSettings("/Users/agent/work/p/a", "edit", paths, false, false, false, others);
+  for (const p of others) {
+    assert.ok(listed.sandbox.filesystem.denyRead.includes(p), p);
+    assert.ok(listed.permissions.deny.includes(`Read(/${p}/**)`), p);
+  }
+  assert.ok(!listed.sandbox.filesystem.denyRead.some((p) => p.startsWith("/Users/agent/work/p/a")));
+  assert.ok(!listed.permissions.deny.some((r) => r.includes("/Users/agent/work/p/a")));
   const look = claudeSettings("/Users/agent/work/p/a", "look", paths);
   assert.deepEqual((look.sandbox.filesystem as { denyWrite?: string[] }).denyWrite, ["/Users/agent/work/p/a"]);
   assert.ok(["Edit", "Write", "NotebookEdit"].every((t) => look.permissions.deny.includes(t)));

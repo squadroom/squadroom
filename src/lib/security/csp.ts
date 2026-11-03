@@ -4,7 +4,11 @@
 // else, and no page may frame it. An agent's Markdown is rendered without raw HTML and its images are
 // placeholders unless they are inline (markdown-image.ts), so
 // the browser never calls out on an agent's behalf. No referrer leaves with
-// any link an agent wrote.
+// any link an agent wrote, and forms post only to the page's own origin.
+// The browser keeps to https for a year once it has seen the page there
+// (Tailscale Serve adds no HSTS of its own; browsers ignore the header
+// over plain http, so local development is unaffected), and never guesses
+// a response's type from its content.
 //
 // Wider than `default-src 'self'` only where the page cannot run otherwise:
 // - script-src 'unsafe-inline': Next's App Router bootstraps each page with
@@ -25,6 +29,7 @@ export function contentSecurityPolicy(dev: boolean): string {
     `connect-src 'self'${dev ? " ws: wss:" : ""}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
+    "form-action 'self'",
     "object-src 'none'",
   ].join("; ");
 }
@@ -34,6 +39,8 @@ export function securityHeaders(dev: boolean): { key: string; value: string }[] 
   return [
     { key: "Content-Security-Policy", value: contentSecurityPolicy(dev) },
     { key: "Referrer-Policy", value: "no-referrer" },
+    { key: "Strict-Transport-Security", value: "max-age=31536000" },
+    { key: "X-Content-Type-Options", value: "nosniff" },
   ];
 }
 
