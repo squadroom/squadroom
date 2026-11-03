@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -44,8 +44,10 @@ test("inside a transaction: its writes are seen, and a rollback undoes them", ()
   store.close();
 });
 
-test("closed and opened again, the same file's queries are prepared afresh", () => {
-  const path = join(mkdtempSync(join(tmpdir(), "console-cache-")), "console.sqlite");
+test("closed and opened again, the same file's queries are prepared afresh", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-cache-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "console.sqlite");
   const first = new ConsoleStore(path);
   first.insert(ADD, "a", "1");
   first.close();

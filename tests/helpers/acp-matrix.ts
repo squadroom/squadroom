@@ -10,7 +10,7 @@ import { chargeTurn } from "../../src/lib/console/spend.ts";
 import { GIT_TOKEN, harness, TOKEN } from "./console-harness.ts";
 
 // The ACP conformance matrix for one more
-// ACP kind, as OpenCode passes it (tests/console-acp.test.ts):
+// ACP kind, as OpenCode passes it (tests/console-acp-sessions.test.ts):
 // its own start command, an end-to-end turn, model confirmation, credential
 // mode, usage (repeated, late, missing), partial owner waits, cancellation,
 // an unknown start, a resumed session and a restart. Against the scripted

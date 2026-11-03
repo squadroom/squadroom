@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
@@ -13,7 +12,7 @@ import {
   teamPrompt,
 } from "../src/lib/console/team.ts";
 import { transcript } from "../src/lib/console/transcript.ts";
-import { harness } from "./helpers/console-harness.ts";
+import { git, harness } from "./helpers/console-harness.ts";
 
 // team tools and the mailbox, limits and Pause, the
 // reviewer's refresh and commit messages. Fakes only: no model, no
@@ -23,16 +22,6 @@ type H = Awaited<ReturnType<typeof harness>>;
 const timeline = (h: H) => projectView(h.store, h.project.id)!.tabs[0].timeline;
 const lastTurn = (h: H, agentId: string) =>
   Math.max(...h.events(agentId).map((e) => e.turnId));
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: {
-      PATH: "/usr/bin:/bin",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-    } as Record<string, string> as NodeJS.ProcessEnv,
-  }).trim();
-
 test("prompts, Re-send notes and commit messages", () => {
   const base = {
     tabId: "t",
@@ -275,7 +264,7 @@ test("queued messages are delivered together when the agent is free, one instruc
   // commit comes first), and is delivered once it ends.
   const sending = h.send(lead.id, "sendhang Reviewer later");
   await h.until(() => timeline(h).some((m) => m.text === "later"), "queued");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(timeline(h).find((m) => m.text === "later")!.state, "queued");
   runCommand(h.store, { action: "stop", agentId: lead.id });
   await h.ended(sending);
@@ -455,7 +444,7 @@ test("Pause after current turns, Stop now and Resume, for a tab, a project and e
   await h.started(running);
   runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
   const held = h.send(lead.id, "hello");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(running)!.status, "running");
   // Stop now: the running turn stops; the queued one stays for Resume.
   assert.equal(
@@ -471,7 +460,7 @@ test("Pause after current turns, Stop now and Resume, for a tab, a project and e
   );
   await h.ended(running);
   assert.equal(h.store.turn(running)!.status, "stopped");
-  await new Promise((r) => setTimeout(r, 200));
+  await h.passes();
   assert.equal(h.store.turn(held)!.status, "queued");
   assert.match(
     projectView(h.store, h.project.id)!.project.pauseReason!,
@@ -484,7 +473,7 @@ test("Pause after current turns, Stop now and Resume, for a tab, a project and e
     "Paused by the owner.",
   );
   runCommand(h.store, { action: "resume", scope: "project", id: h.project.id });
-  await new Promise((r) => setTimeout(r, 200));
+  await h.passes();
   assert.equal(h.store.turn(held)!.status, "queued");
   runCommand(h.store, { action: "resume", scope: "all" });
   await h.ended(held);

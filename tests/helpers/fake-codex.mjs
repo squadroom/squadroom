@@ -33,7 +33,7 @@ import readline from "node:readline";
 
 const setup = fs.existsSync("fake-codex.json") ? JSON.parse(fs.readFileSync("fake-codex.json", "utf8")) : {};
 const send = (x) => process.stdout.write(JSON.stringify(x) + "\n");
-const log = (x) => fs.appendFileSync("codex-calls.jsonl", JSON.stringify({ pid: process.pid, ...x }) + "\n");
+const log = (x) => fs.appendFileSync("codex-calls.jsonl", JSON.stringify({ pid: process.pid, at: Date.now(), ...x }) + "\n");
 // Setup `ignoreTerm`: the server survives TERM (only KILL ends it).
 if (setup.ignoreTerm) process.on("SIGTERM", () => {});
 // A server keeping its login in memory only (an API-key server) starts with

@@ -143,11 +143,11 @@ test("no Codex turn starts on a server that was signalled to end; the next one w
   // Queued right after the owner confirmed the stop, before TERM is even
   // sent: it must not start on the server that is about to end.
   const next = h.send(b.id, "hello");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(next)!.status, "queued");
   await h.until(() => /^signal TERM/m.test(h.log()), "TERM sent to the shared server");
   // The server ignores TERM, so it lives until KILL: still no start on it.
-  await new Promise((r) => setTimeout(r, 150));
+  await h.passes();
   assert.equal(h.store.turn(next)!.status, "queued");
   assert.equal(h.codexCalls().filter((c) => c.method === "turn/start").length, 1);
   await h.ended(deaf);

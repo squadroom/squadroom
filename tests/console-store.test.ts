@@ -500,6 +500,8 @@ test("a store transaction busy past the timeout is tried once more before it fai
     "-e",
     `const { DatabaseSync } = require("node:sqlite"); const d = new DatabaseSync(${JSON.stringify(path)}); d.exec("BEGIN IMMEDIATE"); console.log("held"); setTimeout(() => { d.exec("COMMIT"); process.exit(0); }, 5300);`,
   ]);
+  // Ended with the test, even when it fails before the holder lets go.
+  t.after(() => holder.kill());
   await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
   const started = Date.now();
   const project = runCommand(store, { action: "createProject", name: "After the wait", source: "none" }).project as { id: string };

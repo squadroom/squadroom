@@ -39,7 +39,11 @@ On a Mac, also run `npm run test:macos` (CI's `macos` job).
 - A few process-heavy tests (the ACP and Codex server tests) are timing
   sensitive on a loaded machine. If one fails under `npm test`, rerun its file
   serially before investigating:
-  `node --test --test-concurrency=1 tests/<file>.test.ts`.
+  `node --test --test-concurrency=1 tests/<file>.test.ts`. On a slow
+  machine, `CONSOLE_TEST_TIME_FACTOR=3 npm test` gives the harness's
+  timeouts three times as long: how long a test waits for something to
+  happen (unless the test sets its own limit) and an ACP agent's setup
+  calls. Values below 1 count as 1.
 - Some launcher tests use macOS's `sandbox-exec` and are skipped elsewhere.
   `npm run test:macos` runs them, and in CI's `macos` job none may skip.
 

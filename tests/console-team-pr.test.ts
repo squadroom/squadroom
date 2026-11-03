@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { cleanComment, codexState, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
-import { harness } from "./helpers/console-harness.ts";
+import { git, harness } from "./helpers/console-harness.ts";
 import { resendNote } from "../src/lib/console/team.ts";
 
 // an agent reads its own pull request (Codex's
@@ -14,12 +13,6 @@ import { resendNote } from "../src/lib/console/team.ts";
 // owner's token; the agent never holds a GitHub login. "GitHub" is a local
 // bare repository and a fake REST + GraphQL API.
 
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", HOME: cwd } as Record<string, string> as NodeJS.ProcessEnv,
-  }).trim();
 const call = (tool: string, args: Record<string, unknown> = {}) => `call ${tool} ${JSON.stringify(args)}`;
 
 function origin(t: TestContext) {

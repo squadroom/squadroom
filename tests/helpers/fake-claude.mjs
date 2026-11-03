@@ -1,6 +1,7 @@
 // A scripted stand-in for Claude Code 2.1.282 in stream-json mode (-2
 // tests). It records its arguments and environment names in its working
-// folder, and acts on each prompt's first word:
+// folder, marks each prompt it receives in claude-prompts.jsonl in the
+// agent home ($HOME), and acts on each prompt's first word:
 //   hello      streams text, runs a tool whose output contains its token
 //   apikey     reports API credentials in its init event
 //   nokey      reports no API credentials (the login) in its init event
@@ -53,6 +54,7 @@
 // earlier actions just carries on (it echoes).
 import fs from "node:fs";
 import readline from "node:readline";
+import { CLAUDE_TERM_EXIT_MS } from "./timing.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (name) => {
@@ -136,7 +138,7 @@ function command(content) {
   return team ? { text: team[3], from: team[1].trim(), cid: team[2] ?? null } : { text, from: null, cid: null };
 }
 // Like a real client, it takes a moment to exit after TERM.
-process.on("SIGTERM", () => setTimeout(() => process.exit(0), 600));
+process.on("SIGTERM", () => setTimeout(() => process.exit(0), CLAUDE_TERM_EXIT_MS));
 const controls = new Map();
 
 readline.createInterface({ input: process.stdin }).on("line", async (line) => {
@@ -160,6 +162,8 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
     return;
   }
   if (q.type !== "user") return;
+  // The prompt arrived: the harness's `started` waits for this mark.
+  fs.appendFileSync(`${process.env.HOME}/claude-prompts.jsonl`, JSON.stringify({ cwd: process.cwd(), at: Date.now() }) + "\n");
   // A Console upload notice comes first; the owner's own words follow it.
   const cmd = command(q.message.content);
   const asked = cmd.text;

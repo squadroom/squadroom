@@ -1,21 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
 import { claimCovers, claimPattern, claimsOverlap, holdCycle } from "../src/lib/console/claims.ts";
 import { transcript } from "../src/lib/console/transcript.ts";
-import { harness, TOKEN } from "./helpers/console-harness.ts";
+import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // coding agents working on the same
 // code — team_pull with conflicts and abort, claims (enforced for Claude,
 // flagged after a turn for everyone), holds with their timeout, cycles and
 // the stall check, and the team template. Fakes only.
 
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", args, { cwd, encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as Record<string, string> as NodeJS.ProcessEnv }).trim();
 const call = (tool: string, args: Record<string, unknown> = {}) => `call ${tool} ${JSON.stringify(args)}`;
 
 test("claim patterns and hold cycles", () => {
@@ -110,7 +107,7 @@ test("team_pull: a clean merge, never the teammate's uncommitted work; conflicts
   // Staging the file with its markers still in it changes nothing.
   git(bFolder, "add", "f.txt");
   await h.ended(h.send(b.id, "hello"));
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(git(bFolder, "rev-parse", "HEAD"), before);
   assert.ok(h.store.merging(b.id));
   // The next turn is told, resolves it, and the merge is committed.
