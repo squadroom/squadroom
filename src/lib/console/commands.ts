@@ -739,7 +739,9 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
 
 export function runCommand(store: ConsoleStore, input: Record<string, unknown>, options: CommandOptions = {}): Record<string, unknown> {
   const action = input.action as CommandAction;
-  if (!Object.hasOwn(COMMANDS, action)) throw new CommandError("Unknown action.");
+  // Only a string: a lookup would find ["setAcpNetwork"] under its name, but
+  // needsFreshCode's switch would not, so the code check would be skipped.
+  if (typeof action !== "string" || !Object.hasOwn(COMMANDS, action)) throw new CommandError("Unknown action.");
   return COMMANDS[action as RunAction](store, input, options, action);
 }
 
