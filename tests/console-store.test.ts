@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { Redactor, truncateBytes } from "../src/lib/console/redact.ts";
+import { loadCredentials, Redactor, rememberedKeysFile, truncateBytes } from "../src/lib/console/redact.ts";
 import { TurnEvents } from "../src/lib/console/events.ts";
-import { claudeSettings, decide, decideControl, inside, realInside } from "../src/lib/console/permissions.ts";
+import { claudeSettings, decide, decideControl, inside, inStep, realInside } from "../src/lib/console/permissions.ts";
 import { ConsoleStore, LEASE_LOST } from "../src/lib/console/store.ts";
 import { backupDue, consoleBackupName, expiredConsoleBackups } from "../src/lib/console/backup.ts";
 import { CommandError, runCommand } from "../src/lib/console/commands.ts";
@@ -119,6 +119,29 @@ test("a turn stores at most its byte limit, then reports it once", () => {
   assert.match((s.rows[0].body as { text: string }).text, /truncated/);
 });
 
+test("a key replaced in the key file is still masked and caught after a restart", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "console-keys-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keysFile = join(dir, "console-keys.json");
+  const OLD = "sk-proj-FAKE-old-key-0000000000000000";
+  const NEW = "sk-proj-FAKE-new-key-1111111111111111";
+  const write = (value: string) => writeFileSync(keysFile, JSON.stringify({ keys: { OPENAI_API_KEY: { value } }, projects: {} }), { mode: 0o600 });
+  write(OLD);
+  assert.equal(loadCredentials(new Redactor(), keysFile), null);
+  assert.equal(statSync(rememberedKeysFile(keysFile)).mode & 0o777, 0o600);
+  // Replaced, then a new worker: the old key is still known.
+  write(NEW);
+  const after = new Redactor();
+  assert.equal(loadCredentials(after, keysFile), null);
+  assert.ok(after.holdsSecretBytes(Buffer.from(`token=${OLD}\n`)));
+  assert.equal(after.text(`token=${OLD}`), "token=[redacted …0000]");
+  assert.ok(after.holdsSecret(`key ${OLD}`) && after.holdsSecret(`key ${NEW}`));
+  // A link where the remembered file belongs stops the load.
+  rmSync(rememberedKeysFile(keysFile));
+  symlinkSync(keysFile, rememberedKeysFile(keysFile));
+  assert.throws(() => loadCredentials(new Redactor(), keysFile), /plain file/);
+});
+
 function folders(t: TestContext) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "console-perm-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -165,14 +188,43 @@ test("file-tool writes outside the agent's own folder are denied at both levels"
   assert.equal(inside(mine, `${mine}-evil/x`), false);
 });
 
+test("a path through `..` or a symbolic link in the folder is outside it, even when the link stays inside", (t) => {
+  const { root, mine } = folders(t);
+  // lnk -> a folder outside: `lnk/../escape.txt` reads as inside by its
+  // text, but on disk it lands beside the link's target.
+  mkdirSync(join(root, "outside", "sub"), { recursive: true });
+  symlinkSync(join(root, "outside", "sub"), join(mine, "lnk"));
+  mkdirSync(join(mine, "docs"));
+  symlinkSync(join(mine, "docs"), join(mine, "alias"));
+  const edit = { folder: mine, permission: "edit" as const };
+  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/alias/a.txt`, `${mine}/alias`]) {
+    assert.equal(realInside(mine, path), false, path);
+    assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "deny", path);
+    assert.equal(inStep(mine, path, ["**"]), false, path);
+  }
+  assert.equal(inside(mine, `${mine}/docs/../a.txt`), false);
+  // Plain paths, existing or not yet, still are inside.
+  assert.equal(realInside(mine, `${mine}/docs/a.txt`), true);
+  assert.equal(realInside(mine, `${mine}/new/deeper/a.txt`), true);
+  assert.equal(inStep(mine, `${mine}/docs/a.md`, ["docs/*.md"]), true);
+  // A folder that is not there holds nothing.
+  assert.equal(realInside(join(root, "missing"), join(root, "missing", "a.txt")), false);
+});
+
 test("Claude settings: the sandbox, the read block, the hidden folders, and Look only's write blocks", () => {
   const paths = { agentHome: "/Users/agent", shared: "/opt/console-shared" };
   const edit = claudeSettings("/Users/agent/work/p/a", "edit", paths);
-  assert.deepEqual(edit.sandbox.filesystem.denyRead, ["/opt/console-shared", "/Users/agent/.codex", "/Users/agent/.claude", "/Users/agent/.kimi-code"]);
+  assert.deepEqual(edit.sandbox.filesystem.denyRead, ["/opt/console-shared", "/Users/agent/.codex", "/Users/agent/.claude", "/Users/agent/.kimi-code", "/Users/agent/.claude.json"]);
   assert.equal(edit.sandbox.allowUnsandboxedCommands, false);
   assert.equal(edit.sandbox.failIfUnavailable, true);
   assert.equal(edit.permissions.blockReadsOutsideWorkingDirectories, true);
-  assert.deepEqual(edit.permissions.deny, ["Read(//opt/console-shared/**)", "Read(//Users/agent/.codex/**)", "Read(//Users/agent/.claude/**)", "Read(//Users/agent/.kimi-code/**)"]);
+  assert.deepEqual(edit.permissions.deny, [
+    "Read(//opt/console-shared/**)",
+    "Read(//Users/agent/.codex/**)",
+    "Read(//Users/agent/.claude/**)",
+    "Read(//Users/agent/.kimi-code/**)",
+    "Read(//Users/agent/.claude.json)",
+  ]);
   assert.equal("denyWrite" in edit.sandbox.filesystem, false);
   const look = claudeSettings("/Users/agent/work/p/a", "look", paths);
   assert.deepEqual((look.sandbox.filesystem as { denyWrite?: string[] }).denyWrite, ["/Users/agent/work/p/a"]);

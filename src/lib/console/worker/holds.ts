@@ -47,8 +47,9 @@ export const holds = {
     this.overSpend(agent.tabId, true);
   },
   /** A paid turn's charge (spend.ts: `usage` is the client's whole-turn
-   * usage once it ended normally, or null); an allowance carries the tab's
-   * hold, which the store writes in the same transaction. */
+   * usage, or null; `ended`, whether the turn ended normally); an
+   * allowance carries the tab's hold, which the store writes in the same
+   * transaction. */
   charge(
     this: ConsoleWorker,
     agent: ConsoleAgent,
@@ -56,10 +57,11 @@ export const holds = {
     turnId: number,
     usage: TurnUsage | null | undefined,
     running?: RunningUsage,
+    ended = true,
   ): (Charge & { hold?: string }) | null {
     // Priced at the rates of when the turn started, never when it ended or
     // a later restart charged it (a scheduled price change, pricing.ts).
-    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()), running);
+    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()), running, ended);
     if (!charge || charge.basis !== "allowance") return charge;
     const n = charge.allowances ?? 1;
     const what = n === 1 ? "the full allowance for a request" : `the full allowance for each of ${n} requests`;

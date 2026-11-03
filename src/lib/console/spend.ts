@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AgentKind, AgentModel } from "./agents.ts";
-import { costUsd, type PricedModel } from "../shared/pricing.ts";
+import { costUsd, tokenPrices, type PricedModel } from "../shared/pricing.ts";
 import type { ProjectKey } from "./keys.ts";
 import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type TurnUsage } from "./types.ts";
 
@@ -45,8 +45,9 @@ export function loginKey(kind: AgentKind, model: AgentModel, key: ProjectKey | n
 export interface Charge {
   usd: number;
   /** `reported`: from the client's usage; `allowance`: its usage was
-   * missing, contradictory or incomplete, so the full allowance was
-   * charged for each request that did not report it. */
+   * missing, contradictory or incomplete, or the turn did not end normally,
+   * so the full allowance was charged for each request its usage did not
+   * cover (at least one). */
   basis: "reported" | "allowance";
   /** With `allowance`: how many requests were charged the allowance. */
   allowances?: number;
@@ -69,6 +70,10 @@ export interface RunningUsage {
   long: TurnUsage | null;
   /** Requests that reported their own usage. */
   reported: number;
+  /** Requests whose own usage report could not be read (a field missing
+   * or malformed, or parts that do not add up): each is charged the
+   * allowance, never counted as nothing. */
+  unreported: number;
   /** Requests the client said it began (Claude Code). */
   starts: number;
   /** Changes of the context gauge's figure: one per request at least. */
@@ -77,7 +82,7 @@ export interface RunningUsage {
   /** The largest input one request was seen to send. */
   largest: number;
 }
-export const NO_REQUESTS: RunningUsage = { usage: null, long: null, reported: 0, starts: 0, gauges: 0, lastGauge: null, largest: 0 };
+export const NO_REQUESTS: RunningUsage = { usage: null, long: null, reported: 0, unreported: 0, starts: 0, gauges: 0, lastGauge: null, largest: 0 };
 
 const whole = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
@@ -102,10 +107,12 @@ function subtract(a: TurnUsage, b: TurnUsage | null): TurnUsage {
   return out;
 }
 
-/** One request's own usage (Codex's `last`), added to the turn's. */
+/** One request's own usage (Codex's `last`), added to the turn's; one that
+ * does not add up is a request that did not report it. */
 export function requestUsage(r: RunningUsage, usage: TurnUsage, model: BilledModel): RunningUsage {
+  if (!usageAddsUp(usage)) return { ...r, unreported: r.unreported + 1 };
   const above = model.paid?.longContext?.aboveTokens;
-  const input = usage.inputTokens ?? 0;
+  const input = usage.inputTokens;
   return {
     ...r,
     usage: addUsage(r.usage, usage),
@@ -130,7 +137,16 @@ export function readRunning(raw: unknown): RunningUsage {
   const r = raw as Partial<RunningUsage>;
   const count = (v: unknown) => (whole(v) ? v : 0);
   const usage = (v: unknown) => (v && typeof v === "object" ? (v as TurnUsage) : null);
-  return { usage: usage(r.usage), long: usage(r.long), reported: count(r.reported), starts: count(r.starts), gauges: count(r.gauges), lastGauge: whole(r.lastGauge) ? r.lastGauge : null, largest: count(r.largest) };
+  return {
+    usage: usage(r.usage),
+    long: usage(r.long),
+    reported: count(r.reported),
+    unreported: count(r.unreported),
+    starts: count(r.starts),
+    gauges: count(r.gauges),
+    lastGauge: whole(r.lastGauge) ? r.lastGauge : null,
+    largest: count(r.largest),
+  };
 }
 
 function billing(model: BilledModel): PricedModel {
@@ -157,39 +173,56 @@ function price(priced: PricedModel, usage: TurnUsage & { inputTokens: number; ou
 
 /** Requests the turn was seen to make. */
 export function requestsSeen(r: RunningUsage): number {
-  return Math.max(r.starts, r.gauges, r.reported);
+  return Math.max(r.starts, r.gauges, r.reported + r.unreported);
 }
 
 /**
  * A paid turn's charge. Null for a model with no metered price (a
  * subscription).
  *
- * `usage` is what the client reported for the whole turn once it ended
- * normally (for a client that reports each request's, their sum), or null
- * when that is missing or cannot be trusted. Requests above the model's
- * long-context threshold are charged its long-context rates: exactly those
- * requests when each reported its own, otherwise the whole turn when the
- * largest request seen (the context gauge) was above it, or, with no
- * figure for any request, when the turn's total was.
+ * `usage` is what the client reported for the whole turn (for a client
+ * that reports each request's, their sum), or null when that is missing.
+ * `ended`: the turn ended normally, so no request was under way. Then
+ * usage that adds up, with every request's report read, is the charge.
+ * Requests above the model's long-context threshold are charged its
+ * long-context rates: exactly those requests when each reported its own,
+ * otherwise the whole turn when the largest request seen (the context
+ * gauge) was above it, or, with no figure for any request, when the turn's
+ * total was.
  *
- * Otherwise the turn is charged the usage its requests did report, plus
- * the full allowance for each request it was seen to start without
- * reporting it, and at least one (a request may have been under way).
+ * Otherwise the turn is charged the usage it did report, plus the full
+ * allowance for each request it was seen to start without that usage
+ * covering it, and at least one (a request may have been under way): a
+ * client that reports each request's counts those that reported; one that
+ * reports the whole turn's, the requests its context gauge measured.
  */
-export function chargeTurn(model: BilledModel, usage: TurnUsage | null | undefined, at = new Date(), running: RunningUsage = NO_REQUESTS): Charge | null {
+export function chargeTurn(model: BilledModel, usage: TurnUsage | null | undefined, at = new Date(), running: RunningUsage = NO_REQUESTS, ended = true): Charge | null {
   if (!model.paid) return null;
   const priced = billing(model);
   const requestedAt = at.toISOString();
   const above = model.paid.longContext?.aboveTokens;
-  if (usageAddsUp(usage)) {
-    const long = running.reported > 0 ? (running.long ?? false) : running.largest > 0 && above !== undefined ? running.largest > above : above !== undefined && usage.inputTokens > above;
-    return { usd: price(priced, usage, long, requestedAt), basis: "reported" };
-  }
-  const known = usageAddsUp(running.usage) ? running.usage : null;
-  const reported = known ? price(priced, known, running.long ?? false, requestedAt) : 0;
-  const allowances = Math.max(1, requestsSeen(running) - (known ? running.reported : 0));
-  const allowance = costUsd(priced, model.paid.contextWindow, model.paid.maxOutputTokens, 0, { requestedAt });
-  return { usd: reported + allowances * allowance, basis: "allowance", allowances };
+  const long = (u: TurnUsage & { inputTokens: number }) =>
+    running.reported > 0 ? (running.long ?? false) : running.largest > 0 && above !== undefined ? running.largest > above : above !== undefined && u.inputTokens > above;
+  if (ended && !running.unreported && usageAddsUp(usage)) return { usd: price(priced, usage, long(usage), requestedAt), basis: "reported" };
+  const perRequest = running.reported + running.unreported > 0;
+  const known = perRequest ? (usageAddsUp(running.usage) ? running.usage : null) : usageAddsUp(usage) ? usage : null;
+  const reported = known ? price(priced, known, long(known), requestedAt) : 0;
+  const covered = !known ? 0 : perRequest ? running.reported : running.gauges;
+  const allowances = Math.max(1, requestsSeen(running) - covered);
+  return { usd: reported + allowances * allowanceUsd(model, priced, at), basis: "allowance", allowances };
+}
+
+/** One request's full allowance: the model's whole context window as
+ * input, at the highest input-side rate it has (a cache write costs more
+ * than plain input), and its maximum output. */
+function allowanceUsd(model: BilledModel, priced: PricedModel, at: Date): number {
+  const { contextWindow, maxOutputTokens } = model.paid!;
+  const rates = tokenPrices(priced, at);
+  const write = rates.cacheWritePerMtok ?? 0;
+  const longWrite = rates.longCacheWritePerMtok ?? 0;
+  const top = Math.max(rates.inputPerMtok, write, longWrite);
+  const side = top === rates.inputPerMtok ? {} : top === write ? { cacheWriteInputTokens: contextWindow } : { longCacheWriteInputTokens: contextWindow };
+  return costUsd(priced, contextWindow, maxOutputTokens, 0, { requestedAt: at.toISOString(), ...side });
 }
 
 /** Dollars as the Needs you tray shows them. */

@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { credentialValues, readKeyFile, writeKeyFile, type KeyEntry } from "./keys.ts";
+
 // Secrets never stored: before any event, message or tool result is
 // written, every exact value the worker handed to an agent, and every
 // common key shape, is replaced by `[redacted …last4]`. So an agent running
@@ -165,3 +170,45 @@ export function truncateBytes(text: string, maxBytes: number): { text: string; t
   const kept = cutBytes(text, maxBytes);
   return { text: `${kept}\n… truncated, ${bytes - Buffer.byteLength(kept, "utf8")} bytes omitted`, truncated: true };
 }
+
+/** Beside the key file: every credential value the worker has loaded from
+ * it, so a key replaced on the Keys page is still known after a restart. */
+export const rememberedKeysFile = (keysFile: string) => join(dirname(keysFile), "console-keys-replaced.json");
+
+/**
+ * Load every credential value the key file holds, and every one it held
+ * before (remembered beside it), into the redactor, and remember the
+ * current ones: a key replaced on the Keys page is still masked, and still
+ * refused by the push check, after a restart. The values themselves are
+ * kept, in the key file's own format and folder (a plain file of the
+ * owner's, 0600, in the 0700 key folder, where the live keys already are):
+ * a hash could only match a whole text, never find a key inside one or
+ * mask it there. Throws when either file exists but cannot be read whole.
+ * Returns why the current values could not be remembered, or null (they
+ * are masked all the same in this worker's life).
+ */
+export function loadCredentials(redactor: Redactor, keysFile: string): string | null {
+  const current = credentialValues(keysFile);
+  const file = rememberedKeysFile(keysFile);
+  let kept: Record<string, KeyEntry> = {};
+  if (present(file)) kept = readKeyFile(file).keys;
+  const known = new Set(Object.values(kept).map((e) => e.value));
+  for (const value of [...known, ...current]) redactor.add(value);
+  const fresh = current.filter((v) => !known.has(v));
+  if (!fresh.length) return null;
+  const name = (v: string) => createHash("sha256").update(v, "utf8").digest("hex").slice(0, 16);
+  try {
+    writeKeyFile(file, { keys: { ...kept, ...Object.fromEntries(fresh.map((v) => [name(v), { value: v }])) }, projects: {} });
+    return null;
+  } catch (error) {
+    return `Replaced keys could not be remembered in ${file}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+const present = (path: string) => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};

@@ -260,13 +260,14 @@ test("paths: a linked design folder, another agent's claim, a path outside the s
   symlinkSync(elsewhere, join(folder, "design"));
   await assert.rejects(h.worker.imageCall(rt, "image_generate", generate), /design\/hero\.png: Writes outside this agent's own folder/);
   assert.equal(krea.calls.length, 0);
-  // design/ links inside the clone: the agent's write refuses it (paid,
-  // nothing written through the link).
+  // design/ links inside the clone: refused before any charge too (a link
+  // could be repointed after the check).
   const inner = join(folder, "inner");
   mkdirSync(inner);
   rmSync(join(folder, "design"));
   symlinkSync(inner, join(folder, "design"));
-  await assert.rejects(h.worker.imageCall(rt, "image_generate", generate), /design in this folder is not a plain folder.*charged \$0\.015/);
+  await assert.rejects(h.worker.imageCall(rt, "image_generate", generate), /design\/hero\.png: Writes outside this agent's own folder/);
+  assert.equal(krea.calls.length, 0);
   assert.equal(existsSync(join(inner, "hero.png")), false);
   rmSync(join(folder, "design"));
   const calls = krea.calls.length;

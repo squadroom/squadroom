@@ -210,9 +210,10 @@ export const pause = {
   },
 
   // ── The Console-wide spend limit ───────────────────────────────────────
-  /** API-key spend across every tab, open or closed, since the start of
-   * this UTC month or the owner's last reset, whichever is later: turns by
-   * when they ended, image calls by when they were charged. */
+  /** API-key spend across every tab, open or closed, this UTC month and
+   * since the owner's last reset: a turn in the month it started (as the
+   * Overview counts it and its prices are fixed) and charged since the
+   * reset, image calls by when they were charged. */
   consoleSpend(this: ConsoleStore): ConsoleSpend {
     const d = new Date(this.now());
     const monthStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
@@ -220,8 +221,9 @@ export const pause = {
     const own = this.flag(CONSOLE_SPEND_LIMIT);
     const spent = Number(
       this.get(
-        `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM console_turns WHERE cost_usd IS NOT NULL AND ended_at >= ?1)
-          + (SELECT COALESCE(SUM(cost_usd), 0) FROM console_image_calls WHERE created_at >= ?1) AS usd`,
+        `SELECT (SELECT COALESCE(SUM(cost_usd), 0) FROM console_turns WHERE cost_usd IS NOT NULL AND COALESCE(started_at, ended_at) >= ?1 AND ended_at >= ?2)
+          + (SELECT COALESCE(SUM(cost_usd), 0) FROM console_image_calls WHERE created_at >= ?2) AS usd`,
+        monthStart,
         from,
       )!.usd,
     );

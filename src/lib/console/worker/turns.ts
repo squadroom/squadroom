@@ -228,12 +228,13 @@ export const turns = {
     const unmeasured = !t.gaugeSeen || t.gaugePending;
     // A paid turn whose prompt reached the client is charged from the whole
     // turn's usage its client reported at its end, or, for a client that
-    // reports each request's (Codex), their sum once the turn completed
-    // normally. A turn that ended any other way may have had a request
-    // under way whose usage never came: it is charged the allowance for it
-    // (spend.ts).
+    // reports each request's (Codex), their sum. A turn that did not end
+    // normally may have had a request under way whose usage never came,
+    // whatever its client reported: it is charged that usage plus the
+    // allowance for each request it did not cover, at least one, and its
+    // tab pauses (spend.ts).
     const usage = options.usage !== undefined ? options.usage : options.completed ? t.running.usage : null;
-    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, usage, t.running) : null;
+    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, usage, t.running, !!options.completed) : null;
     if (unmeasured && t.validated) this.safe(() => this.store.setGauge(this.epoch!, rt.agent.id, { measured: false }));
     this.releaseWaits(t.id, "The turn ended.");
     const epoch = this.epoch;

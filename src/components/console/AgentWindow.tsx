@@ -84,7 +84,7 @@ export default function AgentWindow({
       ? [
           {
             label: agent.askFirst ? "Turn Ask me first off" : "Turn Ask me first on",
-            hint: "Its changes, commands and web access wait for you in Needs you",
+            hint: "Its file changes and commands wait for you in Needs you, as web access always does. Team tools (such as pulling teammates' work) and image tools don't wait.",
             onSelect: () => void run({ action: "setAskFirst", agentId: agent.id, on: !agent.askFirst }),
           },
         ]
@@ -246,7 +246,7 @@ export default function AgentWindow({
             </button>
           ) : null;
         })()}
-        <span className={styles.badge} title={agent.askFirst ? "Ask me first: its changes, commands and web access wait for you in Needs you" : undefined}>
+        <span className={styles.badge} title={agent.askFirst ? "Ask me first: its file changes and commands wait for you in Needs you, as web access always does. Team tools (such as pulling teammates' work) and image tools don't wait." : undefined}>
           {PERMISSION_LABELS[agent.permission]}
           {agent.askFirst ? " · ask first" : ""}
         </span>

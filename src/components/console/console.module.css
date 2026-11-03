@@ -582,6 +582,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.needInput {
+  margin: 0;
+  max-height: 40dvh;
+  overflow: auto;
+}
 .pushRow {
   display: flex;
   flex-wrap: wrap;

@@ -282,6 +282,9 @@ export function needsView(store: ConsoleStore) {
       kind: r.kind,
       tool: r.tool,
       summary: r.summary,
+      // The whole stored input (redacted, at most 64 KB, a cut marked): the
+      // tray shows it on request, so the owner sees what Allow once allows.
+      input: r.input,
       // Only where there is a rule to remember (a compound command has none).
       canAlways: r.kind === "permission" && !!r.ruleKey,
       canProject: r.kind === "permission" && !!r.ruleKey?.startsWith("network:"),
