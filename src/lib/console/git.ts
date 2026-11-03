@@ -68,13 +68,6 @@ export const CLONE_TMP = ".console-tmp";
  * owner's uploads. */
 const CONSOLE_DIRS = [CLONE_TMP, UPLOADS_DIR];
 const EXCLUDE = [".", ...CONSOLE_DIRS.map((d) => `:(exclude)${d}`)];
-/** Adds the lines given that the file (a clone's `info/exclude`) lacks. */
-const EXCLUDE_SCRIPT = `my ($path, @want) = @ARGV; my $text = "";
-if (open my $in, "<", $path) { local $/; $text = <$in> // ""; close $in }
-my %have = map { $_ => 1 } split /\\r?\\n/, $text; my @add = grep { !$have{$_} } @want; exit 0 unless @add;
-(my $dir = $path) =~ s{/[^/]*$}{}; mkdir $dir if length $dir && !-d $dir;
-open my $out, ">>", $path or die "$path: $!\\n";
-print $out (($text eq "" || $text =~ /\\n$/) ? "" : "\\n"), map { "$_\\n" } @add; close $out or die "$path: $!\\n";`;
 
 /** GitHub's basic-auth header for a token, kept out of every command line. */
 function authHeader(token: string) {
@@ -736,14 +729,6 @@ export class Clone {
     if (r.truncated) throw new GitError(`${what} failed: too much output to check.`);
     return r;
   }
-  /** The clone's `info/exclude` names the folders never committed, so an
-   * agent's own `git add -A` leaves them out too. The agent owns `.git`, so
-   * this is written again before every commit. */
-  private async excludeConsoleDirs() {
-    const path = (await this.git(["rev-parse", "--git-path", "info/exclude"], "Finding the clone's exclude file", 4096)).stdout.trim();
-    const r = await this.launcher.runIn(this.folder, "/usr/bin/perl", ["-e", EXCLUDE_SCRIPT, path, ...CONSOLE_DIRS.map((d) => `/${d}/`)]);
-    if (r.code !== 0) throw new GitError(`Writing the clone's exclude file failed: ${r.stderr.trim().slice(0, 200) || `exit ${r.code}`}`);
-  }
   /** Index entries the agent marked skip-worktree or assume-unchanged
    * (which hide a change from status) are unmarked, so every check sees
    * the files as they are. */
@@ -764,7 +749,6 @@ export class Clone {
   async createEmpty(name: string, agentId: string): Promise<string> {
     await this.git(["init", "--quiet", "-b", "main"], "Creating the agent folder");
     await this.git([...author(name, agentId), "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "Start"], "The first commit");
-    await this.excludeConsoleDirs();
     return (await this.head())!;
   }
   /** A GitHub project's clone, filled from the mirror's bundle. An editing
@@ -777,7 +761,6 @@ export class Clone {
     await this.git(["fetch", "--quiet", bundle, `refs/heads/${base}:refs/heads/${base}`], "Filling the clone");
     if (branch) await this.git(["checkout", "--quiet", "-b", branch, base], "Creating the agent's branch");
     else await this.git(["checkout", "--quiet", "--detach", base], "Checking out the base branch");
-    await this.excludeConsoleDirs();
     return (await this.head())!;
   }
   async head(): Promise<string | null> {
@@ -793,7 +776,6 @@ export class Clone {
     agentId: string,
     options: { unresolved?: "skip" | "throw"; conflicts?: string[]; only?: (path: string) => boolean; since?: string } = {},
   ): Promise<string | null> {
-    await this.excludeConsoleDirs();
     // A merge from team_pull is committed only once no conflict marker is
     // left in its conflicted files: every file the pull reported,
     // even one the agent has staged since, and any still unmerged. A tab
@@ -826,7 +808,8 @@ export class Clone {
       for (let i = 0; i < paths.length; i += 100) await this.git(["add", "--all", "--", ...paths.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Adding the changes");
     } else await this.git(["add", "--all", "--", "."], "Adding the changes");
     // The excluded folders' index entries go back to the last commit (an
-    // exclude pathspec would make `add` fail on them once ignored): what
+    // exclude pathspec would make `add` fail on them where the repository
+    // ignores them): what
     // the agent staged there is unstaged (the files stay on disk), and
     // files the repository already tracks there are kept, never deleted.
     await this.git(["reset", "--quiet", "--", ...CONSOLE_DIRS], "Clearing the index");

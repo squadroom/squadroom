@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Clone } from "../src/lib/console/git.ts";
 import type { Launcher } from "../src/lib/console/launcher.ts";
 import { inStep } from "../src/lib/console/permissions.ts";
@@ -246,32 +246,39 @@ test("in a tab with steps, a commit that appears while the Console records lefto
   assert.notEqual(execFileSync("git", ["rev-parse", "HEAD"], { cwd: folder, encoding: "utf8" }).trim(), stray);
 });
 
-test("the owner's uploads stay out of commits: the clone's info/exclude names them, again before every commit, and what the agent staged there is unstaged", async (t) => {
+test("the owner's uploads stay out of commits: what the agent staged there is unstaged", async (t) => {
   const r = repo(t);
   const c = new Clone(launcher, r.dir);
-  const exclude = join(r.dir, ".git", "info", "exclude");
   mkdirSync(join(r.dir, ".console-uploads"));
   writeFileSync(join(r.dir, ".console-uploads", "contract.pdf"), "%PDF private\n");
+  mkdirSync(join(r.dir, ".console-tmp"));
+  writeFileSync(join(r.dir, ".console-tmp", "scratch.txt"), "tmp\n");
   // The agent forces its upload into the index; the turn's commit leaves it out.
   r.g("add", "-f", ".console-uploads/contract.pdf");
   writeFileSync(join(r.dir, "notes.md"), "n2\n");
   const sha = (await c.commitTurn("turn", "A", "a1"))!;
   assert.equal(r.g("ls-tree", "-r", "--name-only", sha), "notes.md\npackage.json");
   assert.ok(existsSync(join(r.dir, ".console-uploads", "contract.pdf")));
-  assert.match(readFileSync(exclude, "utf8"), /^\/\.console-tmp\/$/m);
-  assert.match(readFileSync(exclude, "utf8"), /^\/\.console-uploads\/$/m);
-  // The agent's own `git add -A` now leaves the uploads out.
-  r.g("add", "-A");
   assert.equal(r.g("diff", "--cached", "--name-only"), "");
-  // The agent rewrites the file (no trailing newline): the lines come back.
-  writeFileSync(exclude, "# mine\nbuild/");
-  writeFileSync(join(r.dir, "notes.md"), "n3\n");
-  await c.commitTurn("turn", "A", "a1");
-  assert.equal(readFileSync(exclude, "utf8"), "# mine\nbuild/\n/.console-tmp/\n/.console-uploads/\n");
-  // Written once: a second commit adds nothing.
-  writeFileSync(join(r.dir, "notes.md"), "n4\n");
-  await c.commitTurn("turn", "A", "a1");
-  assert.equal(readFileSync(exclude, "utf8"), "# mine\nbuild/\n/.console-tmp/\n/.console-uploads/\n");
+});
+
+test("the turn's commit never writes through a planted info/exclude link", async (t) => {
+  const r = repo(t);
+  const c = new Clone(launcher, r.dir);
+  // The agent points its clone's exclude file at a file outside the clone.
+  const outside = join(mkdtempSync(join(tmpdir(), "outside-")), "auth.json");
+  t.after(() => rmSync(dirname(outside), { recursive: true, force: true }));
+  writeFileSync(outside, '{"token":"x"}');
+  const exclude = join(r.dir, ".git", "info", "exclude");
+  rmSync(exclude, { force: true });
+  mkdirSync(dirname(exclude), { recursive: true });
+  symlinkSync(outside, exclude);
+  mkdirSync(join(r.dir, ".console-uploads"));
+  writeFileSync(join(r.dir, ".console-uploads", "contract.pdf"), "%PDF private\n");
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  const sha = (await c.commitTurn("turn", "A", "a1"))!;
+  assert.equal(r.g("ls-tree", "-r", "--name-only", sha), "notes.md\npackage.json");
+  assert.equal(readFileSync(outside, "utf8"), '{"token":"x"}');
 });
 
 test("a branch or tag named MERGE_HEAD is not a merge, and in a tab with steps a real one is never committed as a merge", async (t) => {

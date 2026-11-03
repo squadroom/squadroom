@@ -49,7 +49,7 @@ work one turn at a time in the window's **Changes** view. Each commit's
 message holds your whole request for that turn, and pushing the branch
 publishes it. Nothing is pushed until you approve it, and when an agent
 opens a pull request you see its title and description before they are
-posted.
+posted, unless you chose **Always** for that agent's pushes.
 
 ## Roles
 

@@ -211,7 +211,7 @@ test("file-tool writes outside the agent's own folder are denied at both levels"
   assert.equal(inside(mine, `${mine}-evil/x`), false);
 });
 
-test("a path through `..` or a symbolic link in the folder is outside it, even when the link stays inside", (t) => {
+test("a path through `..` or a link leading outside the folder is outside it; a link that stays inside is followed", (t) => {
   const { root, mine } = folders(t);
   // lnk -> a folder outside: `lnk/../escape.txt` reads as inside by its
   // text, but on disk it lands beside the link's target.
@@ -220,12 +220,21 @@ test("a path through `..` or a symbolic link in the folder is outside it, even w
   mkdirSync(join(mine, "docs"));
   symlinkSync(join(mine, "docs"), join(mine, "alias"));
   const edit = { folder: mine, permission: "edit" as const };
-  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/alias/a.txt`, `${mine}/alias`]) {
+  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/lnk/a.txt`, `${mine}/lnk`]) {
     assert.equal(realInside(mine, path), false, path);
     assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "deny", path);
     assert.equal(inStep(mine, path, ["**"]), false, path);
   }
   assert.equal(inside(mine, `${mine}/docs/../a.txt`), false);
+  // A link that stays inside is followed: allowed, and in a step only
+  // when both its name and where it leads are named.
+  for (const path of [`${mine}/alias/a.txt`, `${mine}/alias`]) {
+    assert.equal(realInside(mine, path), true, path);
+    assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "allow", path);
+    assert.equal(inStep(mine, path, ["**"]), true, path);
+  }
+  assert.equal(inStep(mine, `${mine}/alias/a.md`, ["alias/*.md"]), false);
+  assert.equal(inStep(mine, `${mine}/alias/a.md`, ["docs/*.md"]), false);
   // Plain paths, existing or not yet, still are inside.
   assert.equal(realInside(mine, `${mine}/docs/a.txt`), true);
   assert.equal(realInside(mine, `${mine}/new/deeper/a.txt`), true);

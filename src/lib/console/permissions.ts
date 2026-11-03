@@ -1,5 +1,5 @@
-import { lstatSync, statSync } from "node:fs";
-import { isAbsolute, join, matchesGlob, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, matchesGlob, relative, resolve, sep } from "node:path";
 import type { Permission } from "./types.ts";
 
 // Permission levels for agent windows.
@@ -134,44 +134,50 @@ export function inside(folder: string, path: string): boolean {
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
 
-/** No part of a path inside the folder, below the folder, is a symbolic
- * link on disk (the parts that exist yet). A link that stays inside is
- * refused too: a running program could repoint it after the check. */
-function linkFree(folder: string, full: string): boolean {
-  let probe = resolve(folder);
-  for (const part of relative(probe, full).split(sep).filter(Boolean)) {
-    probe = join(probe, part);
-    try {
-      if (lstatSync(probe).isSymbolicLink()) return false;
-    } catch (error) {
-      // The rest does not exist yet; anything unreadable counts as outside.
-      return (error as NodeJS.ErrnoException).code === "ENOENT";
-    }
-  }
-  return true;
-}
-
-/** On disk: the folder exists, the path is inside it by its text, and no
- * part of it below the folder is a symbolic link. */
+/** On disk: the path is inside the folder by its text, and its nearest
+ * existing part, with links resolved, is still inside the folder. A link
+ * that stays inside is followed. Anything unreadable counts as outside. */
 export function realInside(folder: string, path: string): boolean {
   if (!inside(folder, path)) return false;
-  try {
-    if (!statSync(folder).isDirectory()) return false;
-  } catch {
-    return false;
+  const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
+  let probe = full;
+  for (;;) {
+    try {
+      const real = realpathSync(probe);
+      return inside(realpathSync(folder), join(real, relative(probe, full)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+      const parent = dirname(probe);
+      if (parent === probe) return false;
+      probe = parent;
+    }
   }
-  return linkFree(folder, isAbsolute(path) ? resolve(path) : resolve(folder, path));
 }
 
 /** A path in the folder that one of the step's files or patterns names,
- * by its text, with no symbolic link on the way (so an allowed name that
- * links to another document does not open it). */
+ * by its text (never through `..`) and, on disk, by where links lead (so
+ * an allowed name that links to another document does not open it). */
 export function inStep(folder: string, path: string, files: string[]): boolean {
   const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
-  const rel = relative(resolve(folder), full).split(sep).join("/");
-  if (!inside(folder, path) || !files.some((f) => matchesGlob(rel, f))) return false;
-  // No folder on disk (as in a check of the rule alone): nothing to follow.
-  return linkFree(folder, full);
+  const named = (base: string, target: string) => {
+    const rel = relative(base, target).split(sep).join("/");
+    return files.some((f) => matchesGlob(rel, f));
+  };
+  if (!inside(folder, path) || !named(resolve(folder), full)) return false;
+  let root: string;
+  try {
+    root = realpathSync(folder);
+  } catch {
+    return true; // No folder on disk (as in a check of the rule alone).
+  }
+  // The nearest existing part, with links resolved, plus the rest.
+  for (let probe = full; ; probe = dirname(probe)) {
+    try {
+      return named(root, join(realpathSync(probe), relative(probe, full)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(probe) === probe) return false;
+    }
+  }
 }
 
 /** A tab with steps: a write to any path outside the
@@ -182,8 +188,9 @@ export function outsideStep(folder: string, paths: string[], stepFiles: string[]
 }
 
 /**
- * Decide one permission prompt. `realInside` confirms, on disk, that no
- * part of the path below the agent's folder is a symbolic link, so a link
+ * Decide one permission prompt. A path with a `..` part is refused, and
+ * `realInside` confirms, on disk, that the path's nearest existing part
+ * (or the file itself) resolves inside the agent's folder, so a link
  * planted in the folder cannot lead a write elsewhere.
  */
 export function decide(

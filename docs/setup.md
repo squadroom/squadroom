@@ -355,7 +355,8 @@ Things to know while using it:
   included, through your mirror and opens or updates its pull request;
   **Open pull request** asks the agent to write the title and description
   first, and Needs you shows them to you for approval before anything is
-  posted (as it does for every `team_push`). Push branch sends only the
+  posted (as it does for every `team_push`, unless you chose **Always**
+  for that agent's pushes). Push branch sends only the
   commit the Console recorded at the end of the agent's last turn, even
   after a worker restart; a commit made after that is refused until the
   next turn. Your uploads (`.console-uploads`) are never committed, and a
@@ -513,8 +514,9 @@ either access level:
 - **Code edit**: the agent changes files in its own folder, and Squadroom
   commits them after each turn. The sandbox lets it write only in its own
   clone and its temporary folder, and a request to change a file anywhere
-  else is refused, as is a path with `..` in it or one that goes through a
-  symbolic link (a linked `design/` folder, say).
+  else is refused, as is a path with `..` in it. Symbolic links are
+  followed, and one that leads out of its folder (a `design/` folder
+  linked elsewhere, say) is refused too.
 - **Code analysis**: the agent can read, run commands you approve and
   message its team, but not change files.
 

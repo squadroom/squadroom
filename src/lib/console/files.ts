@@ -1,10 +1,10 @@
 // Files in an agent's folder: the file panel and uploads. Browser-safe and
 // pure: no Node imports.
 
-/** Where uploads go inside an agent's folder. Never committed (the clone's
- * `info/exclude` names it too) and never pushed (a push whose commits add a
- * file here is refused); read-only for a Look only agent (its sandbox
- * denies writes to its whole folder). */
+/** Where uploads go inside an agent's folder. Never committed (the turn's
+ * commit leaves it out) and never pushed (a push whose commits add a file
+ * here is refused); read-only for a Look only agent (its sandbox denies
+ * writes to its whole folder). */
 export const UPLOADS_DIR = ".console-uploads";
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 /** What the panel shows at most. */

@@ -457,7 +457,7 @@ test("Push branch checks the objects GitHub lacks, not a patch: binary and -diff
   assert.match(git(bare, "ls-tree", "--name-only", `refs/heads/${branch("Clean")}`), /icon\.png/);
 });
 
-test("Push branch refuses a branch whose commits add the owner's uploads; a new clone's info/exclude names them", async (t) => {
+test("Push branch refuses a branch whose commits add the owner's uploads", async (t) => {
   const bare = origin(t);
   const h = await harness(t, {}, false, {
     project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
@@ -470,7 +470,6 @@ test("Push branch refuses a branch whose commits add the owner's uploads; a new 
   await h.ready(lead.id);
   const folder = h.store.agent(lead.id)!.folder;
   const branch = h.store.agentBase(lead.id).branch!;
-  assert.match(readFileSync(join(folder, ".git", "info", "exclude"), "utf8"), /^\/\.console-uploads\/$/m);
   // The agent forces an upload into a commit of its own.
   mkdirSync(join(folder, ".console-uploads"), { recursive: true });
   writeFileSync(join(folder, ".console-uploads", "contract.pdf"), "%PDF private\n");

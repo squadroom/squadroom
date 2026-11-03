@@ -128,8 +128,8 @@ month it started too.
   (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused; in a tab with steps, only the current step's files)
   or files it in Needs you (network per host, unknown tools, pushes). A
-  path with a `..` part, or with a symbolic link anywhere below the agent's
-  folder, counts as outside it, even a link that leads back inside. An
+  path with a `..` part counts as outside it, and symbolic links are
+  followed: one that leads out of the agent's folder counts as outside. An
   allow the Console cannot record is refused. Needs you shows a command
   whole, with its line breaks, marking any cut with …, and **Show all**
   shows the full stored input (up to 64 KB), which is exactly what Allow
@@ -179,8 +179,8 @@ the mirror's branches don't already reach, raw, and refuses the push if any
 holds a credential the Console handed out. That check matches exact bytes
 only: a credential encoded some other way (base64, UTF-16, split across
 lines) is not caught. A push is also refused when its new commits add a
-file under `.console-uploads` (your uploads) or `.console-tmp`; each
-clone's `info/exclude` names both, and the turn's commit leaves them out.
+file under `.console-uploads` (your uploads) or `.console-tmp`, and the
+turn's commit leaves them out.
 It pushes only the commit it recorded at the end of the agent's last turn,
 so a commit made later by a program the agent left running waits for the
 next turn.
@@ -205,7 +205,8 @@ or updates the branch's pull request with the same token and, only when
 `CONSOLE_CODEX_REVIEW` is on, comments `@codex review` on it. The `team_push` approval in Needs you shows the
 title and description that will be posted from your account (the first
 1,200 characters; Show all has the rest), and **Open pull request** asks
-for that approval too.
+for that approval too. Once you choose **Always** for an agent's pushes,
+its later pushes are posted without asking.
 
 ## Sign-in
 
