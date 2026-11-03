@@ -106,7 +106,7 @@ export default function BlockView({
       return <p className={styles.errorLine}>{block.text}</p>;
     case "team":
       return (
-        <div className={styles.owner}>
+        <div className={styles.team}>
           {block.messages.map((m, i) => (
             <div key={i} className={styles.teamMessage}>
               <b>
