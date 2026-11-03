@@ -168,6 +168,10 @@ test("Claude Code on an API key: only its key crosses, it must report that key, 
   assert.equal(h.store.turn(free)!.costUsd, null);
   const subEnv = JSON.parse(readFileSync(join(h.store.agent(sub.id)!.folder, "env.json"), "utf8")) as string[];
   assert.ok(subEnv.includes("CLAUDE_CODE_OAUTH_TOKEN") && !subEnv.includes("ANTHROPIC_API_KEY"));
+  // The harness plants an OPENAI_API_KEY in the worker's own environment
+  // (and the key file has one): neither window's client sees it.
+  assert.equal(process.env.OPENAI_API_KEY?.startsWith("sk-ambient-"), true);
+  for (const names of [env, subEnv]) assert.ok(!names.includes("OPENAI_API_KEY"), names.join(","));
   const api = h.send(sub.id, "apikey");
   await h.ended(api);
   assert.match(h.store.turn(api)!.reason!, /API credentials/);
