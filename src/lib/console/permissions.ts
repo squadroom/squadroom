@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve, sep } from "node:path";
 import type { Permission } from "./types.ts";
 
@@ -134,23 +134,37 @@ export function inside(folder: string, path: string): boolean {
   return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
 }
 
-/** On disk: the path is inside the folder by its text, and its nearest
- * existing part, with links resolved, is still inside the folder. A link
- * that stays inside is followed. Anything unreadable counts as outside. */
+/** Where a path leads on disk: its nearest existing part with links
+ * resolved, plus the rest. Null when that cannot be known: a part that
+ * cannot be read, or a link to something that does not exist yet (writing
+ * there would create its target, wherever that is). */
+function leadsTo(full: string): string | null {
+  for (let probe = full; ; probe = dirname(probe)) {
+    try {
+      return join(realpathSync(probe), relative(probe, full));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(probe) === probe) return null;
+      try {
+        lstatSync(probe);
+        return null;
+      } catch {
+        // Not there at all: the part above decides.
+      }
+    }
+  }
+}
+
+/** On disk: the path is inside the folder by its text, and where it leads,
+ * with links resolved, is still inside the folder. A link that stays
+ * inside is followed; one to nothing, or anything unreadable, counts as
+ * outside. */
 export function realInside(folder: string, path: string): boolean {
   if (!inside(folder, path)) return false;
-  const full = isAbsolute(path) ? resolve(path) : resolve(folder, path);
-  let probe = full;
-  for (;;) {
-    try {
-      const real = realpathSync(probe);
-      return inside(realpathSync(folder), join(real, relative(probe, full)));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
-      const parent = dirname(probe);
-      if (parent === probe) return false;
-      probe = parent;
-    }
+  const real = leadsTo(isAbsolute(path) ? resolve(path) : resolve(folder, path));
+  try {
+    return real !== null && inside(realpathSync(folder), real);
+  } catch {
+    return false;
   }
 }
 
@@ -170,14 +184,8 @@ export function inStep(folder: string, path: string, files: string[]): boolean {
   } catch {
     return true; // No folder on disk (as in a check of the rule alone).
   }
-  // The nearest existing part, with links resolved, plus the rest.
-  for (let probe = full; ; probe = dirname(probe)) {
-    try {
-      return named(root, join(realpathSync(probe), relative(probe, full)));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(probe) === probe) return false;
-    }
-  }
+  const real = leadsTo(full);
+  return real !== null && named(root, real);
 }
 
 /** A tab with steps: a write to any path outside the
@@ -191,7 +199,9 @@ export function outsideStep(folder: string, paths: string[], stepFiles: string[]
  * Decide one permission prompt. A path with a `..` part is refused, and
  * `realInside` confirms, on disk, that the path's nearest existing part
  * (or the file itself) resolves inside the agent's folder, so a link
- * planted in the folder cannot lead a write elsewhere.
+ * planted in the folder cannot lead a write elsewhere. A link swapped in
+ * after this check is not caught here (docs/architecture.md, known
+ * limits).
  */
 export function decide(
   tool: string,

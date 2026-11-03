@@ -211,7 +211,7 @@ test("file-tool writes outside the agent's own folder are denied at both levels"
   assert.equal(inside(mine, `${mine}-evil/x`), false);
 });
 
-test("a path through `..` or a link leading outside the folder is outside it; a link that stays inside is followed", (t) => {
+test("a path through `..`, a link leading outside the folder or a link to nothing is outside it; a link that stays inside is followed", (t) => {
   const { root, mine } = folders(t);
   // lnk -> a folder outside: `lnk/../escape.txt` reads as inside by its
   // text, but on disk it lands beside the link's target.
@@ -219,8 +219,11 @@ test("a path through `..` or a link leading outside the folder is outside it; a 
   symlinkSync(join(root, "outside", "sub"), join(mine, "lnk"));
   mkdirSync(join(mine, "docs"));
   symlinkSync(join(mine, "docs"), join(mine, "alias"));
+  // Links to nothing yet: a write would create their target, wherever it is.
+  symlinkSync(join(root, "outside", "absent.md"), join(mine, "planted"));
+  symlinkSync(join(root, "outside", "absent-dir"), join(mine, "pdir"));
   const edit = { folder: mine, permission: "edit" as const };
-  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/lnk/a.txt`, `${mine}/lnk`]) {
+  for (const path of [`${mine}/lnk/../escape.txt`, "lnk/../escape.txt", `${mine}/docs/../a.txt`, `${mine}/lnk/a.txt`, `${mine}/lnk`, `${mine}/planted`, `${mine}/pdir/x.txt`]) {
     assert.equal(realInside(mine, path), false, path);
     assert.equal(decide("Write", { file_path: path }, edit, realInside).behavior, "deny", path);
     assert.equal(inStep(mine, path, ["**"]), false, path);

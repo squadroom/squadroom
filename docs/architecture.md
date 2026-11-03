@@ -91,7 +91,7 @@ way; its tab pauses. A turn that was stopped (by you or a limit) while its
 program still ran is charged the same way, except that each of those
 requests is sized by the largest input the turn was seen to send, with the
 model's maximum output, instead of the whole context window; with no input
-seen, the full allowance. A Codex request whose own usage can't be read counts
+seen, or once a helper (subagent) ran, the full allowance. A Codex request whose own usage can't be read counts
 as one that did not report it. The one exception is an ACP turn the
 provider turned away as unauthorized (401 or 403) before anything
 happened: nothing ran, so it costs nothing. Requests are counted from
@@ -291,6 +291,12 @@ code step once when mail is down; it does not confirm weighty commands.
   network setting and the list of folders it may not read that it started
   with, until the worker restarts. After switching a project's network off,
   restart the worker.
+- **A link swapped in during a write.** Claude Code's own file tools are
+  not confined by the kernel: the Console checks where a path leads before
+  it allows the write, so a link that a program the agent left running
+  swaps in after that check can still lead the write to another place the
+  `agent` user can write (another agent's folder). Codex's and ACP agents'
+  writes are confined by their sandboxes.
 - **Listening servers.** With a project's network on, an ACP agent can
   open a server that listens for connections.
 - **Kimi Code's repository settings.** Kimi Code still loads a

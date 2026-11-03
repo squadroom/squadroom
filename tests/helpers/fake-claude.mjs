@@ -414,6 +414,15 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
     waiting = word;
     return;
   }
+  if (word === "measuredhang" || word === "measuredhelperhang") {
+    // One request measured (its input, the gauge), then, for the helper
+    // word, a helper started; it waits, and an interrupt ends the turn.
+    send({ type: "assistant", message: { model, content: [{ type: "text", text: "Working." }], usage: { input_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 3 } } });
+    if (word === "measuredhelperhang")
+      send({ type: "assistant", message: { model, content: [{ type: "tool_use", id: "toolu_agent1", name: "Agent", input: { description: "Look around", subagent_type: "Explore", prompt: "x" } }] } });
+    waiting = "hang";
+    return;
+  }
   if (word === "flood") {
     for (let i = 0; i < 40; i++)
       send({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: `f${i}`, content: "y".repeat(100_000) }] } });

@@ -321,6 +321,7 @@ export const sessions = {
         return void this.safe(() => this.store.taskUnfollowed(epoch, rt.agent.id));
       case "helper_start": {
         // A helper (subagent) begins: its row, redacted and bounded.
+        t.helpers = true;
         const clean = (text: string, fallback: string) => this.redactor.text(text).replace(/\s+/g, " ").trim() || fallback;
         return void this.safe(() =>
           this.store.startHelper(epoch, { agentId: rt.agent.id, turnId: t.id, toolUseId: ev.toolUseId, name: clean(ev.name, "Helper"), type: clean(ev.type, "helper") }),

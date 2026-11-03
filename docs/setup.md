@@ -152,9 +152,10 @@ charged once for its own usage. After the worker restarts, a Claude Code
 full allowance and its tab pauses until you Resume. A turn that fails is
 charged what it reported plus the allowance for at least one request (one
 may have been under way), and its tab pauses too. A turn you stop is
-charged what it reported plus one request the size of the largest it sent,
-with the model's longest reply (a reply cut short can't be measured), and
-its tab pauses. On a model with a large context window that is much less
+charged what it reported plus, for each request its report doesn't cover
+(at least one), a request the size of the largest it sent, with the
+model's longest reply (a reply cut short can't be measured), and its tab
+pauses. If a helper (subagent) ran in it, it gets the full allowance. On a model with a large context window that is much less
 than the full allowance.
 
 ## 5. An https address
@@ -363,8 +364,10 @@ Things to know while using it:
   for that agent's pushes). Push branch sends only the
   commit the Console recorded at the end of the agent's last turn, even
   after a worker restart; a commit made after that is refused until the
-  next turn. Your uploads (`.console-uploads`) are never committed, and a
-  push whose commits add a file there is refused. With `CONSOLE_CODEX_REVIEW=on` in
+  next turn. Your uploads (`.console-uploads`) are never in the Console's
+  commits, and a push whose commits add a file there is refused (if an
+  agent commits them itself, that branch can't be pushed until the commit
+  is removed). With `CONSOLE_CODEX_REVIEW=on` in
   `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.
@@ -587,7 +590,7 @@ with until then.
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
 | Paid API spend across every tab in one UTC month (API-key models and image calls; a turn counts in the month it started), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
-| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus the full allowance (the model's whole context window in, at its highest input rate, and its maximum output out) for each request its usage doesn't cover, at least one; the tab pauses until you Resume that pause. A stopped turn's requests are sized by the largest input it sent instead of the whole window. An ACP turn the provider refused as unauthorized (401 or 403) before anything happened costs nothing |
+| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus the full allowance (the model's whole context window in, at its highest input rate, and its maximum output out) for each request its usage doesn't cover, at least one; the tab pauses until you Resume that pause. A turn you stopped has those requests sized by the largest input it sent instead of the whole window, unless a helper (subagent) ran in it. An ACP turn the provider refused as unauthorized (401 or 403) before anything happened costs nothing |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |
