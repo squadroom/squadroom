@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { TreeProject } from "@/lib/console/tree";
 import type { ConsoleEvent } from "@/lib/console/types";
 import { appendEvent, type EventWindow } from "@/lib/console/ui";
-import { followStream } from "./api";
+import { followStream } from "@/lib/console/sse";
+import { reload } from "@/components/shared/FreshCode";
 
 const EMPTY = new Map<string, ConsoleEvent[]>();
 
@@ -65,6 +66,7 @@ export function useEvents(projectId: string | null, onStatus: () => void) {
         publish();
         if (status) statusRef.current();
       },
+      () => reload("/login"),
     );
     return () => {
       stopped = true;
@@ -85,6 +87,7 @@ export function useTree(initial: TreeProject[] | null): TreeProject[] | null {
         (frames) => {
           for (const f of frames) if (f.data && f.event === "tree") setStreamed(JSON.parse(f.data) as TreeProject[]);
         },
+        () => reload("/login"),
       ),
     [],
   );

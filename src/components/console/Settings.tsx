@@ -5,6 +5,7 @@ import { archiveReady, money, parseDollars, plural } from "@/lib/console/ui";
 import { DOCUMENT_REVIEW, PARKING_LOT, STEPS_MAX, TEMPLATE_NAME_MAX, checkSteps, rowsToSteps, stepRows, type StepRow, type TemplateStep } from "@/lib/console/templates";
 import { api, type Run } from "./api";
 import Dialog from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 /** Pause a tab, a project or everything: after current turns, or now. */
@@ -148,7 +149,8 @@ export function SpendLimit({
   run: Run;
   since?: string;
 }) {
-  const set = (limitUsd: number | null) => void run(tabId ? { action: "setSpendLimit", tabId, limitUsd } : { action: "setConsoleSpendLimit", limitUsd });
+  const { busy, guard } = useBusy();
+  const set = (limitUsd: number | null) => guard(() => run(tabId ? { action: "setSpendLimit", tabId, limitUsd } : { action: "setConsoleSpendLimit", limitUsd }));
   const [value, setValue] = useState(spend.limitUsd.toFixed(2));
   const parsed = parseDollars(value);
   const changed = Number.isFinite(parsed) && parsed !== spend.limitUsd;
@@ -162,7 +164,7 @@ export function SpendLimit({
         <span>Limit $</span>
         <input inputMode="decimal" aria-label="Spend limit in dollars" value={value} onChange={(e) => setValue(e.target.value)} />
         <button
-          disabled={!changed || parsed < 0.01}
+          disabled={busy || !changed || parsed < 0.01}
           title={parsed > spend.limitUsd ? "Raising the limit needs a fresh code" : "Lowering the limit"}
           onClick={() => set(parsed)}
         >
@@ -170,6 +172,7 @@ export function SpendLimit({
         </button>
         {!spend.isDefault && (
           <button
+            disabled={busy}
             title={`Use the default, ${money(spend.defaultUsd)}${spend.defaultUsd > spend.limitUsd ? " (needs a fresh code)" : ""}`}
             onClick={() => {
               setValue(spend.defaultUsd.toFixed(2));
@@ -203,6 +206,7 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
   const steps = tab.steps!;
   const [target, setTarget] = useState(Math.min(steps.index + 1, steps.steps.length - 1));
   const step = steps.steps[steps.index];
+  const { busy, guard } = useBusy();
   return (
     <Dialog title={`Steps: ${tab.name}`} onClose={onClose}>
       <h3 className={styles.subhead}>
@@ -220,7 +224,7 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
             </option>
           ))}
         </select>{" "}
-        <button disabled={target === steps.index} onClick={() => void run({ action: "setStep", tabId: tab.id, step: target })}>
+        <button disabled={busy || target === steps.index} onClick={() => guard(() => run({ action: "setStep", tabId: tab.id, step: target }))}>
           Move to this step
         </button>
       </p>
@@ -228,9 +232,15 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
   );
 }
 
+/** A step row with a key of its own, so moving or removing a row keeps
+ * each row's fields and focus with it. */
+type KeyedRow = StepRow & { key: number };
+let rowKey = 0;
+const keyed = (rows: StepRow[]): KeyedRow[] => rows.map((r) => ({ ...r, key: ++rowKey }));
+
 /** A template's steps: in order, each with a name and the
  * files it may change, comma separated (patterns like adrs/*.md). */
-function StepsEditor({ rows, setRows }: { rows: StepRow[]; setRows: (rows: StepRow[]) => void }) {
+function StepsEditor({ rows, setRows }: { rows: KeyedRow[]; setRows: (rows: KeyedRow[]) => void }) {
   const row = (i: number, change: Partial<StepRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...change } : r)));
   const move = (i: number, by: number) => {
     const next = [...rows];
@@ -245,7 +255,7 @@ function StepsEditor({ rows, setRows }: { rows: StepRow[]; setRows: (rows: StepR
         approved. {PARKING_LOT} is always allowed.
       </p>
       {rows.map((r, i) => (
-        <div key={i} className={styles.teamRow}>
+        <div key={r.key} className={styles.teamRow}>
           <input aria-label={`Step ${i + 1}: name`} value={r.name} placeholder="Name" onChange={(e) => row(i, { name: e.target.value })} />
           <input aria-label={`Step ${i + 1}: files`} value={r.files} placeholder="brief.md, docs/*.md" onChange={(e) => row(i, { files: e.target.value })} />
           <button aria-label={`Move step ${i + 1} up`} disabled={i === 0} onClick={() => move(i, -1)}>
@@ -260,8 +270,8 @@ function StepsEditor({ rows, setRows }: { rows: StepRow[]; setRows: (rows: StepR
         </div>
       ))}
       <div className={styles.dialogButtons}>
-        {rows.length < STEPS_MAX && <button onClick={() => setRows([...rows, { name: "", files: "" }])}>+ Add step</button>}
-        <button onClick={() => setRows(stepRows(DOCUMENT_REVIEW.steps))}>Use Document review&apos;s steps</button>
+        {rows.length < STEPS_MAX && <button onClick={() => setRows([...rows, { name: "", files: "", key: ++rowKey }])}>+ Add step</button>}
+        <button onClick={() => setRows(keyed(stepRows(DOCUMENT_REVIEW.steps)))}>Use Document review&apos;s steps</button>
       </div>
     </>
   );
@@ -270,7 +280,7 @@ function StepsEditor({ rows, setRows }: { rows: StepRow[]; setRows: (rows: StepR
 /** A template's name and steps, as the dialogs below collect them. */
 function TemplateForm(props: { title: string; name: string; steps: TemplateStep[]; hint: string; save: string; onClose: () => void; onSave: (name: string, steps: TemplateStep[]) => Promise<unknown> }) {
   const [name, setName] = useState(props.name);
-  const [rows, setRows] = useState(() => stepRows(props.steps));
+  const [rows, setRows] = useState(() => keyed(stepRows(props.steps)));
   const steps = rowsToSteps(rows);
   const checked = checkSteps(steps);
   return (
@@ -344,8 +354,8 @@ export function ArchiveDialog({ scope, id, onClose, onConfirm }: { scope: "proje
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
-    api(undefined, `?impact=${scope}:${encodeURIComponent(id)}`)
-      .then((data: ArchiveImpact) => live && setImpact(data))
+    api<ArchiveImpact>(undefined, `?impact=${scope}:${encodeURIComponent(id)}`)
+      .then((data) => live && setImpact(data))
       .catch((e: Error) => live && setFailed(e.message));
     return () => {
       live = false;

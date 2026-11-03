@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { CONSOLE_CODE_MS, KEY_ACTIONS, storeFailure, type CommandAction, freshCodeContext, runKeysCommand, needsFreshCode, runCommand } from "@/lib/console/commands";
-import { archiveImpact, keysPageView, changesView, commitPatchView, needsView, projectView, projectsView, rolesView, searchView, templatesView, treeView, workerView } from "@/lib/console/views";
+import { archiveImpact, branchPatchView, keysPageView, changesView, commitPatchView, needsView, projectView, projectsView, rolesView, searchView, templatesView, treeView, workerView } from "@/lib/console/views";
 import { consoleAccess, consoleHealth, consoleJson, consoleSignIn, consoleStore } from "@/lib/console/web";
 import { consoleKeysFile, consoleLogFile } from "@/lib/console/config";
 import { readLog } from "@/lib/console/log";
@@ -83,9 +83,10 @@ export async function GET(request: Request) {
     if (search !== null) return consoleJson(searchView(store, search.slice(0, 200)));
     const changes = params.get("changes");
     if (changes) {
-      // The dialog's list, every 3 seconds; one commit's patch when opened.
+      // The dialog's list, every 3 seconds; one commit's patch, or the
+      // branch's, when it is opened.
       const commit = params.get("commit");
-      const view = commit ? commitPatchView(store, changes, Number(commit)) : changesView(store, changes);
+      const view = commit ? commitPatchView(store, changes, Number(commit)) : params.has("branch") ? branchPatchView(store, changes) : changesView(store, changes);
       return view ? consoleJson(view) : consoleJson({ error: commit ? "That commit does not exist." : "That agent does not exist." }, 404);
     }
     // Polling: a view the page already has is answered with its version

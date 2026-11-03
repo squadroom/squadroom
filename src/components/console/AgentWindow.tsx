@@ -12,7 +12,7 @@ import { elapsed, fileLinks, pastedName, plural } from "@/lib/console/ui";
 import { atEnd } from "@/lib/console/view-state";
 import type { Run } from "./api";
 import BlockView from "./BlockView";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import InlineRename from "./InlineRename";
 import KindBadge from "./KindBadge";
 import { MenuButton, type MenuItem } from "./Menu";

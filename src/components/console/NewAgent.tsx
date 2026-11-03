@@ -8,6 +8,10 @@ import Dialog from "./Dialog";
 import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
+// New agent: one window in the current tab. Its name, its AI (kind, model
+// and thinking), its access (Edit or Look only), Ask me first for Claude
+// Code, and an optional role whose prompt can be changed for this agent.
+
 export default function NewAgent({
   roles,
   talkOnly,

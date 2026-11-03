@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { changesView } from "../src/lib/console/views.ts";
+import { branchPatchView, changesView } from "../src/lib/console/views.ts";
 import { checkGitHub, consoleBranch, CONSOLE_BRANCH, Mirror, parseRepo, validBranch } from "../src/lib/console/git.ts";
 import { Launcher } from "../src/lib/console/launcher.ts";
 import { ConsoleWorker } from "../src/lib/console/worker.ts";
@@ -149,7 +149,7 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   const view = changesView(h.store, lead.id)!;
   assert.equal(view.commits.length, 1);
   assert.match(view.commits[0].stat, /notes\.txt/);
-  assert.match(view.diff!.patch, /\+written by claude/);
+  assert.match(branchPatchView(h.store, lead.id)!.patch, /\+written by claude/);
   // A turn that changed nothing makes no commit.
   const quiet = h.send(lead.id, "hello there");
   await h.ended(quiet);
