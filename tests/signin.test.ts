@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SignInDatabase } from "../src/lib/signin/store.ts";
 import { servedPath, serverSettings } from "../src/config/server-env.ts";
-import { clientAddress, readCappedText, readCookie, postAllowed, SESSION_COOKIE, startAllowed } from "../src/lib/signin/hosted.ts";
+import { NextResponse } from "next/server.js";
+import { clientAddress, cookieOptions, readCappedText, readCookie, postAllowed, SESSION_COOKIE, STATE_COOKIE, startAllowed } from "../src/lib/signin/hosted.ts";
 import { codeMailer } from "../src/lib/signin/web-services.ts";
 import type { MailSettings } from "../src/lib/shared/mail.ts";
 import {
@@ -15,6 +16,7 @@ import {
   FRESH_CODE_MS,
   LOCK_MS,
   PARTIAL_MS,
+  SESSION_MS,
   STATE_MS,
   SignIn,
   SignInError,
@@ -126,6 +128,24 @@ test("the server serves only the Console and sign-in routes, and commands need O
   for (const site of ["cross-site", "same-site"]) assert.equal(startAllowed(headers({ "sec-fetch-site": site })), false, site);
   assert.equal(readCookie(`a=1; ${SESSION_COOKIE}=abc; b=2`, SESSION_COOKIE), "abc");
   assert.equal(readCookie(null, "x"), undefined);
+});
+
+test("the session cookie: __Host-, Secure, Path=/, HttpOnly, SameSite=Lax, 30 days; signing out expires it", () => {
+  // Serialized the way the sign-in routes set it.
+  const setCookie = (name: string, value: string, maxAgeSeconds: number) => {
+    const response = NextResponse.json({});
+    response.cookies.set(name, value, cookieOptions(maxAgeSeconds));
+    return response.headers.get("set-cookie")!.split("; ");
+  };
+  assert.equal(SESSION_MS, 30 * 24 * 60 * 60_000);
+  const session = setCookie(SESSION_COOKIE, "abc", SESSION_MS / 1000);
+  assert.ok(SESSION_COOKIE.startsWith("__Host-") && STATE_COOKIE.startsWith("__Host-"));
+  assert.equal(session[0], `${SESSION_COOKIE}=abc`);
+  for (const part of ["Path=/", "Max-Age=2592000", "Secure", "HttpOnly", "SameSite=lax"]) assert.ok(session.includes(part), part);
+  // __Host- cookies are refused by the browser if they carry a Domain.
+  assert.ok(!session.some((p) => /^domain=/i.test(p)));
+  const out = setCookie(SESSION_COOKIE, "", 0);
+  assert.ok(out.includes("Max-Age=0") && out.includes("Secure") && out.includes("Path=/"));
 });
 
 test("step 1: only the configured GitHub account, with the matching state, gets a partial session", async (t) => {
