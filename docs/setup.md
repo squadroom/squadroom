@@ -149,9 +149,13 @@ off for the API-key models, because it is billed per search and Squadroom
 can't work out its cost from the usage the client reports. Each turn is
 charged once for its own usage. After the worker restarts, a Claude Code
 "(API key)" window's first turn can't be measured, so it is charged its
-full allowance and its tab pauses until you Resume. A turn you stop, or
-one that fails, is charged what it reported plus the allowance for at least
-one request (one may have been under way), and its tab pauses too.
+full allowance and its tab pauses until you Resume. A turn that fails is
+charged what it reported plus the allowance for at least one request (one
+may have been under way), and its tab pauses too. A turn you stop is
+charged what it reported plus one request the size of the largest it sent,
+with the model's longest reply (a reply cut short can't be measured), and
+its tab pauses. On a model with a large context window that is much less
+than the full allowance.
 
 ## 5. An https address
 
@@ -583,7 +587,7 @@ with until then.
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
 | Paid API spend across every tab in one UTC month (API-key models and image calls; a turn counts in the month it started), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
-| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus the full allowance (the model's whole context window in, at its highest input rate, and its maximum output out) for each request its usage doesn't cover, at least one; the tab pauses until you Resume that pause. An ACP turn the provider refused as unauthorized (401 or 403) before anything happened costs nothing |
+| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus the full allowance (the model's whole context window in, at its highest input rate, and its maximum output out) for each request its usage doesn't cover, at least one; the tab pauses until you Resume that pause. A stopped turn's requests are sized by the largest input it sent instead of the whole window. An ACP turn the provider refused as unauthorized (401 or 403) before anything happened costs nothing |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |

@@ -47,9 +47,9 @@ export const holds = {
     this.overSpend(agent.tabId, true);
   },
   /** A paid turn's charge (spend.ts: `usage` is the client's whole-turn
-   * usage, or null; `ended`, whether the turn ended normally); an
-   * allowance carries the tab's hold, which the store writes in the same
-   * transaction. */
+   * usage, or null; `ended`, whether the turn ended normally; `stopped`,
+   * whether it was stopped); an allowance carries the tab's hold, which the
+   * store writes in the same transaction. */
   charge(
     this: ConsoleWorker,
     agent: ConsoleAgent,
@@ -58,12 +58,20 @@ export const holds = {
     usage: TurnUsage | null | undefined,
     running?: RunningUsage,
     ended = true,
+    stopped = false,
   ): (Charge & { hold?: string }) | null {
     // Priced at the rates of when the turn started, never when it ended or
     // a later restart charged it (a scheduled price change, pricing.ts).
-    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()), running, ended);
+    const charge = chargeTurn(model, usage, pricedAt(this.store.turn(turnId), this.now()), running, ended, stopped);
     if (!charge || charge.basis !== "allowance") return charge;
     const n = charge.allowances ?? 1;
+    if (charge.sizedBy) {
+      const what = n === 1 ? "one more request" : `${n} requests`;
+      return {
+        ...charge,
+        hold: `${USAGE_PAUSE}${agent.name}'s turn ${turnId} was stopped mid-request, so it was charged the usage it reported plus ${what} of ${charge.sizedBy.toLocaleString("en")} input tokens (its largest) and the model's longest reply (${usd(charge.usd)} in all). Resume to let the tab continue.`,
+      };
+    }
     const what = n === 1 ? "the full allowance for a request" : `the full allowance for each of ${n} requests`;
     return {
       ...charge,

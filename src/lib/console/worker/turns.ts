@@ -232,9 +232,10 @@ export const turns = {
     // normally may have had a request under way whose usage never came,
     // whatever its client reported: it is charged that usage plus the
     // allowance for each request it did not cover, at least one, and its
-    // tab pauses (spend.ts).
+    // tab pauses (spend.ts). A stopped turn's allowance is sized by the
+    // largest input it sent.
     const usage = options.usage !== undefined ? options.usage : options.completed ? t.running.usage : null;
-    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, usage, t.running, !!options.completed) : null;
+    const charge = t.prompted ? this.charge(rt.agent, rt.model, t.id, usage, t.running, !!options.completed, status === "stopped") : null;
     if (unmeasured && t.validated) this.safe(() => this.store.setGauge(this.epoch!, rt.agent.id, { measured: false }));
     this.releaseWaits(t.id, "The turn ended.");
     const epoch = this.epoch;

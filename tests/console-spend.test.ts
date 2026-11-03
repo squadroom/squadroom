@@ -160,6 +160,30 @@ test("a turn that did not end normally is charged its reported usage plus the al
   assert.deepEqual(chargeTurn(LUNA, usage, AT, claude, true), { usd: reported, basis: "reported" });
 });
 
+test("a stopped turn is charged its reported usage plus each request it did not cover, sized by its largest input", () => {
+  const usage = { inputTokens: 2_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const reported = chargeTurn(HAIKU, usage, AT)!.usd;
+  // Haiku's cache writes cost more than its input: the request's input is
+  // priced at that rate, with the model's maximum output.
+  const one = (input: number) => costUsd({ ...HAIKU.paid!.prices, id: HAIKU.id, label: HAIKU.label, model: HAIKU.model }, input, HAIKU.paid!.maxOutputTokens, 0, { requestedAt: AT.toISOString(), cacheWriteInputTokens: input });
+  let claude = NO_REQUESTS;
+  for (let i = 0; i < 3; i++) claude = requestStarted(claude);
+  claude = requestGauged(requestGauged(claude, 1_000), 1_500);
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, claude, false, true), { usd: reported + one(1_500), basis: "allowance", allowances: 1, sizedBy: 1_500 });
+  assert.ok(one(1_500) < chargeTurn(HAIKU, null, AT)!.usd);
+  // Two requests it did not cover are two of them.
+  assert.equal(chargeTurn(HAIKU, usage, AT, requestStarted(claude), false, true)!.usd, reported + 2 * one(1_500));
+  // Not stopped (it failed), the full allowance.
+  assert.equal(chargeTurn(HAIKU, usage, AT, claude, false)!.sizedBy, undefined);
+  // No input seen, or a report that could not be read: the full allowance.
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, NO_REQUESTS, false, true), chargeTurn(HAIKU, usage, AT, NO_REQUESTS, false));
+  const req = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
+  const bad = requestUsage(requestUsage(requestGauged(NO_REQUESTS, 1_000), req, SOL), { inputTokens: undefined, outputTokens: 5 }, SOL);
+  assert.equal(chargeTurn(SOL, bad.usage, AT, bad, false, true)!.sizedBy, undefined);
+  // Ended normally, the report is the charge, stopped or not.
+  assert.deepEqual(chargeTurn(HAIKU, usage, AT, claude, true, true), { usd: reported, basis: "reported" });
+});
+
 test("a Codex request whose usage cannot be read is charged the allowance, never nothing", () => {
   const req = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };
   const good = requestUsage(NO_REQUESTS, req, SOL);

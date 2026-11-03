@@ -236,7 +236,7 @@ test("an API-key Codex server that does not report the API key runs no turn", as
   assert.ok(!h.codexCalls().some((c) => c.method === "thread/start"));
 });
 
-test("a Codex API-key turn that did not complete normally is charged its reported request plus one allowance, and its tab waits", async (t) => {
+test("a stopped Codex API-key turn is charged its reported request plus one sized by its largest input, and its tab waits", async (t) => {
   const h = await harness(t, {}, false, { codex: {} });
   keys(h.keysFile);
   await h.worker.start();
@@ -254,8 +254,10 @@ test("a Codex API-key turn that did not complete normally is charged its reporte
   const running = requestUsage(requestGauged(NO_REQUESTS, 40), request, SOL_KEY);
   const at = new Date(row.startedAt!);
   assert.equal(row.costBasis, "allowance");
-  assert.equal(row.costUsd, chargeTurn(SOL_KEY, request, at, running)!.usd + chargeTurn(SOL_KEY, null, at)!.usd);
-  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: .*the full allowance for a request whose usage it did not report/);
+  assert.equal(row.costUsd, chargeTurn(SOL_KEY, request, at, running, false, true)!.usd);
+  assert.ok(row.costUsd! > chargeTurn(SOL_KEY, request, at, running)!.usd);
+  assert.ok(row.costUsd! < chargeTurn(SOL_KEY, request, at, running, false)!.usd);
+  assert.match(h.store.tab(h.tab.id)!.pauseReason ?? "", /^Usage not reported: .*was stopped mid-request, so it was charged the usage it reported plus one more request of 40 input tokens/);
 });
 
 test("a turn a dead worker left is charged from what its client had reported, at the prices it started with, even once its model has left the catalog", async (t) => {

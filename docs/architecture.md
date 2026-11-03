@@ -87,7 +87,11 @@ restarted), is charged what its requests did report plus the model's full
 allowance (its whole context window as input, at the model's highest
 input-side rate, and its maximum output) for each request its reported
 usage does not cover, and at least one, since a request may have been under
-way; its tab pauses. A Codex request whose own usage can't be read counts
+way; its tab pauses. A turn that was stopped (by you or a limit) while its
+program still ran is charged the same way, except that each of those
+requests is sized by the largest input the turn was seen to send, with the
+model's maximum output, instead of the whole context window; with no input
+seen, the full allowance. A Codex request whose own usage can't be read counts
 as one that did not report it. The one exception is an ACP turn the
 provider turned away as unauthorized (401 or 403) before anything
 happened: nothing ran, so it costs nothing. Requests are counted from

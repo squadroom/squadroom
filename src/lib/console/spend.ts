@@ -18,7 +18,9 @@ import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type TurnUsage } from "./types.ts";
 // charged what it did report plus the full allowance (the model's whole
 // context window as input and its maximum output, at catalog rates) for
 // every request it was seen to start without reporting it, at least one,
-// and pauses its tab: zero is never assumed.
+// and pauses its tab: zero is never assumed. A turn that was stopped is
+// charged the same way, except that each of those requests is sized by the
+// largest input the turn was seen to send instead of the whole window.
 
 /** The fingerprint of a key: enough to tell two keys apart, nothing that
  * helps recover one. */
@@ -51,6 +53,9 @@ export interface Charge {
   basis: "reported" | "allowance";
   /** With `allowance`: how many requests were charged the allowance. */
   allowances?: number;
+  /** A stopped turn's: the input each of those requests was sized by (the
+   * largest seen) instead of the whole context window. */
+  sizedBy?: number;
 }
 
 /** What a turn is priced as: its model's id, names and catalog prices,
@@ -195,8 +200,20 @@ export function requestsSeen(r: RunningUsage): number {
  * covering it, and at least one (a request may have been under way): a
  * client that reports each request's counts those that reported; one that
  * reports the whole turn's, the requests its context gauge measured.
+ * `stopped`: the turn was stopped (by the owner or a limit) while its
+ * client still ran, so each of those requests is sized by the largest input
+ * seen, with the model's maximum output (a reply cut short has no length to
+ * read); with no input seen, or a report that could not be read, the full
+ * allowance.
  */
-export function chargeTurn(model: BilledModel, usage: TurnUsage | null | undefined, at = new Date(), running: RunningUsage = NO_REQUESTS, ended = true): Charge | null {
+export function chargeTurn(
+  model: BilledModel,
+  usage: TurnUsage | null | undefined,
+  at = new Date(),
+  running: RunningUsage = NO_REQUESTS,
+  ended = true,
+  stopped = false,
+): Charge | null {
   if (!model.paid) return null;
   const priced = billing(model);
   const requestedAt = at.toISOString();
@@ -209,20 +226,20 @@ export function chargeTurn(model: BilledModel, usage: TurnUsage | null | undefin
   const reported = known ? price(priced, known, long(known), requestedAt) : 0;
   const covered = !known ? 0 : perRequest ? running.reported : running.gauges;
   const allowances = Math.max(1, requestsSeen(running) - covered);
-  return { usd: reported + allowances * allowanceUsd(model, priced, at), basis: "allowance", allowances };
+  const sizedBy = stopped && !running.unreported && running.largest > 0 ? Math.min(running.largest, model.paid.contextWindow) : undefined;
+  return { usd: reported + allowances * allowanceUsd(model, priced, at, sizedBy), basis: "allowance", allowances, ...(sizedBy ? { sizedBy } : {}) };
 }
 
-/** One request's full allowance: the model's whole context window as
- * input, at the highest input-side rate it has (a cache write costs more
- * than plain input), and its maximum output. */
-function allowanceUsd(model: BilledModel, priced: PricedModel, at: Date): number {
-  const { contextWindow, maxOutputTokens } = model.paid!;
+/** One request's allowance: `input` tokens (by default the model's whole
+ * context window) at the highest input-side rate it has (a cache write
+ * costs more than plain input), and its maximum output. */
+function allowanceUsd(model: BilledModel, priced: PricedModel, at: Date, input = model.paid!.contextWindow): number {
   const rates = tokenPrices(priced, at);
   const write = rates.cacheWritePerMtok ?? 0;
   const longWrite = rates.longCacheWritePerMtok ?? 0;
   const top = Math.max(rates.inputPerMtok, write, longWrite);
-  const side = top === rates.inputPerMtok ? {} : top === write ? { cacheWriteInputTokens: contextWindow } : { longCacheWriteInputTokens: contextWindow };
-  return costUsd(priced, contextWindow, maxOutputTokens, 0, { requestedAt: at.toISOString(), ...side });
+  const side = top === rates.inputPerMtok ? {} : top === write ? { cacheWriteInputTokens: input } : { longCacheWriteInputTokens: input };
+  return costUsd(priced, input, model.paid!.maxOutputTokens, 0, { requestedAt: at.toISOString(), ...side });
 }
 
 /** Dollars as the Needs you tray shows them. */
