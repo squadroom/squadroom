@@ -12,12 +12,13 @@ export const CLIENT_VERSIONS = { codex: "0.155.1", claude: "2.1.282" } as const;
 /** The Console's ACP clients: npm package and pinned version, installed
  * for the `agent` user by setup-agent-user.sh into the clients folder; the
  * key is the executable's name. Versions checked on npm 2026-10-21
- * (OpenCode's 2026-11-01); each is verified offline through the ACP
- * conformance matrix and runs at Code edit or Code analysis. */
+ * (OpenCode's 2026-11-01, Grok Build's 2026-11-03); each is verified
+ * offline through the ACP conformance matrix and runs at Code edit or
+ * Code analysis. */
 export const ACP_CLIENTS = {
   opencode: { package: "opencode-ai", version: "1.19.5" },
   gemini: { package: "@google/gemini-cli", version: "0.65.0" },
-  grok: { package: "@xai-official/grok", version: "1.0.62" },
+  grok: { package: "@xai-official/grok", version: "1.0.70" },
   kimi: { package: "@moonshot-ai/kimi-code", version: "2.3.0" },
 } as const;
 /** Where scripts/console/setup-agent-user.sh installs the Console's clients
