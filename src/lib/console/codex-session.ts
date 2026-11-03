@@ -416,7 +416,12 @@ class CodexLoginDriver implements AgentDriver {
       if (this.ending || this.serverRetiring()) throw new CodexError("The Codex server is being ended.");
       return this.current;
     }
-    if (this.serverRetiring()) throw new CodexError("The previous Codex server has not exited yet.");
+    // A turn that got past waiting() (an idle server ended while its folder
+    // was being committed, say) waits for the retired server to exit.
+    if (this.serverRetiring()) {
+      await Promise.all([...this.retired].filter((e) => !e.proc.exited).map((e) => e.done));
+      return this.server();
+    }
     this.starting ??= (async () => {
       const server = new CodexServer(this.host.launcher, this.host.paths.agentHome, this.host.binary("codex"), this.host.redactor, this.apiKey);
       this.spawning = server;
@@ -508,6 +513,14 @@ class CodexLoginDriver implements AgentDriver {
     for (const e of this.retired) if (e.step()) this.retired.delete(e);
     this.ending?.end.step();
   }
+  /** With no window left on it (so no turn), the server is ended the way a
+   * retired one is: true once nothing of it is running. */
+  endIdle(): boolean {
+    if (this.sessions.size || this.ending || this.starting) return false;
+    if (this.current && !this.current.exited) this.retired.add(new Ending(this.host, this.current));
+    this.current = null;
+    return this.retired.size === 0;
+  }
   async shutdown() {
     const procs = [this.current, this.spawning, ...[...this.retired].map((e) => e.proc)].filter((p): p is NonNullable<typeof p> => !!p);
     await endProcesses(this.host.launcher, procs, this.host.graceMs, this.host.log);
@@ -567,8 +580,12 @@ export class CodexDriver implements AgentDriver {
   usesFolder() {
     return false;
   }
+  /** An API key's server with no window left (its key was replaced, or its
+   * windows closed) is ended, and forgotten once it has exited: it would
+   * otherwise keep running with that key until shutdown. */
   tick() {
     for (const d of this.all) d.tick();
+    for (const [print, d] of this.keyed) if (d.endIdle()) this.keyed.delete(print);
   }
   async shutdown() {
     await Promise.all(this.all.map((d) => d.shutdown()));

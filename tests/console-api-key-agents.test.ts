@@ -20,11 +20,11 @@ const CAP = { usd: 10, url: "https://example.test/limits", checkedAt: "2026-11-0
 const SONNET_KEY = agentModel("claude-code", "claude-sonnet-5@api-key")!;
 const SOL_KEY = agentModel("codex", "gpt-5.6-sol@api-key")!;
 
-function keys(path: string) {
+function keys(path: string, openai = OPENAI) {
   writeFileSync(
     path,
     JSON.stringify({
-      keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, ANTHROPIC_API_KEY: { value: ANTHROPIC, cap: CAP }, OPENAI_API_KEY: { value: OPENAI, cap: CAP } },
+      keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, ANTHROPIC_API_KEY: { value: ANTHROPIC, cap: CAP }, OPENAI_API_KEY: { value: openai, cap: CAP } },
       projects: {},
     }),
     { mode: 0o600 },
@@ -221,6 +221,83 @@ test("Codex on an API key: its own App Server, signed in with the key over stdin
   assert.equal(thread(keyed.pid).config.web_search, "disabled");
   assert.equal(thread(chatgpt.pid).cwd, h.store.agent(sub.id)!.folder);
   assert.equal(thread(chatgpt.pid).config.web_search, undefined);
+});
+
+test("a replaced OpenAI key's Codex server is ended once no window is on it; one a window still uses keeps running", async (t) => {
+  const h = await harness(t, {}, false, { codex: {} });
+  keys(h.keysFile);
+  await h.worker.start();
+  const one = h.agent("One", "edit", "gpt-5.6-sol@api-key", "codex");
+  const two = h.agent("Two", "edit", "gpt-5.6-sol@api-key", "codex");
+  await h.ready(one.id, two.id);
+  const run = async (id: string) => {
+    const turn = h.send(id, "hello");
+    await h.ended(turn);
+    assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+  };
+  // Each server's pid, by the key it signed in with.
+  const logins = () =>
+    readFileSync(join(h.agentHome, "codex-calls.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { pid: number; method: string; params: Record<string, unknown> })
+      .filter((c) => c.method === "account/login/start");
+  const server = (key: string) => logins().find((c) => c.params.apiKey === key)!.pid;
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  await run(one.id);
+  await run(two.id);
+  const keyB = OPENAI.replace("ABCD", "BBBB");
+  const keyC = OPENAI.replace("ABCD", "CCCC");
+  for (const [old, next] of [[OPENAI, keyB], [keyB, keyC]]) {
+    const pid = server(old);
+    keys(h.keysFile, next);
+    // One moves to the new key; Two's window is still on the old one, so
+    // its server keeps running.
+    await run(one.id);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.ok(alive(pid), "the old key's server, still in use, keeps running");
+    await run(two.id);
+    await h.until(() => !alive(pid), "the old key's server ends");
+  }
+  assert.ok(alive(server(keyC)));
+  assert.equal(new Set(logins().map((c) => c.pid)).size, 3);
+});
+
+test("a turn being prepared when its key's last window closes waits for that server to exit, then runs on a new one", async (t) => {
+  const h = await harness(t, {}, false, { codex: { ignoreTerm: true } });
+  keys(h.keysFile);
+  await h.worker.start();
+  const one = h.agent("One", "edit", "gpt-5.6-sol@api-key", "codex");
+  const two = h.agent("Two", "edit", "gpt-5.6-sol@api-key", "codex");
+  await h.ready(one.id, two.id);
+  const first = h.send(one.id, "hello");
+  await h.ended(first);
+  assert.equal(h.store.turn(first)!.status, "done", h.store.turn(first)!.reason ?? "");
+  // Two's folder commit is held, so its turn is past waiting() but has no
+  // window on the server yet.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  const beforeTurn = h.worker.repos.beforeTurn.bind(h.worker.repos);
+  h.worker.repos.beforeTurn = async (...args) => {
+    if (args[0].id === two.id) await held;
+    return beforeTurn(...args);
+  };
+  const turn = h.send(two.id, "hello");
+  await h.until(() => h.store.turn(turn)!.status === "running", "Two's turn is being prepared");
+  runCommand(h.store, { action: "close", agentId: one.id });
+  // The idle server is sent TERM (which it ignores); the turn goes on.
+  await h.until(() => /^signal TERM \d+$/m.test(h.log()), "the idle server is ended");
+  release();
+  await h.ended(turn);
+  assert.equal(h.store.turn(turn)!.status, "done", h.store.turn(turn)!.reason ?? "");
+  assert.match(h.log(), /^signal KILL \d+$/m);
 });
 
 test("an API-key Codex server that does not report the API key runs no turn", async (t) => {
