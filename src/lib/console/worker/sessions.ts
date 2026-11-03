@@ -2,12 +2,13 @@ import { randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { mcpConfigPath } from "../claude-session.ts";
-import { errorMessage as message, type AgentSession, type SessionContext, type SessionEvent } from "../session.ts";
+import { errorMessage as message, guarded, type AgentSession, type SessionContext, type SessionEvent } from "../session.ts";
 import { requestGauged, requestStarted, requestUsage, type RunningUsage } from "../spend.ts";
 import { mapTaskText, type TaskOp } from "../tasks.ts";
 import type { ConsoleAgent, TurnStatus } from "../types.ts";
+import type { TurnRow } from "../store.ts";
 import type { ConsoleWorker } from "../worker.ts";
-import { SYSTEM, type ActiveTurn, type Runtime } from "./shared.ts";
+import { sessionOutdated, SYSTEM, type ActiveTurn, type Runtime } from "./shared.ts";
 import { currentStepFiles } from "../templates.ts";
 
 // Agents' folders and their client sessions: GitHub projects prepared,
@@ -106,10 +107,10 @@ export const sessions = {
   /** Start fresh: an agent whose conversation the owner cleared drops its
    * idle process or thread, so its next turn starts a new one. Its folder,
    * branch and transcript stay. */
-  freshStarts(this: ConsoleWorker): void {
+  freshStarts(this: ConsoleWorker, open: TurnRow[]): void {
     for (const rt of this.runtimes.values()) {
       if (!this.cleared(rt.agent.id) || rt.turn || rt.busy || !rt.session) continue;
-      if (this.store.openTurns().some((t) => t.agentId === rt.agent.id && t.status !== "queued")) continue;
+      if (open.some((t) => t.agentId === rt.agent.id && t.status !== "queued")) continue;
       this.sessionSaved.delete(rt.agent.id);
       this.retire(rt);
       this.safe(() =>
@@ -129,7 +130,7 @@ export const sessions = {
       const acp = [...this.runtimes.values()].filter((rt) => rt.agent.projectId === project.id && this.drivers.get(rt.agent.kind)?.sandboxed);
       const running = acp.filter((rt) => rt.turn);
       if (running.length) {
-        if (change.now) for (const rt of running) if (!rt.turn!.stopping) this.stopTurn(rt, "Stopped: the project's network setting is changing.", "stopped", false);
+        if (change.now) for (const rt of running) if (!rt.turn!.stopping) this.stopTurn(rt, "Stopped: the project's network setting is changing.", false);
         continue;
       }
       for (const rt of acp) if (rt.session && !rt.busy) this.retire(rt);
@@ -174,7 +175,7 @@ export const sessions = {
     // changed, globally or for the project) is replaced: its process holds
     // the old one.
     const credential = rt.credential ?? this.credentialFor(agent, rt.model);
-    if (rt.session && !rt.session.exited && (rt.session.stale(agent) || rt.sessionLogin !== rt.login || rt.sessionCredential !== credential.print)) this.retire(rt);
+    if (rt.session && !rt.session.exited && sessionOutdated(rt, agent, credential)) this.retire(rt);
     if (rt.session && !rt.session.exited) return rt.session;
     if (rt.session) this.revoke(rt);
     let me: AgentSession | null = null;
@@ -185,11 +186,7 @@ export const sessions = {
       emit: (event) => {
         // A replaced generation (evicted, closed) never touches the runtime.
         if (!me || rt.session !== me) return;
-        try {
-          this.sessionEvent(rt, event);
-        } catch (error) {
-          this.log(`event handling failed: ${message(error)}`);
-        }
+        guarded((line) => this.log(line), () => this.sessionEvent(rt, event));
       },
       permit: (tool, input, policy) => (me && rt.session === me ? this.permit(rt, tool, input, policy) : Promise.resolve({ allow: false, always: false, answer: null, reason: "This agent session has ended." })),
       newToken: () => this.newToken(agent.id, rt),
@@ -338,7 +335,7 @@ export const sessions = {
       case "permission":
         return t.events.emit("permission", { tool: ev.tool, decision: ev.decision, reason: ev.reason });
       case "oversize":
-        return this.stopTurn(rt, "Output limit: one line of output was too long.", "stopped", false);
+        return this.stopTurn(rt, "Output limit: one line of output was too long.", false);
     }
   },
   /** The client ended the turn. A stop that was under way decides how it

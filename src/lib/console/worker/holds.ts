@@ -138,11 +138,10 @@ export const holds = {
   /** A tab paused because nobody was lifting a hold resumes by itself once
    * no such hold is left (Lift, team_resume, the timeout); any other pause
    * stays until the owner resumes. */
-  clearHoldStalls(this: ConsoleWorker): void {
+  clearHoldStalls(this: ConsoleWorker, open: TurnRow[]): void {
     for (const tab of this.store.allTabs()) {
       if (!tab.paused || !tab.pauseReason?.startsWith(HOLD_STALL)) continue;
       const agents = this.store.agents(tab.projectId).filter((a) => a.tabId === tab.id);
-      const open = this.store.openTurns();
       if (agents.some((a) => this.heldWaiting(a, open))) continue;
       this.safe(() => this.store.liftPause(tab.id, HOLD_STALL, this.epoch!));
     }

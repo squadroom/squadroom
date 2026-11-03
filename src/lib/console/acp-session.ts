@@ -5,7 +5,7 @@ import type { SandboxSpec } from "./launcher.ts";
 import { inside, outsideStep, realInside, type Decision } from "./permissions.ts";
 import { TEAM_TOOL_NAMES } from "./team.ts";
 import { acpToolLabel } from "./transcript.ts";
-import { errorMessage as message, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
+import { errorMessage as message, guarded, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 import type { ConsoleAgent, ConsoleProject } from "./types.ts";
 
 // ACP agents behind the session seam: one agent program per window, in the
@@ -79,7 +79,7 @@ export function decideAcp(
       break;
     case "edit":
     case "delete":
-    case "move":
+    case "move": {
       if (agent.permission === "look") return { behavior: "deny", reason: "This window is Code analysis: it cannot change files." };
       if (!paths.length) return { behavior: "deny", reason: "The Console could not tell which files this changes." };
       if (paths.some((p) => !inside(agent.folder, p) || !check(agent.folder, p))) return { behavior: "deny", reason: "Writes outside this agent's own folder are not allowed." };
@@ -88,6 +88,7 @@ export function decideAcp(
       if (step) return step;
       decision = { behavior: "allow", reason: "Files in this agent's own folder." };
       break;
+    }
     case "execute":
       decision = agent.permission === "look" ? ask("A command needs the owner's approval in a Code analysis window.") : { behavior: "allow", reason: "Commands run in the sandbox." };
       break;
@@ -139,13 +140,7 @@ class AcpSession implements AgentSession {
     this.proc = new AcpProcess(host.launcher, ctx.agent.folder, host.binary(ctx.agent.kind), agentKind(ctx.agent.kind)?.acpArgs ?? ["acp"], ctx.credentials, this.spec, host.redactor);
     const kind = agentKind(ctx.agent.kind);
     driver.track(this.proc, ctx, kind?.needsNetwork && !this.spec.network ? `${kind.label} needs Network on for this project (the project's menu, Network…).` : undefined);
-    this.proc.onNotification = (method, params) => {
-      try {
-        this.onNotification(method, params);
-      } catch (error) {
-        host.log(`event handling failed: ${message(error)}`);
-      }
-    };
+    this.proc.onNotification = (method, params) => guarded(host.log, () => this.onNotification(method, params));
     // A request the Console cannot handle (its input breaks the policy's
     // reading, say) is refused, never an unhandled error in the worker.
     this.proc.onRequest = (id, method, params) =>

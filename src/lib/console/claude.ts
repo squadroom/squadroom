@@ -1,7 +1,7 @@
 import type { AgentModel, ConsoleEffort } from "./agents.ts";
 import type { Launcher } from "./launcher.ts";
 import { Redactor } from "./redact.ts";
-import { ClientProcess, count, oneLine } from "./session.ts";
+import { ClientProcess, count, isObject, oneLine, str } from "./session.ts";
 import type { TurnUsage } from "./types.ts";
 
 // The Claude Code driver: the official CLI kept running between turns,
@@ -88,20 +88,15 @@ export type ClaudeEvent =
 function resultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content))
-    return content
-      .map((c) => (c && typeof c === "object" && (c as { type?: string }).type === "text" ? String((c as { text?: unknown }).text ?? "") : `[${(c as { type?: string })?.type ?? "content"}]`))
-      .join("\n");
+    return content.map((c) => (isObject(c) && c.type === "text" ? str(c.text) : `[${(isObject(c) && str(c.type)) || "content"}]`)).join("\n");
   return "";
 }
 
 function toolResults(content: unknown[]): { id: string; text: string; error: boolean }[] {
   return content
-    .filter((c) => c && typeof c === "object" && (c as { type?: string }).type === "tool_result")
-    .map((c) => ({
-      id: String((c as { tool_use_id?: unknown }).tool_use_id ?? ""),
-      text: resultText((c as { content?: unknown }).content),
-      error: (c as { is_error?: unknown }).is_error === true,
-    }));
+    .filter(isObject)
+    .filter((c) => c.type === "tool_result")
+    .map((c) => ({ id: str(c.tool_use_id), text: resultText(c.content), error: c.is_error === true }));
 }
 
 /** Read one line of Claude Code's stream-json output. A subagent's own
@@ -115,12 +110,13 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
   // tool results only settle its task calls.
   if (typeof line.parent_tool_use_id === "string" && line.parent_tool_use_id && (type === "stream_event" || type === "assistant" || type === "user" || type === "system")) {
     const parent = line.parent_tool_use_id;
-    const content = ((line.message as { content?: unknown } | undefined)?.content ?? []) as Array<Record<string, unknown>>;
+    const content = isObject(line.message) ? (line.message.content ?? []) : [];
     if (!Array.isArray(content)) return [];
     if (type === "user") return toolResults(content).map((r) => ({ ...r, type: "helper_result" as const }));
     if (type !== "assistant") return [];
     return content
-      .filter((c) => c?.type === "tool_use")
+      .filter(isObject)
+      .filter((c) => c.type === "tool_use")
       .map((c) => ({ type: "helper_tool" as const, parent, id: String(c.id ?? ""), name: String(c.name ?? "tool"), input: c.input }));
   }
   if (type === "system") {
@@ -139,26 +135,29 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
     return [];
   }
   if (type === "stream_event") {
-    const part = line.event as { type?: string; message?: { model?: unknown }; delta?: { type?: string; text?: unknown; thinking?: unknown } } | undefined;
+    const part = isObject(line.event) ? line.event : {};
     // A top-level model request begins (the gauge's latest request).
-    if (part?.type === "message_start")
-      return part.message?.model !== undefined ? [{ type: "request_start" }, { type: "model", model: part.message.model }] : [{ type: "request_start" }];
-    if (part?.type === "content_block_delta") {
-      if (part.delta?.type === "text_delta" && typeof part.delta.text === "string") return [{ type: "delta", kind: "text", text: part.delta.text }];
-      if (part.delta?.type === "thinking_delta" && typeof part.delta.thinking === "string")
-        return [{ type: "delta", kind: "thinking", text: part.delta.thinking }];
+    if (part.type === "message_start") {
+      const model = isObject(part.message) ? part.message.model : undefined;
+      return model !== undefined ? [{ type: "request_start" }, { type: "model", model }] : [{ type: "request_start" }];
+    }
+    if (part.type === "content_block_delta" && isObject(part.delta)) {
+      const delta = part.delta;
+      if (delta.type === "text_delta" && typeof delta.text === "string") return [{ type: "delta", kind: "text", text: delta.text }];
+      if (delta.type === "thinking_delta" && typeof delta.thinking === "string") return [{ type: "delta", kind: "thinking", text: delta.thinking }];
     }
     return [];
   }
   if (type === "assistant") {
-    const message = line.message as { model?: unknown; content?: Array<Record<string, unknown>>; usage?: Record<string, unknown> } | undefined;
+    const message = isObject(line.message) ? line.message : {};
     // A client-made error wrapper is not the model speaking.
-    if (line.is_api_error_message === true || message?.model === "<synthetic>") return [];
-    const out: ClaudeEvent[] = message?.model !== undefined ? [{ type: "model", model: message.model }] : [];
+    if (line.is_api_error_message === true || message.model === "<synthetic>") return [];
+    const out: ClaudeEvent[] = message.model !== undefined ? [{ type: "model", model: message.model }] : [];
     // The request's own input (helpers' lines never reach here).
-    const used = [message?.usage?.input_tokens, message?.usage?.cache_read_input_tokens ?? 0, message?.usage?.cache_creation_input_tokens ?? 0].map(count);
+    const usage = isObject(message.usage) ? message.usage : {};
+    const used = [usage.input_tokens, usage.cache_read_input_tokens ?? 0, usage.cache_creation_input_tokens ?? 0].map(count);
     if (used.every((v) => v !== undefined)) out.push({ type: "request_usage", inputTokens: used.reduce((a, b) => a! + b!, 0)! });
-    for (const c of message?.content ?? []) {
+    for (const c of Array.isArray(message.content) ? message.content.filter(isObject) : []) {
       if (c.type === "text" && typeof c.text === "string") out.push({ type: "message", kind: "text", text: c.text });
       if (c.type === "thinking" && typeof c.thinking === "string") out.push({ type: "message", kind: "thinking", text: c.thinking });
       if (c.type === "tool_use") out.push({ type: "tool", id: String(c.id ?? ""), name: String(c.name ?? "tool"), input: c.input });
@@ -166,7 +165,7 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
     return out;
   }
   if (type === "user") {
-    const content = (line.message as { content?: unknown } | undefined)?.content;
+    const content = isObject(line.message) ? line.message.content : undefined;
     if (!Array.isArray(content)) return [];
     return toolResults(content).map((r) => ({ ...r, type: "tool_result" as const }));
   }

@@ -261,3 +261,37 @@ test("the line reader: a line over the limit is dropped and reported, and every 
   assert.deepEqual(got, [1, 2, 3, 4]);
   assert.equal(oversize, 2);
 });
+
+test("terminate after close keeps the one ending: one TERM, one KILL a grace period later, counted once", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { ClientProcess, OwnProcessDriver } = await import("../src/lib/console/session.ts");
+  const signals: string[] = [];
+  let now = 0;
+  const host = { launcher: { signal: async (signal: string) => (signals.push(signal), true) }, now: () => now, graceMs: 1_000, log: () => {} };
+  class Driver extends OwnProcessDriver {
+    readonly label = "Test";
+  }
+  class Proc extends ClientProcess {
+    protected received() {}
+  }
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: Object.assign(new EventEmitter(), { writable: true }), pid: 7 });
+  const driver = new Driver(host as never);
+  const proc = new Proc(child as never, "/w", "Test");
+  driver.retire(proc);
+  const contained = driver.terminate(proc);
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(signals, ["TERM"]);
+  assert.equal(driver.endings.size, 1);
+  assert.equal(driver.retiring(), 1);
+  now = 1_000;
+  driver.tick();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(signals, ["TERM", "KILL"]);
+  child.emit("close", null, "SIGKILL");
+  driver.tick();
+  assert.deepEqual(await contained, { contained: true, collateral: [] });
+  assert.equal(driver.retiring(), 0);
+  // An exited process is contained at once, with nothing sent.
+  assert.deepEqual(await driver.terminate(proc), { contained: true, collateral: [] });
+  assert.deepEqual(signals, ["TERM", "KILL"]);
+});

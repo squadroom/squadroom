@@ -1,6 +1,7 @@
 import type { Launcher } from "./launcher.ts";
 import { Redactor } from "./redact.ts";
-import { count, isObject, oneLine as shorten, RpcProcess, str } from "./session.ts";
+import { count, isObject, oneLine as shorten, RpcProcess, str, type LateReply } from "./session.ts";
+export type { LateReply } from "./session.ts";
 import { codexPlanOp, type TaskOp } from "./tasks.ts";
 
 // The Codex driver: one `codex app-server` per login, run as
@@ -37,8 +38,6 @@ export type CodexEvent =
   /** The thread's whole plan (task list). */
   | { type: "plan"; turnId: string; op: TaskOp }
   | { type: "error"; text: string }
-  /** The server began a turn on the thread (its id). */
-  | { type: "started"; turnId: string }
   | { type: "completed"; turnId: string; status: string; error: string | null };
 
 /** The kinds of file change Codex 0.155.1 reports (`PatchChangeKind`). */
@@ -145,10 +144,6 @@ export function readCodexNotification(method: string, params: Record<string, unk
       const op = codexPlanOp(params.plan);
       return op ? [{ type: "plan", turnId: str(params.turnId), op }] : [];
     }
-    case "turn/started": {
-      const turn = (params.turn ?? {}) as { id?: unknown };
-      return [{ type: "started", turnId: str(turn.id) }];
-    }
     case "model/rerouted":
       return [{ type: "rerouted", model: params.toModel ?? params.model }];
     case "error": {
@@ -169,9 +164,6 @@ export function readCodexNotification(method: string, params: Record<string, unk
  * timeout, after which the server may well have accepted the request and
  * be acting on it. */
 export type CodexOutcome = "refused" | "ended" | "unknown";
-/** A reply that came after its call's timeout: the result, or the
- * refusal (then nothing was accepted after all). */
-export type LateReply = (reply: { result: Record<string, unknown> } | { refused: string }) => void;
 export class CodexError extends Error {
   readonly outcome: CodexOutcome;
   constructor(message: string, outcome: CodexOutcome = "refused") {
@@ -183,12 +175,6 @@ export class CodexError extends Error {
 
 /** One App Server process and its JSON-RPC traffic. */
 export class CodexServer extends RpcProcess {
-  private nextId = 1;
-  private calls = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  /** Calls that timed out whose caller still wants the reply, should it
-   * come (an accepted turn/start): the reply is handed on once, a result
-   * or a refusal. */
-  private late = new Map<number, LateReply>();
   // Its notifications carry `threadId`; its requests are approvals and
   // elicitations.
   private redactor: Redactor;
@@ -201,54 +187,21 @@ export class CodexServer extends RpcProcess {
     this.redactor = redactor;
     this.apiKey = apiKey;
   }
-  protected ended() {
-    for (const call of this.calls.values()) {
-      clearTimeout(call.timer);
-      call.reject(new CodexError("The Codex server ended.", "ended"));
-    }
-    this.calls.clear();
-    this.late.clear();
+  protected gone() {
+    return new CodexError("The Codex server ended.", "ended");
   }
-  protected reply(message: Record<string, unknown>) {
-    const id = message.id;
-    const call = typeof id === "number" ? this.calls.get(id) : undefined;
-    if (!call) {
-      // A reply after its call timed out goes to the caller that asked for
-      // it: an error reply means nothing was accepted after all.
-      const late = typeof id === "number" ? this.late.get(id) : undefined;
-      if (late) {
-        this.late.delete(id as number);
-        if (message.error) late({ refused: `Codex refused: ${shorten(this.redactor, str((message.error as { message?: unknown }).message) || "an error")}` });
-        else late({ result: (message.result ?? {}) as Record<string, unknown> });
-      }
-      return;
-    }
-    this.calls.delete(id as number);
-    clearTimeout(call.timer);
-    if (message.error) {
-      const error = message.error as { message?: unknown };
-      call.reject(new CodexError(`Codex refused: ${shorten(this.redactor, str(error.message) || "an error")}`));
-    } else call.resolve((message.result ?? {}) as Record<string, unknown>);
+  protected timedOut(method: string) {
+    return new CodexError(`Codex did not answer ${method} in time.`, "unknown");
+  }
+  protected refusal(message: Record<string, unknown>) {
+    if (!message.error) return null;
+    return new CodexError(`Codex refused: ${shorten(this.redactor, str((message.error as { message?: unknown }).message) || "an error")}`);
   }
   /** One request. A timeout rejects with outcome `unknown`: the server may
    * have accepted it. `late` then receives the reply if it still arrives:
    * the result, or the refusal (nothing was accepted). */
   call(method: string, params: unknown, timeoutMs = 60_000, late?: LateReply): Promise<Record<string, unknown>> {
-    if (this.exited) return Promise.reject(new CodexError("The Codex server ended.", "ended"));
-    const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.calls.delete(id);
-        if (late && !this.exited) this.late.set(id, late);
-        reject(new CodexError(`Codex did not answer ${method} in time.`, "unknown"));
-      }, timeoutMs);
-      this.calls.set(id, { resolve, reject, timer });
-      this.send({ id, method, params });
-    });
-  }
-  /** The caller no longer wants a late reply. */
-  forget(late: LateReply) {
-    for (const [id, fn] of this.late) if (fn === late) this.late.delete(id);
+    return this.request(method, params, { timeoutMs, late });
   }
 
   /** Initialize and check the login, with no switch either way: a

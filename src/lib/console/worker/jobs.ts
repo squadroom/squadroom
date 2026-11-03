@@ -6,7 +6,7 @@ import { runCleanup, scanCleanup, type CleanupOptions } from "../cleanup.ts";
 import { probeConnection } from "../connections.ts";
 import { loadCredentials } from "../redact.ts";
 import { errorMessage as message } from "../session.ts";
-import type { ConsoleStore } from "../store.ts";
+import type { ConsoleStore, TurnRow } from "../store.ts";
 import type { ConsoleWorker } from "../worker.ts";
 
 // The owner's jobs outside a turn: Push branch, the key file, connection
@@ -27,11 +27,11 @@ function one<J>(w: ConsoleWorker, flag: "pushing" | "checking" | "cleaning", cla
 
 export const jobs = {
   /** Push branch: one at a time, never while its agent works. */
-  runJobs(this: ConsoleWorker): void {
+  runJobs(this: ConsoleWorker, open: TurnRow[]): void {
     // A push waits while its agent works (team_push asks during a turn).
     const working = () => [
       ...[...this.runtimes.values()].filter((rt) => rt.turn || rt.busy).map((rt) => rt.agent.id),
-      ...this.store.openTurns().filter((t) => t.status !== "queued").map((t) => t.agentId),
+      ...open.filter((t) => t.status !== "queued").map((t) => t.agentId),
     ];
     one(this, "pushing", (epoch) => this.store.claimJob(epoch, working()), (job, epoch) => (async () => {
       const agent = this.store.agent(job.agentId);

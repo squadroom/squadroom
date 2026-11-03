@@ -23,11 +23,17 @@ import type { Runtime } from "./shared.ts";
 const WAIT_MS = 4 * 60_000;
 const POLL_MS = 2_000;
 
-/** Wait `ms`, or less when `signal` aborts. */
-const pause = (ms: number, signal: AbortSignal) =>
+/** Wait `ms`, or less when `signal` aborts. The abort listener goes when
+ * the wait ends either way, so many polls never pile listeners up. */
+export const pause = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
   });
 /** A call whose charge is already settled; its message says how. */
 class Settled extends ImageError {}

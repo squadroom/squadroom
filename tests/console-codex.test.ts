@@ -337,3 +337,22 @@ test("a Codex line over the output limit: the running turn stops, the server is 
   const starts = readFileSync(join(h.agentHome, "codex-starts.jsonl"), "utf8").trim().split("\n");
   assert.equal(starts.length, 2, "a new server for the next turn");
 });
+
+test("an API-key Codex turn waits only for its own key's server, and for a folder being made", async () => {
+  const { agentKind } = await import("../src/lib/console/agents.ts");
+  const { CodexDriver } = await import("../src/lib/console/codex-session.ts");
+  const { fingerprint } = await import("../src/lib/console/spend.ts");
+  const model = agentKind("codex")!.models.find((m) => m.paid)!;
+  const name = model.paid!.credential;
+  let creating = false;
+  const driver = new CodexDriver({ creatingFolders: () => creating, flag: () => null } as never, { stopGraceMs: 1_000 });
+  const agent = { id: "a", kind: "codex", model: model.id, projectId: "p", folder: "/w/a" } as never;
+  // A window on key A: its server is still exiting after being retired.
+  driver.open({ agent, model, credentials: { [name]: "key-a" } } as never);
+  const keyed = (driver as unknown as { keyed: Map<string, { retired: Set<unknown> }> }).keyed.get(fingerprint("key-a"))!;
+  keyed.retired.add({ proc: { exited: false } });
+  assert.equal(driver.waiting(agent, { [name]: "key-a" }), true);
+  assert.equal(driver.waiting(agent, { [name]: "key-b" }), false);
+  creating = true;
+  assert.equal(driver.waiting(agent, { [name]: "key-b" }), true);
+});
