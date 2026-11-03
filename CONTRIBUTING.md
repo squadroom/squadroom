@@ -9,7 +9,8 @@ Squadroom is a small project. Issues and pull requests are welcome.
 2. **Open a pull request** against `main`. Describe what changed, why, and
    how you tested it.
 3. **Checks must pass.** CI runs the four checks below on every pull
-   request.
+   request, and a `macos` job that runs the launcher, sandbox and setup
+   tests (`npm run test:macos`).
 4. **Maintainer review is required.** `main` is protected: every pull
    request needs an approving review from the maintainer (see
    [`.github/CODEOWNERS`](.github/CODEOWNERS)) before it is merged.
@@ -27,6 +28,8 @@ npm test
 npm run build
 ```
 
+On a Mac, also run `npm run test:macos` (CI's `macos` job).
+
 - **Tests stay pure**: no network, no DOM, no real agent clients, no `sudo`.
   Put testable logic in `src/lib/*` and keep components and routes as glue.
   The tests use fakes in `tests/helpers/` (a fake Claude Code, Codex and ACP
@@ -38,6 +41,7 @@ npm run build
   serially before investigating:
   `node --test --test-concurrency=1 tests/<file>.test.ts`.
 - Some launcher tests use macOS's `sandbox-exec` and are skipped elsewhere.
+  `npm run test:macos` runs them, and in CI's `macos` job none may skip.
 
 ## Guidelines
 
