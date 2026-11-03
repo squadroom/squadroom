@@ -1,5 +1,6 @@
 import { readRunning, type BilledModel, type RunningUsage } from "../spend.ts";
 import type { ConsoleAgent, EventBody, EventKind, TurnStatus, TurnUsage } from "../types.ts";
+import type { SessionTotals } from "../session.ts";
 import type { ConsoleStore } from "../store.ts";
 import { OPEN } from "./rows.ts";
 import { SUMMARY_MAX } from "./turns.ts";
@@ -43,7 +44,10 @@ export const lifecycle = {
     }, epoch);
   },
   /** End a turn. Its delivered messages settle with it: done, with each
-   * unanswered ask answered by `finalText`; otherwise interrupted. */
+   * unanswered ask answered by `finalText`; otherwise interrupted.
+   * `totals`, its client's running usage totals, are kept only with its
+   * charge, in this transaction: totals saved without the charge would let
+   * the next turn be charged less than it used. */
   finishTurn(
     this: ConsoleStore,
     epoch: number,
@@ -53,6 +57,7 @@ export const lifecycle = {
     usage?: TurnUsage | null,
     finalText: string | null = null,
     charge: Charge | null = null,
+    totals: SessionTotals | null = null,
   ): boolean {
     return this.transaction(() => {
       const now = this.now();
@@ -67,6 +72,11 @@ export const lifecycle = {
         // offsets match what was delivered.
         this.run("UPDATE console_turns SET ended_seq = ?, final_text = ? WHERE id = ?", seq, finalText?.trim() || null, turnId);
         if (charge?.hold) this.holdForUsage(agent.tabId, charge.hold);
+        if (charge && totals)
+          this.run(
+            "INSERT INTO console_session_totals (agent_id, session_id, totals) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET session_id = excluded.session_id, totals = excluded.totals",
+            agent.id, totals.sessionId, JSON.stringify(totals.value),
+          );
         this.settle(turnId, status, finalText, now);
         const summary = !!this.turn(turnId)?.summary;
         // A summary is the agent's own handoff, never routed.

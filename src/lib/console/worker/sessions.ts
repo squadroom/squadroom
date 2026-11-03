@@ -193,6 +193,7 @@ export const sessions = {
       permit: (tool, input, policy) => (me && rt.session === me ? this.permit(rt, tool, input, policy) : Promise.resolve({ allow: false, always: false, answer: null, reason: "This agent session has ended." })),
       newToken: () => this.newToken(agent.id, rt),
       storedSession: () => this.store.session(agent.id),
+      storedTotals: (sessionId) => this.store.sessionTotals(agent.id, sessionId),
       documentsOnly: !!this.store.tabSteps(agent.tabId),
       stepFiles: () => currentStepFiles(this.store.tabSteps(agent.tabId)),
       system: () => {
@@ -359,7 +360,7 @@ export const sessions = {
     // turn's. Ended any other way, a request may have been under way that
     // the usage does not cover, so the allowance is added for it, unless
     // the provider turned the prompt away before any model ran.
-    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" || !!ev.nothingRan });
+    return this.finish(rt, status, reason, { usage: ev.usage, completed: ev.outcome === "done" || !!ev.nothingRan, totals: ev.totals });
   },
   /** What the turn's client has reported so far; a paid turn's is kept
    * with it, so a restart charges it from that. */

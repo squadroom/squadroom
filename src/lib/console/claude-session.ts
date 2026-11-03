@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { agentKind, reportsExpectedModel, type AgentModel } from "./agents.ts";
 import { claudeArgs, ClaudeProcess, PERMISSION_TOOL, toolSummary, type ClaudeEvent } from "./claude.ts";
 import { claudeSettings, decideControl } from "./permissions.ts";
-import { errorMessage, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
+import { errorMessage, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type SessionTotals, type TurnRequest } from "./session.ts";
 import { claudeTaskOp, unfollowable } from "./tasks.ts";
 import type { ConsoleAgent, TurnUsage } from "./types.ts";
 
@@ -35,9 +35,10 @@ export type ModelPart = { model: string; usage: TurnUsage; webSearches: number |
  * running total for the session: each result carries every earlier turn
  * too, and a resumed session's first result already carries the turns
  * before the restart. So a turn is the latest totals less the last result's
- * (`before`). Null when that cannot be read: there is no earlier result to
- * subtract (a session resumed by a worker that never saw its totals), a
- * figure is missing, or a total went down (a zeroed or reset report). A
+ * (`before`): this worker's, or after a restart the totals the store kept
+ * with the session's last charged turn. Null when that cannot be read:
+ * there is no earlier result to subtract (no charged turn kept its totals),
+ * a figure is missing, or a total went down (a zeroed or reset report). A
  * model that did not move this turn is left out.
  */
 export function turnModelUsage(now: ModelPart[], before: ModelPart[] | null): ModelPart[] | null {
@@ -99,6 +100,24 @@ export function apiKeyTurnUsage(model: AgentModel, now: ModelPart[], before: Mod
   return apiKeyUsage(model, parts);
 }
 
+/** Totals the store kept (`storedTotals`), or null when they do not read
+ * as a list of models with numeric figures. */
+export function readTotals(value: unknown): ModelPart[] | null {
+  if (!Array.isArray(value)) return null;
+  const num = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
+  const ok = value.every(
+    (p: unknown) =>
+      !!p &&
+      typeof p === "object" &&
+      typeof (p as ModelPart).model === "string" &&
+      !!(p as ModelPart).usage &&
+      typeof (p as ModelPart).usage === "object" &&
+      Object.values((p as ModelPart).usage).every(num) &&
+      num((p as ModelPart).webSearches),
+  );
+  return ok ? (value as ModelPart[]) : null;
+}
+
 class ClaudeSession implements AgentSession {
   private proc: ClaudeProcess;
   private ctx: SessionContext;
@@ -111,9 +130,12 @@ class ClaudeSession implements AgentSession {
   private topModel: string | undefined;
   private taskCalls = new Set<string>();
   /** The last result's running totals in this process (`modelUsage`);
-   * null until one is seen for a resumed session whose totals this worker
-   * does not know. */
+   * null until one is seen for a resumed session whose totals neither this
+   * worker nor the store knows. */
   private totals: ModelPart[] | null;
+  /** The latest result's totals when they moved, for the store to keep
+   * with this turn's charge. */
+  private moved: SessionTotals | undefined;
 
   constructor(driver: ClaudeDriver, ctx: SessionContext) {
     this.driver = driver;
@@ -127,7 +149,7 @@ class ClaudeSession implements AgentSession {
     chmodSync(temp, 0o640);
     renameSync(temp, config);
     const resume = ctx.storedSession();
-    this.totals = resume ? (driver.totals.get(resume) ?? null) : [];
+    this.totals = resume ? (driver.totals.get(resume) ?? readTotals(ctx.storedTotals(resume))) : [];
     const args = claudeArgs({
       model,
       effort: agent.effort,
@@ -295,22 +317,29 @@ class ClaudeSession implements AgentSession {
           error: ev.ok ? null : `Claude Code reported ${ev.subtype}${ev.text ? `: ${ev.text}` : ""}`,
           text: ev.ok ? ev.text : undefined,
           usage: charged,
+          // Only an API-key turn is charged from the totals.
+          totals: ctx.model.paid ? this.moved : undefined,
         });
       }
     }
   }
   /** A result's usage: an API-key turn's from every model's usage this
    * turn (its share of the running totals, which are kept for the next
-   * result and for a resume of this session by this worker). */
+   * result, for a resume of this session by this worker, and with the
+   * turn's charge for a resume after a restart). */
   private turnUsage(ev: Extract<ClaudeEvent, { type: "result" }>): TurnUsage | null {
     const before = this.totals;
+    this.moved = undefined;
     // A zeroed report (a crash or startup-error result may carry one, or a
     // result without `modelUsage`) is not a new starting point: the totals
     // it came after still are.
     const zeroed = ev.models.every((p) => !p.webSearches && !p.usage.inputTokens && !p.usage.outputTokens && !p.usage.cacheReadTokens && !p.usage.cacheWriteTokens);
     if (!zeroed) {
       this.totals = ev.models;
-      if (ev.sessionId) this.driver.totals.set(ev.sessionId, ev.models);
+      if (ev.sessionId) {
+        this.driver.totals.set(ev.sessionId, ev.models);
+        this.moved = { sessionId: ev.sessionId, value: ev.models };
+      }
     }
     return this.ctx.model.paid ? apiKeyTurnUsage(this.ctx.model, ev.models, before) : ev.usage;
   }
