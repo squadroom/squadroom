@@ -188,9 +188,17 @@ class ClaudeSession implements AgentSession {
     if (ev.type === "control") {
       // Answered even between turns, so the client never waits on us.
       if (ev.subtype !== "can_use_tool") return this.proc.refuse(ev.requestId, "Not handled by the Console.");
-      void ctx.permit(ev.tool, ev.input, decideControl(ev.tool, ev.input)).then((answer) =>
-        this.proc.answer(ev.requestId, answer.allow ? "allow" : "deny", answer.reason, ev.input),
-      );
+      // A failure while deciding (the policy reading the input, or the
+      // store) is a deny, never an unhandled error in the worker.
+      void Promise.resolve()
+        .then(() => ctx.permit(ev.tool, ev.input, decideControl(ev.tool, ev.input)))
+        .then(
+          (answer) => this.proc.answer(ev.requestId, answer.allow ? "allow" : "deny", answer.reason, ev.input),
+          (error: unknown) => {
+            this.driver.host.log(`Claude permission request failed: ${errorMessage(error)}`);
+            this.proc.answer(ev.requestId, "deny", "The Console could not answer.", ev.input);
+          },
+        );
       return;
     }
     // Every result moves the running totals, a discarded turn's too.
