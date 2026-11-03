@@ -210,7 +210,7 @@ export class ConsoleWorker {
       setFlag: (key, value) => void this.safe(() => this.store.setFlag(this.epoch!, key, value)),
       realInside: options.realInside ?? realInside,
       folders: () => this.allFolders(),
-      codexDenied: (agent) => this.codexDenied(agent),
+      deniedFolders: (agent) => this.deniedFolders(agent),
       // In a project: a folder being made, or an agent waiting for one (its
       // project's ACP sessions are retired first, and none starts meanwhile).
       creatingFolders: (projectId) =>
