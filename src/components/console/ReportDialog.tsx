@@ -12,8 +12,8 @@ export default function ReportDialog({ tabId, onClose }: { tabId: string; onClos
   const [failed, setFailed] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    api(undefined, `?report=${encodeURIComponent(tabId)}`)
-      .then((data: { markdown: string; name: string }) => live && setReport(data))
+    api<{ markdown: string; name: string }>(undefined, `?report=${encodeURIComponent(tabId)}`)
+      .then((data) => live && setReport(data))
       .catch((e: Error) => live && setFailed(e.message));
     return () => {
       live = false;

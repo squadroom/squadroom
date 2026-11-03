@@ -355,9 +355,9 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
   };
 }
 
-/** One agent's changes view: each turn's commit (without its patch, which
- * the dialog asks for when it is opened), the branch against its base, and
- * its latest push. */
+/** One agent's changes view: each turn's commit and the branch against its
+ * base (without their patches, which the dialog asks for when one is
+ * opened), and its latest push. */
 export function changesView(store: ConsoleStore, agentId: string) {
   const agent = store.agent(agentId);
   if (!agent) return null;
@@ -371,12 +371,18 @@ export function changesView(store: ConsoleStore, agentId: string) {
     branch: store.agentBase(agentId).branch,
     folder: agent.folder,
     commits: store.commits(agentId),
-    diff,
+    diff: diff && { base: diff.base, head: diff.head, stat: diff.stat, files: diff.files, updatedAt: diff.updatedAt },
     push: store.latestJob(agentId) ?? null,
     // The approve gate: its approval, and the tab's Look only agents with
     // whether each has reviewed the current head.
     approval: approvalView(store, agent, diff),
   };
+}
+
+/** The branch's whole patch in the changes view, asked for when it is
+ * opened: "" before the agent has changed anything. */
+export function branchPatchView(store: ConsoleStore, agentId: string): { patch: string } | null {
+  return store.agent(agentId) ? { patch: store.diff(agentId)?.patch ?? "" } : null;
 }
 
 /** One commit's patch in the changes view, asked for when it is opened. */

@@ -26,12 +26,15 @@ export async function signInAction(body: Record<string, unknown>, failed = "The 
 }
 
 export default function FreshCode({
+  ref,
   done,
   title,
   text,
   className,
   sendOnOpen = false,
 }: {
+  /** The dialog's box, for the page's focus handling. */
+  ref?: React.Ref<HTMLDivElement>;
   done: (confirmed: boolean) => void;
   title: string;
   text: string;
@@ -68,7 +71,7 @@ export default function FreshCode({
       .catch((e: unknown) => setError((e as Error).message));
   }, [sendOnOpen]);
   return (
-    <div className={className} role="dialog" aria-modal="true" aria-labelledby="fresh-code-title">
+    <div ref={ref} tabIndex={-1} className={className} role="dialog" aria-modal="true" aria-labelledby="fresh-code-title">
       <h2 id="fresh-code-title">{title}</h2>
       <p>{text}</p>
       {error && <p role="alert">{error}</p>}

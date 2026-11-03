@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { ExtraProps } from "react-markdown";
-import { CheckIcon, CopyIcon } from "./Icons";
+import Icon from "./Icon";
 
 // Fenced code block with an always-visible copy button (phone-first: there
 // is no hover). react-markdown renders every <pre> through this component;
@@ -27,20 +27,12 @@ export default function CodeBlock(props: React.HTMLAttributes<HTMLPreElement> & 
     }
   }
 
+  // Placed in markdown.css; its colours are the page's button colours.
   return (
-    <div className="relative">
+    <div className="code-block">
       <pre ref={preRef} {...preProps} />
-      <button
-        type="button"
-        onClick={copy}
-        aria-label="Copy code"
-        className="absolute right-2 top-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white/90 px-2.5 text-[11px] font-medium text-zinc-600 shadow-sm backdrop-blur hover:bg-white dark:border-zinc-700 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:bg-zinc-900"
-      >
-        {copied ? (
-          <CheckIcon className="h-3.5 w-3.5 text-emerald-600" />
-        ) : (
-          <CopyIcon className="h-3.5 w-3.5" />
-        )}
+      <button type="button" onClick={copy} aria-label="Copy code" className="code-copy" data-copied={copied || undefined}>
+        <Icon name={copied ? "check" : "copy"} size={14} />
         <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
       </button>
     </div>

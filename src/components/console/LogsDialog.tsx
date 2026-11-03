@@ -13,7 +13,7 @@ export default function LogsDialog() {
   const [filter, setFilter] = useState("");
   const load = useCallback(async () => {
     try {
-      setEntries(((await api(undefined, "?logs=1")) as { entries: LogEntry[] }).entries);
+      setEntries((await api<{ entries: LogEntry[] }>(undefined, "?logs=1")).entries);
       setStatus("");
     } catch (e) {
       setStatus((e as Error).message);

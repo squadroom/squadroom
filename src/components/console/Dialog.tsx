@@ -1,4 +1,4 @@
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import { useDialogFocus } from "./useDialogFocus";
 import styles from "./console.module.css";
 

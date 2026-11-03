@@ -1,6 +1,6 @@
-// The Console's line icons: 24×24 strokes in the text colour,
-// drawn inline so the page loads no icon library. Decorative: the control
-// that holds one carries the accessible name.
+// The line icons: 24×24 strokes in the text colour, drawn inline so the
+// page loads no icon library. Decorative: the control that holds one
+// carries the accessible name.
 
 const PATHS = {
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35",
@@ -23,6 +23,8 @@ const PATHS = {
   agent: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z",
   sidebar: "M3 4h18v16H3zM9 4v16",
   check: "M20 6L9 17l-5-5",
+  /* Two sheets: a code block's Copy. */
+  copy: "M10 8h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2",
   /* Nothing: keeps a menu's labels in line beside a ✓. */
   blank: "",
   external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",

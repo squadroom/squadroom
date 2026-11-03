@@ -13,6 +13,17 @@ import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleEvent, type ConsoleProjec
 export const needCount = (n: NeedsLike) =>
   n.requests.length + n.interrupted.length + (n.messages?.length ?? 0) + (n.paused?.length ?? 0) + (n.notices?.length ?? 0);
 
+/** A Needs you request's stored input, laid out to read: indented when it
+ * is whole JSON (so text inside it keeps its `\n` marks), otherwise as
+ * stored (a cut one ends with how much was left out). */
+export function wholeInput(input: string): string {
+  try {
+    return JSON.stringify(JSON.parse(input), null, 2);
+  } catch {
+    return input;
+  }
+}
+
 /** "1 agent", "2 agents". */
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

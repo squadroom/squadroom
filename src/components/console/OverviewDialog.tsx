@@ -16,7 +16,7 @@ export default function OverviewDialog({ onShow, run }: { onShow: (agentId: stri
   const [status, setStatus] = useState("Loading…");
   const load = useCallback(async () => {
     try {
-      setView({ ...((await api(undefined, "?overview=1")) as Overview), readAt: Date.now() });
+      setView({ ...(await api<Overview>(undefined, "?overview=1")), readAt: Date.now() });
       setStatus("");
     } catch (e) {
       setStatus((e as Error).message);

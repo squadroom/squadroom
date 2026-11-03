@@ -1,9 +1,10 @@
-import { useCallback, useState, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useState, type SyntheticEvent } from "react";
 import type { changesView } from "@/lib/console/views";
 import { nextPolled, type Polled } from "@/lib/console/polled";
 import { approvalLine } from "@/lib/console/ui";
 import { api, usePolled, type Run } from "./api";
 import Dialog from "./Dialog";
+import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
 /** Changed files (exact names from Git), each opening the file panel. */
@@ -20,7 +21,8 @@ function StatFiles({ files, onOpenFile }: { files: string[]; onOpenFile: (path: 
   );
 }
 
-type Commit = NonNullable<ReturnType<typeof changesView>>["commits"][number];
+type Changes = NonNullable<ReturnType<typeof changesView>>;
+type Commit = Changes["commits"][number];
 
 /** One turn's commit: its patch is asked for once, when it is first opened,
  * so the 3-second poll carries the list only. */
@@ -31,8 +33,8 @@ function CommitDetails({ agentId, commit }: { agentId: string; commit: Commit })
   const open = (e: SyntheticEvent<HTMLDetailsElement>) => {
     if (!e.currentTarget.open || asked) return;
     setAsked(true);
-    void api(undefined, `?changes=${encodeURIComponent(agentId)}&commit=${commit.id}`)
-      .then((data: { patch: string }) => setPatch(data.patch))
+    void api<{ patch: string }>(undefined, `?changes=${encodeURIComponent(agentId)}&commit=${commit.id}`)
+      .then((data) => setPatch(data.patch))
       .catch((error: Error) => {
         setFailed(error.message);
         setAsked(false);
@@ -49,7 +51,36 @@ function CommitDetails({ agentId, commit }: { agentId: string; commit: Commit })
   );
 }
 
-type Approval = NonNullable<ReturnType<typeof changesView>>["approval"];
+/** The branch against its base: its patch is asked for while it is open,
+ * again whenever the branch changes, so the poll carries the stat only. */
+function BranchDetails({ agentId, diff }: { agentId: string; diff: NonNullable<Changes["diff"]> }) {
+  const [open, setOpen] = useState(false);
+  const [patch, setPatch] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    api<{ patch: string }>(undefined, `?changes=${encodeURIComponent(agentId)}&branch=1`)
+      .then((data) => {
+        if (!live) return;
+        setPatch(data.patch);
+        setFailed(null);
+      })
+      .catch((e: Error) => live && setFailed(e.message));
+    return () => {
+      live = false;
+    };
+  }, [open, agentId, diff.updatedAt]);
+  return (
+    <details className={styles.tool} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>{diff.stat.split("\n").at(-1)}</summary>
+      <pre>{diff.stat}</pre>
+      {failed ? <p className={styles.errorLine}>{failed}</p> : <pre>{patch ?? "Loading…"}</pre>}
+    </details>
+  );
+}
+
+type Approval = Changes["approval"];
 
 /** The approve gate: approve the branch's current commit, optionally only
  * after a Look only teammate reviewed it; a later commit cancels the approval. */
@@ -90,14 +121,14 @@ function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Ap
  * produced as the agent user with Git's hooks off. An editing agent in a
  * GitHub project also gets Push branch and Open pull request. */
 export default function ChangesView({ agentId, onClose, run, onOpenFile }: { agentId: string; onClose: () => void; run: Run; onOpenFile: (path: string) => void }) {
-  const [polled, setPolled] = useState<Polled<NonNullable<ReturnType<typeof changesView>>> | null>(null);
+  const [polled, setPolled] = useState<Polled<Changes> | null>(null);
   const changes = polled?.value ?? null;
   const [failed, setFailed] = useState<string | null>(null);
   // A later answer clears an earlier error; an unchanged one is not drawn
   // again.
   const load = useCallback(
     () =>
-      void api(undefined, `?changes=${encodeURIComponent(agentId)}`)
+      api<Changes>(undefined, `?changes=${encodeURIComponent(agentId)}`)
         .then((data) => {
           setFailed(null);
           setPolled((last) => nextPolled(last, data));
@@ -107,6 +138,13 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
   );
   usePolled(load, 3_000);
   const pushing = changes?.push?.state === "queued" || changes?.push?.state === "running";
+  // Push and Open pull request: one at a time, so a double click queues one,
+  // and busy until the list read after it shows the push.
+  const { busy, guard } = useBusy();
+  const push = (body: Parameters<Run>[0]) =>
+    guard(async () => {
+      if (await run(body)) await load();
+    });
   return (
     <Dialog title="Changes" onClose={onClose}>
       {failed && <p className={styles.errorLine}>{failed}</p>}
@@ -121,16 +159,16 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
             <div className={styles.pushRow}>
               <button
                 className={styles.primary}
-                disabled={pushing}
+                disabled={pushing || busy}
                 title="The agent writes the pull request's title and description, then the Console pushes the branch, opens the pull request (and asks Codex to review it, when Codex reviews are on)"
-                onClick={() => void run({ action: "openPullRequest", agentId })}
+                onClick={() => push({ action: "openPullRequest", agentId })}
               >
                 Open pull request
               </button>
               <button
-                disabled={pushing}
+                disabled={pushing || busy}
                 title="Push now; the pull request is opened (or updated) from the agent's latest report, and Codex is asked to review when Codex reviews are on"
-                onClick={() => void run({ action: "push", agentId })}
+                onClick={() => push({ action: "push", agentId })}
               >
                 {pushing ? "Pushing…" : "Push branch"}
               </button>
@@ -147,11 +185,7 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
           <h3 className={styles.subhead}>All changes{changes.baseBranch && changes.source === "github" ? ` against ${changes.baseBranch}` : ""}</h3>
           {changes.diff && <StatFiles files={changes.diff.files ?? []} onOpenFile={onOpenFile} />}
           {changes.diff?.stat ? (
-            <details className={styles.tool}>
-              <summary>{changes.diff.stat.split("\n").at(-1)}</summary>
-              <pre>{changes.diff.stat}</pre>
-              <pre>{changes.diff.patch}</pre>
-            </details>
+            <BranchDetails agentId={agentId} diff={changes.diff} />
           ) : (
             <p className={styles.hint}>No changes yet.</p>
           )}

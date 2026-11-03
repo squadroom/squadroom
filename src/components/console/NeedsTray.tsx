@@ -2,9 +2,9 @@ import type { ConsoleCommand } from "@/lib/console/commands";
 import { useState } from "react";
 import type { needsView } from "@/lib/console/views";
 import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleProject } from "@/lib/console/types";
-import { needCount } from "@/lib/console/ui";
+import { needCount, wholeInput } from "@/lib/console/ui";
 import type { Run } from "./api";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import { SpendLimit } from "./Settings";
 import styles from "./console.module.css";
 
@@ -166,15 +166,4 @@ export default function NeedsTray({
       ))}
     </aside>
   );
-}
-
-/** A request's stored input, laid out to read: indented when it is whole
- * JSON (so text inside it keeps its `\n` marks), otherwise as stored (a cut
- * one ends with how much was left out). */
-function wholeInput(input: string): string {
-  try {
-    return JSON.stringify(JSON.parse(input), null, 2);
-  } catch {
-    return input;
-  }
 }

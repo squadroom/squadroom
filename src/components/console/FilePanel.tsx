@@ -4,7 +4,7 @@ import type { FileView } from "@/lib/console/agent-files";
 import { fileKind, formatSize, resolveFromDocument } from "@/lib/console/files";
 import { fence, fileLinks } from "@/lib/console/ui";
 import { api, awaitJob } from "./api";
-import Icon from "./Icon";
+import Icon from "@/components/shared/Icon";
 import { useFocusReturn } from "./useDialogFocus";
 import styles from "./console.module.css";
 
@@ -24,10 +24,10 @@ export default function FilePanel(props: { agentId: string; path: string; helper
     let alive = true;
     void (async () => {
       try {
-        const { readId } = await api(helperId !== undefined ? { action: "readHelper", agentId, helperId } : { action: "readFile", agentId, path });
+        const { readId } = await api<{ readId: number }>(helperId !== undefined ? { action: "readHelper", agentId, helperId } : { action: "readFile", agentId, path });
         // Polled until the worker answers or the request expires (15 min);
         // a busy or stopped worker shows as waiting, not as failed.
-        const read = await awaitJob(`?fileRead=${readId}`, {
+        const read = await awaitJob<{ state: string; result: unknown }>(`?fileRead=${readId}`, {
           delay: (i) => (i === 0 ? 150 : i < 60 ? 400 : 2000),
           limitMs: 15 * 60_000,
           alive: () => alive,

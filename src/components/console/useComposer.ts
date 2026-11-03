@@ -62,13 +62,16 @@ export function useComposer(agent: { id: string; name: string }) {
       }
       setUploads((u) => u.map((x) => (x.key === key ? { ...x, uploadId: data.uploadId } : x)));
       // The upload stays queued until the worker places it, however long
-      // that takes: it is shown as waiting, never as failed.
-      const status = await awaitJob(`?upload=${data.uploadId}`, {
+      // that takes: it is shown as waiting, never as failed. Read only while
+      // its chip is in the composer (Clear ends it).
+      const status = await awaitJob<{ state: string; message?: string }>(`?upload=${data.uploadId}`, {
         delay: (i) => (i < 120 ? 500 : 5000),
+        alive: () => composers.get(agent.id).uploads.some((u) => u.key === key),
         slow: { at: 120, then: () => set("waiting", "Waiting for the Console worker; it places this upload when it runs.") },
         retryErrors: true,
         settled: (status) => status.state !== "queued" && status.state !== "running",
       });
+      if (!status) return;
       if (status.state === "exists") {
         set("failed", status.message);
         if (window.confirm(`${checked.name} is already in ${agent.name}'s uploads. Replace it?`)) return upload(picked, true);

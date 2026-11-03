@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ConsoleStore, LEASE_LOST } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { changesView, commitPatchView } from "../src/lib/console/views.ts";
+import { branchPatchView, changesView, commitPatchView } from "../src/lib/console/views.ts";
 import { harness } from "./helpers/console-harness.ts";
 
 // The store's upkeep: the spend checks' indexes, the worker's fenced
@@ -98,6 +98,25 @@ test("the Changes dialog lists commits without patches, and gives one commit's p
   // Only that agent's own commit, by a whole id.
   assert.equal(commitPatchView(store, other.id, commit.id), null);
   assert.equal(commitPatchView(store, agent.id, Number("x")), null);
+  store.close();
+});
+
+test("the Changes dialog's poll carries the branch's stat without its patch, which is given when it is opened", () => {
+  const store = new ConsoleStore(":memory:");
+  const project = store.createProject("P", "folder");
+  const tabId = store.tabs(project.id)[0].id;
+  const agent = store.createAgent({ tabId, name: "A", role: "", kind: "claude-code", model: "haiku", effort: null, permission: "edit" });
+  // Before any change: no diff, and an empty patch.
+  assert.equal(changesView(store, agent.id)!.diff, null);
+  assert.deepEqual(branchPatchView(store, agent.id), { patch: "" });
+  const epoch = store.takeLease("w", Date.now())!;
+  store.setDiff(epoch, agent.id, { base: "b".repeat(40), head: "a".repeat(40), stat: " a.txt | 1 +", patch: "+big branch patch", files: ["a.txt"] });
+  const { diff } = changesView(store, agent.id)!;
+  assert.equal(diff!.stat, " a.txt | 1 +");
+  assert.deepEqual(diff!.files, ["a.txt"]);
+  assert.equal("patch" in diff!, false);
+  assert.deepEqual(branchPatchView(store, agent.id), { patch: "+big branch patch" });
+  assert.equal(branchPatchView(store, "nobody"), null);
   store.close();
 });
 

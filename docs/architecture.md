@@ -256,20 +256,25 @@ What Squadroom protects against, and the limits it accepts, are in
   rendered once when the turn ends. On a 53 KB reply this took the render
   work from about 9.5 s to 0.65 s, and the slowest update from 99 ms to 8 ms.
 - **Changes loads patches when opened.** The Changes dialog polls every 3
-  seconds for the commit list alone; a commit's patch is fetched once, when
-  you open it.
+  seconds for the commit list and the branch's file summary alone; a
+  commit's patch is fetched once, when you open it, and the branch's whole
+  patch while you have it open (again when the branch changes).
 - **Teammates' messages look different.** In an agent's window, a message
   from a teammate sits on the agent's side with its own border and
   background, so it never looks like yours.
 - **Notifications fall back.** If the service worker fails to register,
   the page shows browser notifications itself; if the browser refuses that
   too, Settings says they are unavailable.
-- **One at a time.** Create buttons and the fresh-code dialog go through
-  `oneAtATime` (`src/lib/console/busy.ts`): a double click creates one
-  thing, and commands that need a code at the same time share one dialog.
-- **Keyboard.** Dialogs and the phone's drawer keep Tab inside them, close
-  on Escape and give focus back on close (`useDialogFocus`); the file panel
-  takes focus and gives it back. On Settings, Escape in a text field only
+- **One at a time.** Create buttons, other costly ones (Push branch, Open
+  pull request, Save on Keys and Roles, a spend limit, a step move) and the
+  fresh-code dialog go through `oneAtATime` (`src/lib/console/busy.ts`): a
+  double click sends one command, and commands that need a code at the
+  same time share one dialog. Overlapping reads of one view (a poll and
+  the reload after a command) keep only the latest read's answer
+  (`src/lib/console/polled.ts`).
+- **Keyboard.** Dialogs, the fresh-code dialog and the phone's drawer keep
+  Tab inside them, close on Escape and give focus back on close
+  (`useDialogFocus`); the file panel takes focus and gives it back. On Settings, Escape in a text field only
   leaves the field, and Escape elsewhere asks first if something was typed
   since the last button press (`src/lib/console/focus.ts`).
 
