@@ -869,7 +869,7 @@ test("an allowance charge and its tab's hold are written together", (t) => {
   const two = (runCommand(store, { action: "send", agentId: agent.id, text: "b" }) as { turnId: number }).turnId;
   store.startTurn(epoch, two);
   store.finishTurn(epoch, two, "interrupted", "cut", null);
-  store.transaction(() => store.chargeTurn(two, { usd: 1, basis: "allowance", hold: "Usage not reported: two" }), epoch);
+  store.transaction(() => store.recordCharge(two, { usd: 1, basis: "allowance", hold: "Usage not reported: two" }), epoch);
   assert.equal(store.tab(tab.id)!.pauseReason, "Usage not reported: two");
 });
 

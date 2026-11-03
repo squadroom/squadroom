@@ -72,18 +72,6 @@ export const images = {
       state, refund ? 1 : 0, message, this.now(), id,
     );
   },
-  /** At start: calls an earlier worker left open stay charged and are
-   * never resubmitted (their job may have run). */
-  failEarlierImageCalls(this: ConsoleStore, epoch: number): number {
-    return this.transaction(
-      () =>
-        this.run(
-          "UPDATE console_image_calls SET state = 'interrupted', message = 'The Console worker restarted during this call: it stays charged and is not resubmitted.', ended_at = ? WHERE state = 'open' AND epoch <> ?",
-          this.now(), epoch,
-        ),
-      epoch,
-    );
-  },
   imageCalls(this: ConsoleStore, turnId: number): ImageCallRow[] {
     return this.all("SELECT * FROM console_image_calls WHERE turn_id = ? ORDER BY id", turnId).map((r) => ({
       id: r.id as number,

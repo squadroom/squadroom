@@ -1,7 +1,8 @@
 // Team tools and the mailbox: what agents in one tab call to message each
 // other, how queued messages become one labelled prompt, what a Re-send
-// tells the agent, and the commit message each turn gets. Pure: the worker
-// and the store call these.
+// tells the agent, and the commit message each turn gets; the circle
+// detector; the patch reader behind a teammate's diff; and the claim
+// patterns and hold cycles. Pure: the worker and the store call these.
 
 /** A team-tool call the agent got wrong (an unknown teammate, an ask that
  * is not its own): returned to the agent, never fatal. */

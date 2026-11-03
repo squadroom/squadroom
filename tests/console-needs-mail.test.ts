@@ -71,7 +71,7 @@ test("the worker queues one e-mail an hour, only with the switch on", async (t) 
     options: { mail, now: () => clock, mailCheckMs: 3_600_000, needsMailCheckMs: 3_600_000 },
   });
   await h.worker.start();
-  h.store.transaction(() => h.store.putFlag(PAUSE_ALL, "Paused by the owner"));
+  h.store.setFlag(PAUSE_ALL, "Paused by the owner");
   h.worker.checkNeedsMail();
   clock += 16 * MIN;
   h.worker.checkNeedsMail();
@@ -86,9 +86,9 @@ test("the worker queues one e-mail an hour, only with the switch on", async (t) 
   h.worker.checkNeedsMail();
   assert.equal(h.store.mailRows().length, 1);
   // Resumed, then paused again: a new incident, mailed after its own wait.
-  h.store.transaction(() => h.store.putFlag(PAUSE_ALL, null));
+  h.store.setFlag(PAUSE_ALL, null);
   h.worker.checkNeedsMail();
-  h.store.transaction(() => h.store.putFlag(PAUSE_ALL, "Paused again"));
+  h.store.setFlag(PAUSE_ALL, "Paused again");
   h.worker.checkNeedsMail();
   clock += 16 * MIN;
   h.worker.checkNeedsMail();

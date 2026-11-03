@@ -129,7 +129,7 @@ export const teamTools = {
         const patterns = claimPatterns(Array.isArray(args.paths) ? args.paths : []);
         return write(this, () =>
           this.store.callOnce(epoch, { turnId: t.id, agentId: me.id, key, tool: "team_release", summary: `team_release ${patterns.join(", ") || "all"}` }, () => {
-            const n = this.store.releaseClaims(null, me.id, patterns);
+            const n = this.store.releaseClaims(epoch, me.id, patterns);
             return n ? `Released ${n} claim${n === 1 ? "" : "s"}.` : "You held no such claim.";
           }),
         );

@@ -9,7 +9,7 @@ import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
 import { ASK_FIRST_CLAUDE_ONLY, NEEDS_MAIL, type ConsoleStore } from "./store.ts";
 import { usd } from "./spend.ts";
-import { CODEX_DISABLED, LIMITS, NAME_MAX, PROMPT_MAX, ROLE_MAX, type ConsoleTab, type Permission } from "./types.ts";
+import { CODEX_DISABLED, LIMITS, NAME_MAX, PROMPT_MAX, ROLE_MAX, isOpen, type ConsoleTab, type Permission } from "./types.ts";
 import { allTemplates, rolesView, templatesView } from "./views.ts";
 
 // The owner's commands, validated here so the route stays glue; the
@@ -33,12 +33,15 @@ export const KEY_ACTIONS = new Set<CommandAction>(["setKey", "removeKey"]);
 
 export class CommandError extends Error {}
 
-/** A failure of the store or its files, answered with a generic 500. Any
- * other error is an expected conflict (a validation, an archived project,
- * a closed request…), answered with its own message so a stale page
- * action still says what to do. */
+/** A failure of the store or its files, answered with a generic 500: an
+ * SQLite error (node:sqlite gives them all one code, and messages such as
+ * "database is locked") or a missing or unreadable file. Any other error is
+ * an expected conflict (a validation, an archived project, a closed
+ * request…), answered with its own message so a stale page action still
+ * says what to do. */
 export const storeFailure = (error: unknown): boolean =>
-  !(error instanceof Error) || (!(error instanceof CommandError) && /sqlite|SQLITE|ENOENT|EACCES/i.test(error.message));
+  !(error instanceof Error) ||
+  (!(error instanceof CommandError) && ["ERR_SQLITE_ERROR", "ENOENT", "EACCES"].includes(String((error as { code?: unknown }).code)));
 
 const text = (value: unknown, field: string, max: number, required = true): string => {
   if (value === undefined && !required) return "";
@@ -53,10 +56,17 @@ const id = (value: unknown, field: string): string => {
   return value;
 };
 
+/** A row id from the page (a request, turn, message…): a positive whole
+ * number; `refused` is the error otherwise. */
+const rowId = (value: unknown, refused: string): number => {
+  const n = Number(value);
+  if (!Number.isSafeInteger(n) || n < 1) throw new CommandError(refused);
+  return n;
+};
 /** Upload ids from the page: positive integers, at most 50. */
 const ids = (value: unknown): number[] => {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.length > 50 || !value.every((v) => Number.isSafeInteger(v) && (v as number) > 0))
+  if (!Array.isArray(value) || value.length > 50 || !value.every((v) => typeof v === "number" && Number.isSafeInteger(v) && v > 0))
     throw new CommandError("Those files are not valid.");
   return value as number[];
 };
@@ -260,25 +270,28 @@ function codeStillNeeded(store: ConsoleStore, input: Record<string, unknown>, op
 const TEAM_NEEDS_FILES = "A coding team needs a project with files.";
 
 /** Create a team in a tab (the setup screen, or a template): its agents,
- * then routes by name. The first agent's turns wait until every other
- * member is set up; a goal is its first message. */
+ * then routes by name, in one transaction. The first agent's turns wait
+ * until every other member is set up; a goal is its first message. */
 function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes: TabTemplate["routes"] = [], exactPrompts = false) {
-  if (store.project(tab.projectId)?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
-  const codexOff = store.flag(CODEX_DISABLED) !== null;
-  const taken = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed").map((a) => a.name);
-  const roles = rolesView(store);
-  const checked = checkTeamSetup(setup ?? defaultTeamSetup(codexOff, taken, roles), { takenNames: taken, codexOff, roles, exactPrompts });
-  if (!checked.ok) throw new CommandError(checked.errors.join(" "));
-  const agents = checked.agents.map((a) => store.createAgent({ tabId: tab.id, ...a }));
-  // The goal is the Orchestrator's (a pair: the Lead's) first owner
-  // message, queued now (so anything sent later waits behind it); no
-  // turn of it starts until every other member is set up.
-  const first = agents[checked.goalTo];
-  store.setWaitFor(first.id, agents.filter((a) => a.id !== first.id).map((a) => a.id));
-  if (checked.goal) store.queueTurn(first.id, new Redactor().text(checked.goal));
-  const named = (name: string) => agents.find((a) => a.name.toLowerCase() === name.toLowerCase())!;
-  for (const r of routes) store.addRoute({ tabId: tab.id, from: named(r.from).id, to: named(r.to).id, phrase: r.phrase });
-  return { agents, warnings: checked.warnings };
+  return store.transaction(() => {
+    if (store.project(tab.projectId)?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
+    const codexOff = store.flag(CODEX_DISABLED) !== null;
+    // A failed agent keeps its name until it is closed.
+    const taken = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed").map((a) => a.name);
+    const roles = rolesView(store);
+    const checked = checkTeamSetup(setup ?? defaultTeamSetup(codexOff, taken, roles), { takenNames: taken, codexOff, roles, exactPrompts });
+    if (!checked.ok) throw new CommandError(checked.errors.join(" "));
+    const agents = checked.agents.map((a) => store.createAgent({ tabId: tab.id, ...a }));
+    // The goal is the Orchestrator's (a pair: the Lead's) first owner
+    // message, queued now (so anything sent later waits behind it); no
+    // turn of it starts until every other member is set up.
+    const first = agents[checked.goalTo];
+    store.setWaitFor(first.id, agents.filter((a) => a.id !== first.id).map((a) => a.id));
+    if (checked.goal) store.queueTurn(first.id, new Redactor().text(checked.goal));
+    const named = (name: string) => agents.find((a) => a.name.toLowerCase() === name.toLowerCase())!;
+    for (const r of routes) store.addRoute({ tabId: tab.id, from: named(r.from).id, to: named(r.to).id, phrase: r.phrase });
+    return { agents, warnings: checked.warnings };
+  });
 }
 
 /** A template is created only if the setup screen's checks accept it now
@@ -315,8 +328,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       return { project: store.createProject(name, input.source) };
     }
     case "decide": {
-      const requestId = Number(input.requestId);
-      if (!Number.isSafeInteger(requestId) || requestId < 1) throw new CommandError("That request is not valid.");
+      const requestId = rowId(input.requestId, "That request is not valid.");
       const request = store.request(requestId);
       if (!request) throw new CommandError("That request does not exist.");
       if (request.kind === "question") {
@@ -336,14 +348,12 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "resend":
     case "dismiss": {
-      const turnId = Number(input.turnId);
-      if (!Number.isSafeInteger(turnId) || turnId < 1) throw new CommandError("That turn is not valid.");
+      const turnId = rowId(input.turnId, "That turn is not valid.");
       return { turnId: store.acknowledgeTurn(turnId, action === "resend")?.id ?? null };
     }
     case "resendMessage":
     case "discardMessage": {
-      const messageId = Number(input.messageId);
-      if (!Number.isSafeInteger(messageId) || messageId < 1) throw new CommandError("That message is not valid.");
+      const messageId = rowId(input.messageId, "That message is not valid.");
       store.settleInterrupted(messageId, action === "resendMessage");
       return { done: true };
     }
@@ -368,8 +378,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     case "releaseClaim":
     case "releaseHold":
     case "dismissNotice": {
-      const n = Number(input.claimId ?? input.holdId ?? input.noticeId);
-      if (!Number.isSafeInteger(n) || n < 1) throw new CommandError("That is not valid.");
+      const n = rowId(input.claimId ?? input.holdId ?? input.noticeId, "That is not valid.");
       const ok =
         action === "releaseClaim" ? store.releaseClaim(n) : action === "releaseHold" ? store.releaseHoldById(n) : store.dismissNotice(n);
       if (!ok) throw new CommandError("That has already ended.");
@@ -389,7 +398,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       // tab's own).
       const tab = store.tab(id(input.tabId, "Tab"));
       if (!tab || tab.archivedAt !== null) throw new CommandError("That tab is closed.");
-      const agents = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
+      const agents = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && isOpen(a));
       if (!agents.length) throw new CommandError("The tab has no agents to save.");
       const steps = checkSteps(input.steps);
       if (!steps.ok) throw new CommandError(steps.errors.join(" "));
@@ -418,7 +427,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       const step = Number(input.step);
       if (!Number.isInteger(step) || step < 0 || step >= stepped.steps.length) throw new CommandError("Choose one of the tab's steps.");
       if (step > stepped.index) {
-        const open = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed" && a.state !== "error");
+        const open = store.agents(tab.projectId).filter((a) => a.tabId === tab.id && isOpen(a));
         const editors = open.filter((a) => a.permission === "edit");
         // Not while an editor's branch may be changing: its approval is of
         // a head that is about to move.
@@ -516,8 +525,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "readHelper": {
       const agent = store.agent(id(input.agentId, "Agent"));
-      const helperId = Number(input.helperId);
-      if (!agent || !Number.isSafeInteger(helperId) || helperId < 1) throw new CommandError("That helper is not valid.");
+      const helperId = rowId(input.helperId, "That helper is not valid.");
+      if (!agent) throw new CommandError("That helper is not valid.");
       return { readId: store.queueRead(agent.id, "helper", helperId) };
     }
     case "readFile": {
@@ -564,11 +573,16 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (template) checkTemplate(store, template.body);
       if (template && store.project(String(input.projectId))?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
       codeStillNeeded(store, input, options);
-      const tab = store.createTab(id(input.projectId, "Project"), text(input.name, "Name", NAME_MAX));
-      if (!template) return { tab };
-      // Steps first, so the team is checked as a tab with steps.
-      if (template.body.steps.length) store.setTabSteps(tab.id, template.body.steps);
-      return { tab, ...createTeam(store, tab, template.body.setup, template.body.routes, true) };
+      const projectId = id(input.projectId, "Project");
+      const name = text(input.name, "Name", NAME_MAX);
+      if (!template) return { tab: store.createTab(projectId, name) };
+      // The tab, its steps and its team together, or none of them.
+      return store.transaction(() => {
+        const tab = store.createTab(projectId, name);
+        // Steps first, so the team is checked as a tab with steps.
+        if (template.body.steps.length) store.setTabSteps(tab.id, template.body.steps);
+        return { tab, ...createTeam(store, tab, template.body.setup, template.body.routes, true) };
+      });
     }
     case "createAgent": {
       const kind = agentKind(input.kind);
@@ -588,7 +602,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       if (store.project(tab.projectId)?.source === "none" && input.permission !== "look")
         throw new CommandError("A project without files has Code analysis agents only.");
       if (input.askFirst === true && kind.kind !== "claude-code") throw new CommandError(ASK_FIRST_CLAUDE_ONLY);
-      // One name per agent in a tab, as the team setup checks.
+      // One name per agent in a tab, as the team setup checks: a failed
+      // agent keeps its name until it is closed.
       const name = text(input.name, "Name", NAME_MAX);
       if (store.agents(tab.projectId).some((a) => a.tabId === tab.id && a.state !== "closed" && a.name.trim().toLowerCase() === name.toLowerCase()))
         throw new CommandError(`${name}: an agent in this tab already has that name.`);
@@ -611,9 +626,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
       return { route: store.addRoute({ tabId: id(input.tabId, "Tab"), from: id(input.from, "From"), to: id(input.to, "To"), phrase }) };
     }
     case "removeRoute": {
-      const n = Number(input.routeId);
-      if (!Number.isInteger(n) || n <= 0) throw new CommandError("Choose a route.");
-      if (!store.removeRoute(n)) throw new CommandError("That route is already removed.");
+      if (!store.removeRoute(rowId(input.routeId, "Choose a route."))) throw new CommandError("That route is already removed.");
       return { removed: true };
     }
     case "forgetRules": {
@@ -633,7 +646,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     }
     case "setNeedsMail": {
       if (typeof input.on !== "boolean") throw new CommandError("Say on or off.");
-      store.transaction(() => store.putFlag(NEEDS_MAIL, input.on ? "on" : null));
+      store.setFlag(NEEDS_MAIL, input.on ? "on" : null);
       return { needsMail: input.on };
     }
     case "setSpendLimit": {
@@ -674,8 +687,7 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
     case "editQueued":
     case "deleteQueued":
     case "sendNext": {
-      const turnId = Number(input.turnId);
-      if (!Number.isSafeInteger(turnId) || turnId < 1) throw new CommandError("That message is not valid.");
+      const turnId = rowId(input.turnId, "That message is not valid.");
       if (action === "deleteQueued") return store.withdrawQueued(turnId);
       if (action === "sendNext") return { turnId: store.sendNext(turnId).id };
       const prompt = new Redactor().text(text(input.text, "Message", PROMPT_MAX));

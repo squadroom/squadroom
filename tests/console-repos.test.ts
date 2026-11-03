@@ -80,31 +80,33 @@ test("repository names, base branches and console branches", () => {
   assert.ok(!CONSOLE_BRANCH.test("main") && !CONSOLE_BRANCH.test("console/../main"));
 });
 
+const checkRepo = (base: string, fetcher: typeof fetch) => checkGitHub("owner/repo", base, { token: "tok", fetch: fetcher });
+
 test("GitHub checks: the base branch exists and a ruleset names it exactly", async () => {
   const seen: string[] = [];
-  await checkGitHub("owner/repo", "main", "tok", api(RULESET, seen));
+  await checkRepo("main", api(RULESET, seen));
   assert.ok(seen.every((h) => h === "Bearer tok"));
-  await assert.rejects(checkGitHub("owner/repo", "develop", "tok", api()), /develop does not exist on GitHub/);
+  await assert.rejects(checkRepo("develop", api()), /develop does not exist on GitHub/);
   // "The default branch" is not the base branch by name (check 6).
   await assert.rejects(
-    checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } } })),
+    checkRepo("main", api({ ...RULESET, conditions: { ref_name: { include: ["~DEFAULT_BRANCH"] } } })),
     /names it exactly/,
   );
-  await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, rules: [{ type: "deletion" }] })), /names it exactly/);
-  await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, enforcement: "evaluate" })), /names it exactly/);
+  await assert.rejects(checkRepo("main", api({ ...RULESET, rules: [{ type: "deletion" }] })), /names it exactly/);
+  await assert.rejects(checkRepo("main", api({ ...RULESET, enforcement: "evaluate" })), /names it exactly/);
   // A ruleset the token's own user may bypass protects nothing from it.
   for (const bypass of ["always", "pull_requests_only", undefined])
-    await assert.rejects(checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, current_user_can_bypass: bypass })), /no bypass for the token's user/);
-  await assert.rejects(checkGitHub("owner/repo", "main", "tok", api(null)), /names it exactly/);
+    await assert.rejects(checkRepo("main", api({ ...RULESET, current_user_can_bypass: bypass })), /no bypass for the token's user/);
+  await assert.rejects(checkRepo("main", api(null)), /names it exactly/);
   // An exclusion that matches the base wins on GitHub.
   for (const exclude of ["refs/heads/main", "refs/heads/*", "~ALL", "~DEFAULT_BRANCH"])
     await assert.rejects(
-      checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, conditions: { ref_name: { include: ["refs/heads/main"], exclude: [exclude] } } })),
+      checkRepo("main", api({ ...RULESET, conditions: { ref_name: { include: ["refs/heads/main"], exclude: [exclude] } } })),
       /names it exactly/,
     );
-  await checkGitHub("owner/repo", "main", "tok", api({ ...RULESET, conditions: { ref_name: { include: ["refs/heads/main"], exclude: ["refs/heads/dev"] } } }));
+  await checkRepo("main", api({ ...RULESET, conditions: { ref_name: { include: ["refs/heads/main"], exclude: ["refs/heads/dev"] } } }));
   await assert.rejects(
-    checkGitHub("owner/repo", "main", "tok", (async () => new Response("{}", { status: 403 })) as typeof fetch),
+    checkRepo("main", (async () => new Response("{}", { status: 403 })) as typeof fetch),
     /cannot read owner\/repo \(403\)/,
   );
 });

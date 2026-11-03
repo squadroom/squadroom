@@ -207,7 +207,7 @@ export class ConsoleWorker {
       graceMs: this.grace,
       stopped: () => this.stopped,
       flag: (key) => this.store.flag(key),
-      setFlag: (key, value) => void this.safe(() => this.store.setFlag(this.epoch!, key, value)),
+      setFlag: (key, value) => void this.safe(() => this.store.setFlag(key, value, this.epoch!)),
       realInside: options.realInside ?? realInside,
       folders: () => this.allFolders(),
       deniedFolders: (agent) => this.deniedFolders(agent),
@@ -404,13 +404,11 @@ export class ConsoleWorker {
       if (agent?.folder && !stepped) await this.repos.refreshDiff(agent, epoch).catch((error: unknown) => this.log(`diff refresh failed: ${message(error)}`));
       this.safe(() => this.store.setSettling(epoch, id, null));
     }
-    // Image calls an earlier worker left open stay charged, never resubmitted.
-    if (this.store.failEarlierImageCalls(epoch)) this.log("Image calls from before the restart stay charged and are not resubmitted.");
-    this.store.failEarlierJobs(epoch);
-    this.store.failEarlierCleanups(epoch);
-    this.store.failEarlierChecks(epoch);
+    // What an earlier worker was running fails visibly; its image calls stay
+    // charged, never resubmitted.
+    const { imageCalls, staged } = this.store.failRunning(epoch);
+    if (imageCalls) this.log("Image calls from before the restart stay charged and are not resubmitted.");
     this.store.expireOpenRequests(epoch);
-    const staged = this.store.failEarlierUploads(epoch);
     this.leading(epoch);
     for (const path of staged) rmSync(path, { force: true });
     this.leading(epoch);
@@ -421,7 +419,7 @@ export class ConsoleWorker {
       this.options.uploadsDir ? { dir: this.options.uploadsDir, inUse: new Set(this.store.stagedInUse()), now: this.now() } : undefined,
     ).catch((error: unknown) => this.log(`Upload leftovers could not all be removed: ${message(error)}`));
     // A Codex problem found by an earlier worker is checked again.
-    this.store.setFlag(epoch, CODEX_DISABLED, null);
+    this.store.setFlag(CODEX_DISABLED, null, epoch);
     // Permission prompts may wait for the owner, so requests have no time limit.
     this.mcp = await startMcpServer(this.backend(), { name: "console", version: "1.0.0" }, { requestTimeoutMs: 0 });
     this.leading(epoch);

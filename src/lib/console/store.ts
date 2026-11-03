@@ -133,6 +133,16 @@ CREATE TRIGGER IF NOT EXISTS console_search_prompt AFTER INSERT ON console_turns
 CREATE TRIGGER IF NOT EXISTS console_search_edit AFTER UPDATE OF prompt ON console_turns BEGIN DELETE FROM console_search WHERE rowid = new.id * 2; INSERT INTO console_search (rowid, body) VALUES (new.id * 2, new.prompt); END;
 CREATE TRIGGER IF NOT EXISTS console_search_reply AFTER UPDATE OF final_text ON console_turns WHEN new.final_text IS NOT NULL BEGIN DELETE FROM console_search WHERE rowid = new.id * 2 + 1; INSERT INTO console_search (rowid, body) VALUES (new.id * 2 + 1, new.final_text); END;
 CREATE TRIGGER IF NOT EXISTS console_search_withdrawn AFTER UPDATE OF status ON console_turns WHEN new.status = 'withdrawn' BEGIN DELETE FROM console_search WHERE rowid IN (new.id * 2, new.id * 2 + 1); END;
+-- What the page reads on every poll, so a long history is not scanned.
+CREATE INDEX IF NOT EXISTS console_helpers_agent ON console_helpers (agent_id, id);
+CREATE INDEX IF NOT EXISTS console_requests_open ON console_requests (id) WHERE state = 'open';
+CREATE INDEX IF NOT EXISTS console_messages_state ON console_messages (state, id);
+CREATE INDEX IF NOT EXISTS console_claims_tab ON console_claims (tab_id, released_at);
+CREATE INDEX IF NOT EXISTS console_holds_tab ON console_holds (tab_id, released_at);
+CREATE INDEX IF NOT EXISTS console_routes_tab ON console_routes (tab_id);
+CREATE INDEX IF NOT EXISTS console_notices_open ON console_notices (id) WHERE dismissed = 0;
+CREATE INDEX IF NOT EXISTS console_uploads_bound ON console_uploads (bound_turn);
+CREATE INDEX IF NOT EXISTS console_jobs_agent ON console_jobs (agent_id, id);
 `;
 
 /** A store from before `SCHEMA_VERSION` (or a backup of one) is refused if
@@ -180,7 +190,13 @@ export class ConsoleStore {
     // was and the web process and the worker opening at once never race.
     try {
       this.transaction(() => {
-        if (Number(this.get("PRAGMA user_version")?.user_version) < SCHEMA_VERSION) {
+        const version = Number(this.get("PRAGMA user_version")?.user_version);
+        // A newer build's store is never stamped back down.
+        if (version > SCHEMA_VERSION)
+          throw new Error(
+            `The Console store is version ${version}, newer than this build reads (${SCHEMA_VERSION}). Update Squadroom, or restore a backup this version made.`,
+          );
+        if (version < SCHEMA_VERSION) {
           migrate(this.db);
           refuseOlder(this.db);
         }
@@ -206,28 +222,32 @@ export class ConsoleStore {
     }
     return statement;
   }
+  /** `work` in one write transaction, fenced by `epoch` when given. Inside
+   * another transaction it becomes part of that one (its epoch checked
+   * too): it commits only with it, and its own error undoes its part. */
   transaction<T>(work: () => T, epoch?: number): T {
+    if (this.db.isTransaction) return this.attempt(work, epoch, true);
     // A database held by another connection past the busy timeout is tried
     // once more after a pause: the whole transaction, so nothing is applied
     // twice. A lost lease or any other error is not.
     for (let attempt = 0; ; attempt++) {
       try {
-        return this.attempt(work, epoch);
+        return this.attempt(work, epoch, false);
       } catch (error) {
         if (attempt > 0 || !busy(error)) throw error;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, BUSY_RETRY_MS);
       }
     }
   }
-  private attempt<T>(work: () => T, epoch?: number): T {
-    this.db.exec("BEGIN IMMEDIATE");
+  private attempt<T>(work: () => T, epoch: number | undefined, nested: boolean): T {
+    this.db.exec(nested ? "SAVEPOINT nested" : "BEGIN IMMEDIATE");
     try {
       if (epoch !== undefined && this.lease()?.epoch !== epoch) throw new Error(LEASE_LOST);
       const value = work();
-      this.db.exec("COMMIT");
+      this.db.exec(nested ? "RELEASE nested" : "COMMIT");
       return value;
     } catch (error) {
-      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      if (this.db.isTransaction) this.db.exec(nested ? "ROLLBACK TO nested; RELEASE nested" : "ROLLBACK");
       throw error;
     }
   }
@@ -246,8 +266,9 @@ export class ConsoleStore {
   insert(sql: string, ...args: SQLInputValue[]): number {
     return Number(this.prepare(sql).run(...args).lastInsertRowid);
   }
-  /** One write of the worker's, fenced by its lease epoch. */
-  write(epoch: number, sql: string, ...args: SQLInputValue[]): void {
+  /** One write in a transaction of its own (or the caller's), fenced by
+   * the worker's lease epoch when given. */
+  write(epoch: number | undefined, sql: string, ...args: SQLInputValue[]): void {
     this.transaction(() => this.run(sql, ...args), epoch);
   }
   /** The worker claims up to `limit` rows of a work queue, oldest first:

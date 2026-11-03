@@ -1,5 +1,6 @@
 import { agentKind, agentModel, type AgentKind, type ConsoleEffort } from "./agents.ts";
 import { BUILT_IN_ROLES, ROLE_PROMPT_MAX, roleText, type RoleDef } from "./roles.ts";
+import { LIMITS, NAME_MAX } from "./types.ts";
 
 // The coding team's setup screen: the owner chooses the Orchestrator's AI
 // and the members; the Orchestrator then divides a goal among them by
@@ -22,7 +23,7 @@ export interface TeamMemberSetup {
 }
 export interface TeamSetup {
   /** False for a pair: no Orchestrator, and the owner talks to the first
-   * editing member. Missing means true (an older setup). */
+   * editing member. Missing means true. */
   orchestrated?: boolean;
   orchestrator: { kind: AgentKind; model: string; effort: string; prompt: string };
   members: TeamMemberSetup[];
@@ -36,10 +37,15 @@ export interface TeamSetup {
 export const TEAM_MAX_MEMBERS = 7;
 export const NOTE_MAX = 120;
 export const GOAL_MAX = 32_000;
-const NAME_MAX = 60;
-/** Turns that run at once per login (LIMITS.turnsPerLogin): more agents
- * of one AI wait their turn ("Queued"); the screen says so. */
-export const TURNS_PER_LOGIN = 3;
+/** Turns that run at once per login: more agents of one AI wait their turn
+ * ("Queued"); the screen says so. */
+export const TURNS_PER_LOGIN = LIMITS.turnsPerLogin;
+/** The models a new team member starts with: these while the catalog
+ * offers them, otherwise the kind's first model, so retiring one never
+ * breaks the default team or a built-in template. */
+const PREFERRED_MODEL = { "claude-code": "claude-sonnet-5", codex: "gpt-5.6-sol" } as const;
+export const defaultModel = (kind: keyof typeof PREFERRED_MODEL): string =>
+  agentModel(kind, PREFERRED_MODEL[kind])?.id ?? agentKind(kind)!.models[0].id;
 
 /** The default team: an Orchestrator, two Leads and a Reviewer, which
  * Create gives when nothing is changed. */
@@ -51,7 +57,7 @@ export function defaultTeamSetup(codexOff = false, takenNames: string[] = [], ro
     return n;
   };
   const prompt = (id: string) => roles.find((r) => r.id === id)?.prompt ?? BUILT_IN_ROLES.find((r) => r.id === id)!.prompt;
-  const claude = { kind: "claude-code" as const, model: "claude-sonnet-5", effort: "default" };
+  const claude = { kind: "claude-code" as const, model: defaultModel("claude-code"), effort: "default" };
   const team: TeamSetup = {
     orchestrator: { ...claude, prompt: prompt("orchestrator") },
     members: [
@@ -59,7 +65,7 @@ export function defaultTeamSetup(codexOff = false, takenNames: string[] = [], ro
       { name: "Lead B", ...claude, permission: "edit", roleId: "lead", prompt: prompt("lead"), note: "" },
       {
         name: "Reviewer",
-        ...(codexOff ? claude : { kind: "codex" as const, model: "gpt-5.6-sol", effort: "default" }),
+        ...(codexOff ? claude : { kind: "codex" as const, model: defaultModel("codex"), effort: "default" }),
         permission: "look",
         roleId: "reviewer",
         prompt: prompt("reviewer"),

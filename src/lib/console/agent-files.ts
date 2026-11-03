@@ -149,7 +149,7 @@ export async function placeUpload(
   try {
     // Written afresh, never copied: on APFS copyFileSync clones the staged
     // file and keeps its group (staff), which the agent is not in, so it
-    // could not read the copy (exit 3; the live image check, 2026-10-31).
+    // could not read the copy (the read failed with exit 3).
     // A new file in the shared folder takes the folder's group (agent).
     writeFileSync(handoff, readFileSync(upload.staged), { flag: "wx", mode: 0o640 });
     chmodSync(handoff, 0o640);
