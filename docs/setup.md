@@ -263,7 +263,9 @@ In a second terminal, in the same folder:
 npm run console:worker
 ```
 
-It prints `worker started`. The worker is the only process that runs
+It prints nothing while it runs: it writes `worker started` and the rest
+to its log, `~/.squadroom/logs/console.jsonl` (the Logs page shows it), and
+only a problem that stops it to the terminal. The worker is the only process that runs
 agents; it is separate from the web server, so restarting one never
 interrupts the other. Ctrl-C stops it, and running turns are then marked
 interrupted.

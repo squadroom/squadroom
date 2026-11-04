@@ -1,0 +1,89 @@
+# A fresh install on a clean Mac, the way docs/setup.md does it: the setup
+# script for real (sudo, the agent user, the pinned agent programs from npm,
+# the launcher), run twice, then the web server and the worker. No secrets,
+# no model calls; sign-in and the agents' logins need real accounts, so they
+# are not covered. GitHub's Mac runners allow sudo without a password.
+# It runs when main changes, on pull requests that touch the install, and
+# on demand (Actions › Fresh install › Run workflow).
+name: Fresh install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - .github/workflows/install.yml
+      - .nvmrc
+      - package-lock.json
+      - scripts/console/**
+      - src/lib/console/clients.ts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Node from Homebrew, as the guide says: the agent user cannot run a
+      # Node inside the owner's home folder (setup-node puts it there).
+      - name: Node 24 from Homebrew
+        run: |
+          brew install node@24
+          echo "$(brew --prefix node@24)/bin" >> "$GITHUB_PATH"
+      # On a Mac a home folder is closed to other accounts; the runner's may
+      # not be, and the setup script's boundary check would rightly stop.
+      - name: Close the home folder to other accounts, as on a normal Mac
+        run: chmod 750 "$HOME"
+      - run: npm ci
+      - name: Setup script
+        run: sudo zsh scripts/console/setup-agent-user.sh
+      - name: Setup script again (safe to rerun)
+        run: sudo zsh scripts/console/setup-agent-user.sh
+      - name: The launcher is the one this checkout needs
+        run: |
+          want=$(sed -n 's/^readonly VERSION=//p' scripts/console/console-agent)
+          got=$(sudo -n -u agent /usr/local/libexec/console-agent version)
+          echo "launcher version $got (this checkout: $want)"
+          [ "$got" = "$want" ]
+      # Placeholder sign-in settings: enough for the servers to start.
+      - name: Sign-in settings
+        run: |
+          cp .env.example .env.local && chmod 600 .env.local
+          sed -i '' -e 's|^SERVER_GITHUB_CLIENT_ID=.*|SERVER_GITHUB_CLIENT_ID=ci-placeholder|' \
+            -e 's|^SERVER_GITHUB_CLIENT_SECRET=.*|SERVER_GITHUB_CLIENT_SECRET=ci-placeholder-secret|' \
+            -e 's|^SERVER_OWNER_GITHUB_ID=.*|SERVER_OWNER_GITHUB_ID=1|' .env.local
+      - run: npm run build
+      - name: The web server answers
+        run: |
+          npm run web -- --port 3011 > web.log 2>&1 &
+          for i in $(seq 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3011/ || true)
+            case $code in 2??|3??) echo "web server answered $code"; exit 0 ;; esac
+            sleep 1
+          done
+          echo "web server did not answer (last: $code)"; cat web.log; exit 1
+      # The worker writes its start line to its log file, not the terminal.
+      - name: The worker starts
+        run: |
+          npm run console:worker > worker.log 2>&1 &
+          pid=$!
+          for i in $(seq 60); do
+            grep -q 'worker started' ~/.squadroom/logs/console.jsonl 2>/dev/null && kill -0 $pid && exit 0
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "the worker did not start"; exit 1
+      - name: Server logs
+        if: always()
+        run: |
+          echo "== web"; cat web.log 2>/dev/null || true
+          echo "== worker"; cat worker.log 2>/dev/null || true
+          echo "== worker log"; cat ~/.squadroom/logs/console.jsonl 2>/dev/null || true
