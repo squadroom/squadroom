@@ -109,8 +109,8 @@ it:
 
 OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
 real Mac on 2026-11-01: each answered, named its model and reported what it
-used. A short turn cost between $0.0013 and $0.026. Gemini CLI and Kimi
-Code haven't had a live turn yet. See
+used. A short turn cost between $0.0013 and $0.026. Gemini CLI had live
+turns on the same day; Kimi Code hasn't had one yet. See
 [docs/setup.md](docs/setup.md#12-other-agent-kinds-acp) for the keys each
 model needs.
 

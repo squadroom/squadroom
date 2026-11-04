@@ -557,7 +557,9 @@ each at Code analysis (then called Look only) with network on. Each one answered
 reported its usage. A short turn cost from $0.0013 (GLM-5.3-Flash) to
 $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.
-Gemini CLI and Kimi Code have not had a live turn yet.
+Gemini CLI 0.65.0 had live turns on 2026-11-01 with a Gemini API key; they
+showed how it reports usage (see `readGeminiUsage` in
+`src/lib/console/acp.ts`). Kimi Code has not had a live turn yet.
 
 If an agent program stops right after it starts, the turn's reason ends
 with the last lines it printed on its error output, with keys masked.

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Launcher } from "./launcher.ts";
 import type { ConsolePaths } from "./permissions.ts";
 import type { ConsoleStore } from "./store.ts";
+import { isOpen } from "./types.ts";
 
 // Folder cleanup: the owner runs it.
 // A scan lists what no open agent or project uses any more, with sizes and
@@ -90,8 +91,7 @@ export async function scanCleanup(o: CleanupOptions): Promise<CleanupItem[]> {
   const home = real(o.paths.agentHome);
   const projects = new Map(o.store.projects().map((p) => [p.id, p]));
   const agents = new Map(o.store.agents().map((a) => [a.id, a]));
-  const open = (a: { id: string; state: string }) => a.state !== "closed" && a.state !== "error";
-  const inUse = (projectId: string) => [...agents.values()].some((a) => a.projectId === projectId && (open(a) || o.busy(a.id)));
+  const inUse = (projectId: string) => [...agents.values()].some((a) => a.projectId === projectId && (isOpen(a) || o.busy(a.id)));
   const listed = await o.launcher.runIn(home, "/usr/bin/perl", ["-e", LIST_SCRIPT, home], 4 * 1024 * 1024);
   if (listed.code !== 0) throw new Error(`The agent's home could not be listed (exit ${listed.code}).`);
   const entries = listed.stdout
@@ -102,7 +102,7 @@ export async function scanCleanup(o: CleanupOptions): Promise<CleanupItem[]> {
   // and the projects' own repositories.
   const liveTmp = new Set([
     tmpKey(home),
-    ...[...agents.values()].filter((a) => a.folder && (open(a) || o.busy(a.id))).map((a) => tmpKey(real(a.folder))),
+    ...[...agents.values()].filter((a) => a.folder && (isOpen(a) || o.busy(a.id))).map((a) => tmpKey(real(a.folder))),
     ...[...projects.keys()].map((id) => tmpKey(join(home, "projects", `${id}.git`))),
   ]);
   const items: Omit<CleanupItem, "sizeKb">[] = [];
@@ -124,7 +124,7 @@ export async function scanCleanup(o: CleanupOptions): Promise<CleanupItem[]> {
       });
     } else if (parts[0] === "work" && parts.length === 3 && ID.test(parts[1]) && ID.test(parts[2]) && !projectGone.has(parts[1])) {
       const a = agents.get(parts[2]);
-      if (a && (open(a) || o.busy(a.id) || a.projectId !== parts[1])) continue;
+      if (a && (isOpen(a) || o.busy(a.id) || a.projectId !== parts[1])) continue;
       items.push({
         key: rel,
         what: a ? `${a.name}'s folder (${a.state === "closed" ? "closed" : "could not be set up"}) in ${projects.get(parts[1])?.name ?? "a removed project"}` : "A folder no agent in the Console owns",
