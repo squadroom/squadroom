@@ -5,7 +5,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { ConsoleStore } from "../src/lib/console/store.ts";
-import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
+import { git, GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // A tab with steps: any agent kind may edit, on any login, and
 // writes stay inside the current step's files for every kind: refused when
@@ -83,8 +83,6 @@ test("a write that never asked: outside the step's files it is put back after th
 
 // What an agent can do with Git itself mid-turn (a command): each of these
 // must still leave nothing outside the step on its branch (review #279).
-const git = (folder: string, ...args: string[]) =>
-  execFileSync("git", ["-C", folder, "-c", "user.name=Agent", "-c", "user.email=agent@example.com", ...args], { encoding: "utf8" }).trim();
 const onBranch = (folder: string, branch: string, path: string) => {
   try {
     execFileSync("git", ["-C", folder, "cat-file", "-e", `refs/heads/${branch}:${path}`], { stdio: "ignore" });

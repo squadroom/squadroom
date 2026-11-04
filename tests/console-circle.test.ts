@@ -7,19 +7,12 @@ import { TEAM_NOTE, TEAM_TOOL_NAMES } from "../src/lib/console/team-tools.ts";
 import { ConsoleWorker } from "../src/lib/console/worker.ts";
 import { Launcher } from "../src/lib/console/launcher.ts";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
-import { harness, TOKEN } from "./helpers/console-harness.ts";
+import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 
 //, first part: the circle detector and team_report.
 // Fakes only: no model, no network.
 
 type H = Awaited<ReturnType<typeof harness>>;
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@x", ...args], {
-    cwd,
-    encoding: "utf8",
-    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as Record<string, string> as NodeJS.ProcessEnv,
-  });
 const reason = (h: H) => h.store.pauseReason("tab", h.tab.id);
 const queued = (h: H) =>
   h.store.timeline(h.tab.id).filter((m) => m.state === "queued").length;
@@ -123,9 +116,7 @@ test("a turn without a repository that a stop cuts short is still recorded as ch
   const lead = h.agent("Lead", "look");
   await h.ready(lead.id);
   const turn = h.send(lead.id, "hang");
-  // No repository, so no starting commit to wait for.
-  await h.until(() => h.store.turn(turn)!.status === "running", "running");
-  await new Promise((r) => setTimeout(r, 150));
+  await h.started(turn);
   await h.worker.stop();
   assert.equal(h.store.turn(turn)!.status, "interrupted");
   const db = (h.store as unknown as { db: { prepare: (q: string) => { get: (...a: unknown[]) => Record<string, unknown> } } }).db;

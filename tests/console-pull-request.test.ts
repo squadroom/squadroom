@@ -1,24 +1,17 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { OPEN_PR_PROMPT, runCommand } from "../src/lib/console/commands.ts";
 import { commentOnPullRequest, openPullRequest } from "../src/lib/console/github-api.ts";
 import { CODEX_REVIEW, codexReviewSetting, PUSH_SUMMARY_BODY, pullRequestText, pushRequest, pushSummary, wantsReview } from "../src/lib/console/pull-request.ts";
-import { harness, TOKEN } from "./helpers/console-harness.ts";
+import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 
 // After a push the Console opens the pull request with a description and,
 // when Codex reviews are switched on, asks Codex to review it, so the owner
 // does neither by hand. "GitHub" is a local bare repository and a fake API.
 
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", HOME: cwd } as Record<string, string> as NodeJS.ProcessEnv,
-  }).trim();
 const call = (tool: string, args: Record<string, unknown> = {}) => `call ${tool} ${JSON.stringify(args)}`;
 
 function origin(t: TestContext) {

@@ -6,6 +6,7 @@ import { ConsoleWorker } from "../src/lib/console/worker.ts";
 import { Launcher } from "../src/lib/console/launcher.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { harness, TOKEN } from "./helpers/console-harness.ts";
+import { CLAUDE_TERM_EXIT_MS } from "./helpers/timing.mjs";
 import { fingerprint } from "../src/lib/console/spend.ts";
 
 // -2: the Console worker against a scripted fake launcher and a fake
@@ -127,7 +128,9 @@ test("the permission tool denies writes outside the agent's folder; the sandbox 
 });
 
 test("Stop interrupts, Force stop and an ignored interrupt end the process; limits stop turns", async (t) => {
-  const h = await harness(t, { inactivityMs: 600, turnBytes: 1_000_000 });
+  // The inactivity limit leaves room for the fake client's cold start on a
+  // loaded machine: each Stop below comes after the prompt has arrived.
+  const h = await harness(t, { inactivityMs: 2_000, turnBytes: 1_000_000 });
   await h.worker.start();
   const lead = h.agent();
   let turn = h.send(lead.id, "hang");
@@ -175,7 +178,7 @@ test("running turns are limited per Claude login and in total; the rest wait que
   const agents = [h.agent("A"), h.agent("B"), h.agent("C")];
   const turns = agents.map((a) => h.send(a.id, "hang"));
   await h.until(() => turns.filter((id) => h.store.turn(id)!.status === "running").length === 2, "two running");
-  await new Promise((r) => setTimeout(r, 200));
+  await h.passes();
   assert.equal(turns.filter((id) => h.store.turn(id)!.status === "queued").length, 1);
   runCommand(h.store, { action: "stop", agentId: agents[0].id });
   await h.until(() => h.store.turn(turns[2])!.status === "running", "third starts");
@@ -222,11 +225,12 @@ test("at most liveProcesses agent processes: the least recently used idle one cl
   // The evicted process stays tracked: still alive after the grace period,
   // it gets KILL.
   await h.until(() => /^signal KILL \d+$/m.test(h.log()), "evicted process killed");
-  // A's evicted process is still exiting (it takes 600 ms) while A's next
-  // turn runs in a new process: that late exit must not settle the new turn.
+  // A's evicted process is still exiting (it takes CLAUDE_TERM_EXIT_MS)
+  // while A's next turn runs in a new process: that late exit must not
+  // settle the new turn.
   const three = h.send(a.id, "hang");
   await h.started(three);
-  await new Promise((r) => setTimeout(r, 900));
+  await new Promise((r) => setTimeout(r, CLAUDE_TERM_EXIT_MS * 1.5));
   assert.equal(h.store.turn(three)!.status, "running");
   const launches = readFileSync(join(h.store.agent(a.id)!.folder, "args.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as string[]);
   assert.equal(launches.length, 2);
@@ -259,7 +263,7 @@ test("the Claude account's usage limit pauses its queue until the reset", async 
   await h.ended(limited);
   assert.ok(h.store.pausedUntil(`claude-code:${fingerprint(TOKEN)}`) > Date.now() + 3_000_000);
   const waiting = h.send(b.id, "hello");
-  await new Promise((r) => setTimeout(r, 300));
+  await h.passes();
   assert.equal(h.store.turn(waiting)!.status, "queued");
   assert.ok(h.events(a.id).some((e) => e.kind === "error" && /usage limit/.test((e.body as { text: string }).text)));
 });

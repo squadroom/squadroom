@@ -32,6 +32,9 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - name: npm test
+        # Naming bash is what turns on pipefail (the default shell runs
+        # bash without it), so a test failure still fails the step through
+        # the tee.
         shell: bash
         run: npm test 2>&1 | tee test-output.log
       - name: Upload test output
@@ -56,6 +59,7 @@ jobs:
       - name: The shell scripts parse (zsh -n)
         run: for script in scripts/console/console-agent scripts/console/*.sh scripts/*.sh; do zsh -n "$script"; done
       - name: Launcher, sandbox and setup tests (none may skip)
+        # As above: the named bash gives the tee pipefail.
         shell: bash
         run: |
           npm run test:macos 2>&1 | tee test-macos.log

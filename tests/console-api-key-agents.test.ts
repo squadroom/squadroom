@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentModel } from "../src/lib/console/agents.ts";
 import { apiKeyTurnUsage, apiKeyUsage, expectedKeySource, turnModelUsage } from "../src/lib/console/claude-session.ts";
 import { codexServerArgs } from "../src/lib/console/codex.ts";
 import { chargeTurn, NO_REQUESTS, readRunning, requestGauged, requestUsage } from "../src/lib/console/spend.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { GIT_TOKEN, harness, TOKEN } from "./helpers/console-harness.ts";
+import { harness, writeKeys } from "./helpers/console-harness.ts";
 
 // Claude Code on an Anthropic API key and Codex on an OpenAI API key, as
 // explicit model choices: each runs on its key and is charged from its
@@ -20,16 +20,7 @@ const CAP = { usd: 10, url: "https://example.test/limits", checkedAt: "2026-11-0
 const SONNET_KEY = agentModel("claude-code", "claude-sonnet-5@api-key")!;
 const SOL_KEY = agentModel("codex", "gpt-5.6-sol@api-key")!;
 
-function keys(path: string, openai = OPENAI) {
-  writeFileSync(
-    path,
-    JSON.stringify({
-      keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, ANTHROPIC_API_KEY: { value: ANTHROPIC, cap: CAP }, OPENAI_API_KEY: { value: openai, cap: CAP } },
-      projects: {},
-    }),
-    { mode: 0o600 },
-  );
-}
+const keys = (path: string, openai = OPENAI) => writeKeys(path, { ANTHROPIC_API_KEY: { value: ANTHROPIC, cap: CAP }, OPENAI_API_KEY: { value: openai, cap: CAP } });
 
 test("the API-key models: twins of the subscription ones, on the existing key names, at catalog prices", () => {
   for (const [kind, credential] of [["claude-code", "ANTHROPIC_API_KEY"], ["codex", "OPENAI_API_KEY"]] as const)

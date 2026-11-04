@@ -99,7 +99,7 @@ test("a summary is never routed to a teammate", async (t) => {
   await h.until(() => routed().some((m) => m.state === "done"), "routed and read");
   const { turnId } = runCommand(h.store, { action: "freshWithSummary", agentId: lead.id }) as { turnId: number };
   await h.ended(turnId);
-  await new Promise((r) => setTimeout(r, 400));
+  await h.passes();
   assert.equal(routed().length, 1);
 });
 

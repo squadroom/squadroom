@@ -1,6 +1,6 @@
 import type { AgentKind } from "../../src/lib/console/agents.ts";
 import type { TestContext } from "node:test";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,21 @@ const TIME_FACTOR = Math.max(1, Number(process.env.CONSOLE_TEST_TIME_FACTOR) || 
 export const ACP_CALL_MS = 30_000 * TIME_FACTOR;
 /** How long `until` waits by default. */
 const UNTIL_MS = 20_000 * TIME_FACTOR;
+
+/** Writes the key file: the Claude login and the Git token, and `extra`
+ * keys (an API key, with its cap). */
+export function writeKeys(path: string, extra: Record<string, unknown> = {}) {
+  writeFileSync(path, JSON.stringify({ keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, ...extra }, projects: {} }), { mode: 0o600 });
+}
+
+/** Git in `cwd` with no global or system configuration, as the test's own
+ * user (an author given with `-c` comes later and wins); trimmed output. */
+export const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", HOME: cwd } as Record<string, string> as NodeJS.ProcessEnv,
+  }).trim();
 
 /** A launcher that behaves like scripts/console/console-agent: a clean
  * environment with only the `--keep` names, its own process group, and Git
@@ -115,7 +130,7 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
   if (extra.codex) writeFileSync(join(agentHome, "fake-codex.json"), JSON.stringify(extra.codex));
   if (extra.acp) writeFileSync(join(agentHome, "fake-acp.json"), JSON.stringify(extra.acp));
   const keysFile = join(root, "keys.json");
-  writeFileSync(keysFile, JSON.stringify({ keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN } }, projects: {} }), { mode: 0o600 });
+  writeKeys(keysFile);
   const claude = join(root, "claude");
   writeFileSync(claude, `#!/bin/sh\nexec ${process.execPath} ${FAKE_CLAUDE} "$@"\n`, { mode: 0o755 });
   const codex = join(root, "codex");
@@ -180,13 +195,24 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     return w;
   };
   t.after(async () => {
-    await worker.stop();
-    for (const w of workers) await w.stop();
-    store.close();
+    // Every step runs even when one before it fails; the first failure is
+    // reported.
+    const failures: unknown[] = [];
+    const step = async (f: () => unknown) => {
+      try {
+        await f();
+      } catch (e) {
+        failures.push(e);
+      }
+    };
+    await step(() => worker.stop());
+    for (const w of workers) await step(() => w.stop());
+    await step(() => store.close());
     if (saved === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = saved;
     // A fake agent may still be writing its log as it ends: retried.
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await step(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    if (failures.length) throw failures[0];
   });
   const source = extra.project ?? { source: "folder" as const };
   const project = runCommand(store, { action: "createProject", name: "Demo", ...source }).project as { id: string };
@@ -216,14 +242,30 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
       ? readFileSync(join(agentHome, "codex-calls.jsonl"), "utf8")
           .trim()
           .split("\n")
-          .map((l) => JSON.parse(l) as { method: string; params: Record<string, unknown> })
+          .map((l) => JSON.parse(l) as { at: number; method: string; params: Record<string, unknown> })
       : [];
-  /** The turn runs and its prompt has gone to the agent (after the folder's
-   * commit before the turn). */
-  const started = async (turnId: number) => {
-    await until(() => store.turn(turnId)!.status === "running" && store.turn(turnId)!.commitBefore !== null, `turn ${turnId} started`);
-    await new Promise((r) => setTimeout(r, 150));
-  };
+  /** The prompts fake Claude Code received: its working folder, and when. */
+  const claudePrompts = () =>
+    existsSync(join(agentHome, "claude-prompts.jsonl"))
+      ? readFileSync(join(agentHome, "claude-prompts.jsonl"), "utf8")
+          .split("\n")
+          .slice(0, -1)
+          .map((l) => JSON.parse(l) as { cwd: string; at: number })
+      : [];
+  /** The turn runs and the agent has received its prompt: fake Claude Code
+   * marks each prompt, fake Codex logs turn/start and the ACP fake
+   * session/prompt, each with the time, after the turn's start. */
+  const started = (turnId: number) =>
+    until(() => {
+      const turn = store.turn(turnId)!;
+      const since = turn.startedAt;
+      if (!["queued", "running"].includes(turn.status)) throw new Error(`turn ${turnId} ended (${turn.status}: ${turn.reason}) before it started`);
+      if (turn.status !== "running" || since === null) return false;
+      const agent = store.agent(turn.agentId)!;
+      if (agent.kind === "claude-code") return claudePrompts().some((p) => p.cwd === agent.folder && p.at >= since);
+      if (agent.kind === "codex") return codexCalls().some((c) => c.method === "turn/start" && c.at >= since);
+      return acpCalls().some((c) => c.method === "session/prompt" && c.cwd === agent.folder && c.at >= since);
+    }, `turn ${turnId} started`);
   const ready = (...ids: string[]) => until(() => ids.every((id) => store.agent(id)!.state === "ready"), "agent folders");
   const acpCalls = () =>
     existsSync(join(agentHome, "acp-calls.jsonl"))
@@ -232,7 +274,7 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
           // file, or a line without its newline yet) when a test reads.
           .split("\n")
           .slice(0, -1)
-          .map((l) => JSON.parse(l) as { pid: number; cwd: string; argv?: string[]; method: string | null; id: number | null; params: Record<string, unknown> | null; result: Record<string, unknown> | null })
+          .map((l) => JSON.parse(l) as { pid: number; at: number; cwd: string; argv?: string[]; method: string | null; id: number | null; params: Record<string, unknown> | null; result: Record<string, unknown> | null })
       : [];
   return { root, store, worker, newWorker, project, tab, agent, codexAgent, acpAgent, acpCalls, keysFile, send, until, ended, started, events, said, log, codexCalls, ready, passes, agentHome, shared };
 }

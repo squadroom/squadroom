@@ -18,7 +18,7 @@
     "dev": "node scripts/web.ts --dev",
     "build": "next build && node scripts/check-build-trace.ts && node scripts/build-stamp.ts",
     "lint": "eslint",
-    "test": "node --test --test-concurrency=4 \"tests/*.test.ts\"",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=4 \"tests/*.test.ts\"",
     "test:macos": "node --test --test-concurrency=1 tests/console-launcher.test.ts tests/console-setup-script.test.ts tests/web-server.test.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "web": "node scripts/web.ts",
