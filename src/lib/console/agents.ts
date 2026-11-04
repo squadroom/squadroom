@@ -154,7 +154,7 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     credential: "CLAUDE_CODE_OAUTH_TOKEN",
     offered: true,
     models: [
-      // Checked 2026-10-16: the pinned 2.1.282 runs
+      // Checked 2026-10-16 on 2.1.282: it runs
       // claude-haiku-4-5-20251001 for `haiku`.
       { id: "haiku", label: "Haiku", model: "haiku", runs: "claude-haiku-4-5", efforts: [] },
       { id: "claude-sonnet-5", label: "Sonnet 5", model: "claude-sonnet-5", runs: "claude-sonnet-5", efforts: CLAUDE_EFFORTS, taskTools: false },
@@ -176,7 +176,8 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     credential: null,
     accountLogin: true,
     offered: true,
-    // Bundled by 0.155.1 (GPT-6 Sol is not, so it is not offered here).
+    // Bundled by 0.155.1 when last checked (GPT-6 Sol was not, so it is not
+    // offered here).
     models: [
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", model: "gpt-5.6-sol", runs: "gpt-5.6-sol", efforts: CODEX_EFFORTS },
       { id: "gpt-6-astra", label: "GPT-6 Astra", model: "gpt-6-astra", runs: "gpt-6-astra", efforts: CODEX_EFFORTS },
@@ -349,7 +350,7 @@ AGENT_KINDS.push(
     sources: [
       "https://geminicli.com/docs/cli/acp-mode/: `gemini --acp`; initialize, authenticate, newSession, loadSession, prompt, cancel, unstable_setSessionModel",
       "https://geminicli.com/docs/get-started/authentication/: GEMINI_API_KEY; Google AI Pro/Ultra logins ended 2026-06-18, so a paid key only",
-      "Live check 2026-10-22: with GEMINI_API_KEY alone the pinned 0.65.0 opens a session offering gemini-3.8-flash; GEMINI_CLI_HOME moves its ~/.gemini",
+      "Live check 2026-10-22: with GEMINI_API_KEY alone 0.65.0 opens a session offering gemini-3.8-flash; GEMINI_CLI_HOME moves its ~/.gemini",
       "src/lib/console/clients.ts: @google/gemini-cli pinned",
     ],
   },
@@ -384,7 +385,7 @@ AGENT_KINDS.push(
     ],
     sources: [
       "https://zed.dev/acp/agent/grok-build: `npx @xai-official/grok agent stdio`, xAI's coding agent; xAI's headless docs: JSON-RPC over stdio, XAI_API_KEY",
-      "Live check 2026-10-22: the pinned 1.0.62 reads XAI_API_KEY and advertises the `xai.api_key` authenticate method when it is set; GROK_HOME moves its ~/.grok",
+      "Live check 2026-10-22: 1.0.62 reads XAI_API_KEY and advertises the `xai.api_key` authenticate method when it is set; GROK_HOME moves its ~/.grok",
       "src/lib/console/clients.ts: @xai-official/grok pinned",
     ],
   },
