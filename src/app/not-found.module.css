@@ -1,0 +1,65 @@
+/* The 404 page. It is outside the Console, so light-dark() follows the
+   system's setting (the page's colour scheme, set in globals.css). */
+.page {
+  margin-inline: auto;
+  display: flex;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 28rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 1.5rem;
+  text-align: center;
+}
+.code {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: light-dark(oklch(51.1% 0.262 276.966), oklch(67.3% 0.182 276.935));
+}
+.title {
+  margin-top: 0.5rem;
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: light-dark(oklch(14.1% 0.005 285.823), #fff);
+}
+.note {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  color: oklch(55.2% 0.016 285.938);
+}
+.link {
+  margin-top: 1.5rem;
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  background-color: oklch(51.1% 0.262 276.966);
+  padding-inline: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  box-shadow:
+    0 1px 3px 0 oklch(25.7% 0.09 281.288 / 0.15),
+    0 1px 2px -1px oklch(25.7% 0.09 281.288 / 0.15);
+  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+@media (hover: hover) {
+  .link:hover {
+    background-color: oklch(58.5% 0.233 277.117);
+  }
+}
+.link:focus-visible {
+  outline: 2px solid oklch(58.5% 0.233 277.117);
+  outline-offset: 2px;
+}

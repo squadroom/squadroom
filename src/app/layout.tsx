@@ -23,10 +23,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     // hydrates; only those two elements' own attributes are exempt.
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         {children}
       </body>
     </html>
