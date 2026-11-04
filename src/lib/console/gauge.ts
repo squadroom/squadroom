@@ -3,7 +3,7 @@
 // made: with no window it shows the count alone, and with no measurement it
 // says so. Browser-safe and pure.
 
-export interface Gauge {
+interface Gauge {
   tokens: number | null;
   contextWindow: number | null;
   measured: boolean;

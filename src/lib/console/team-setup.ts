@@ -36,7 +36,7 @@ export interface TeamSetup {
  * alive at once, so a team fits in that with the Orchestrator. */
 export const TEAM_MAX_MEMBERS = 7;
 export const NOTE_MAX = 120;
-export const GOAL_MAX = 32_000;
+const GOAL_MAX = 32_000;
 /** Turns that run at once per login: more agents of one AI wait their turn
  * ("Queued"); the screen says so. */
 export const TURNS_PER_LOGIN = LIMITS.turnsPerLogin;
@@ -92,7 +92,7 @@ export function pairTeamSetup(codexOff = false, takenNames: string[] = [], roles
   return { ...base, orchestrated: false, members: [{ ...leadRow, name: lead, roleId: "pair-lead", prompt }, reviewer] };
 }
 
-export interface TeamAgentInput {
+interface TeamAgentInput {
   name: string;
   role: string;
   kind: AgentKind;

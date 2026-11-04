@@ -137,7 +137,7 @@ export const CONSOLE_CODE_MS = 8 * 60 * 60_000;
 
 /** What `needsFreshCode` measures a request against, read from the store
  * by `freshCodeContext`. */
-export interface FreshCodeContext {
+interface FreshCodeContext {
   /** The tab's spend limit now (its own or the default); null when the
    * tab is unknown, which needs a code. */
   spendLimit?: number | null;
@@ -210,9 +210,9 @@ export function needsFreshCode(input: Record<string, unknown>, context: FreshCod
 
 /** The highest spend limit a tab can be given. The key's provider-side cap
  * stays the hard ceiling. */
-export const SPEND_LIMIT_MAX = 1_000;
+const SPEND_LIMIT_MAX = 1_000;
 /** The highest Console-wide spend limit. */
-export const CONSOLE_SPEND_LIMIT_MAX = 10_000;
+const CONSOLE_SPEND_LIMIT_MAX = 10_000;
 
 /** A spend limit as sent: dollars, rounded to the cent, from $0.01 to
  * `max`; null (the default); undefined when not valid. */
@@ -228,7 +228,7 @@ export function spendLimitInput(value: unknown, max = SPEND_LIMIT_MAX): number |
  * fresh code where `needsFreshCode` asked for one. The commands it
  * measured against the store check again here, so a change made meanwhile
  * cannot slip past. */
-export interface CommandOptions {
+interface CommandOptions {
   freshCode?: boolean;
 }
 

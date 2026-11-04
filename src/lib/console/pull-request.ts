@@ -7,7 +7,7 @@ import { setting } from "../../config/server-env.ts";
 // calls live in github-api.ts.
 
 /** What the agent (team_push) or the owner (Push branch) asked for. */
-export interface PushRequest {
+interface PushRequest {
   by: "agent" | "owner";
   title?: string;
   body?: string;
@@ -15,10 +15,10 @@ export interface PushRequest {
   review?: boolean;
 }
 
-export const PR_TITLE_MAX = 120;
+const PR_TITLE_MAX = 120;
 /** GitHub refuses bodies over 65,536 characters; the footer and the commit
  * list need room. */
-export const PR_BODY_MAX = 50_000;
+const PR_BODY_MAX = 50_000;
 export const CODEX_REVIEW = "@codex review";
 
 /** CONSOLE_CODEX_REVIEW: whether the worker comments `@codex review` on the
@@ -102,7 +102,7 @@ export function wantsReview(request: PushRequest | null, created: boolean): bool
 // ── Reading the pull request (team_pr) ────────────────────────
 
 /** The most of the pull request team_pr hands back. */
-export const PR_READ_CHARS = 60_000;
+const PR_READ_CHARS = 60_000;
 /** The Codex app's logins, exactly (REST names bots with "[bot]",
  * GraphQL without): anyone else's look-alike comments are not Codex. */
 const CODEX_LOGINS = new Set(["chatgpt-codex-connector", "chatgpt-codex-connector[bot]"]);
@@ -148,9 +148,9 @@ type PrRead = { number: number; url: string; title: string; state: string; headS
 
 /** One person's (or Codex's) comment is shown whole up to this; past it,
  * team_pr with that comment's number reads it all. */
-export const PR_COMMENT_CHARS = 8_000;
+const PR_COMMENT_CHARS = 8_000;
 /** A single comment or thread asked for by number or id. */
-export const PR_ITEM_CHARS = 60_000;
+const PR_ITEM_CHARS = 60_000;
 const indent = (text: string) => text.replace(/\n/g, "\n    ");
 /** Codex's review summary, or a deploy bot's hidden metadata: not talk. */
 const boilerplate = (c: PrComment) => /codex-review-state:v1|codex-pull-request-review-summary/.test(c.body) || /^\s*\[vc\]:/.test(c.body);

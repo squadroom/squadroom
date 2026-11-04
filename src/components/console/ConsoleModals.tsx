@@ -10,6 +10,8 @@ import SearchDialog from "./SearchDialog";
 import { ArchiveDialog, ClosedTabsDialog, FoldersDialog, NetworkDialog, PauseDialog, SaveTemplateDialog, SpendLimitDialog, StepsDialog } from "./Settings";
 import TeamSetupDialog from "./TeamSetupDialog";
 
+// The Console page's dialogs: which one is open, and each one's props.
+
 /** The page's dialogs, at most one open at a time. Changes, the
  * file panel and Needs you are not among them: they open beside a dialog. */
 export type Modal =

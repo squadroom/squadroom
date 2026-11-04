@@ -36,7 +36,7 @@ const APPROVE_TOOL = {
  * asks about first), a team or image tool's bare name, or another name on
  * the Console's server. A request the agent wrote itself can then never
  * pass for one of the Console's own decisions (team_push, team_pr_reply). */
-export function consoleToolName(tool: string): boolean {
+function consoleToolName(tool: string): boolean {
   const own = /^mcp__console__(.*)$/.exec(tool);
   if (own) return !TEAM_TOOL_NAMES.has(own[1]) && !IMAGE_TOOL_NAMES.has(own[1]);
   return tool === APPROVE_TOOL.name || TEAM_TOOL_NAMES.has(tool) || IMAGE_TOOL_NAMES.has(tool);

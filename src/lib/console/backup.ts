@@ -47,7 +47,7 @@ export function expiredConsoleBackups(names: string[], now: number, keepDays: nu
 /** A consistent copy of the store taken off the worker's event loop: a
  * worker thread opens its own read-only connection and runs VACUUM INTO,
  * so the tick, the MCP server and the agents' streams go on meanwhile. */
-export function snapshotOffThread(storePath: string, out: string): Promise<void> {
+function snapshotOffThread(storePath: string, out: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const thread = new Worker(
       `const { workerData, parentPort } = require("node:worker_threads");

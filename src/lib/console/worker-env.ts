@@ -4,7 +4,7 @@ import nextEnv from "@next/env";
 // e-mail settings, the dead-man's switch and the Codex review switch, nothing
 // else. The process's own environment wins, as in Next.js.
 
-export const WORKER_ENV_NAMES = [
+const WORKER_ENV_NAMES = [
   "CONSOLE_BACKUP_DIR",
   "CONSOLE_RESEND_API_KEY",
   "CONSOLE_MAIL_FROM",

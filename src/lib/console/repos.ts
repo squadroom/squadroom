@@ -46,7 +46,7 @@ export function freeBytes(path: string): number {
 }
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 /** The largest bundle the worker copies out of an agent's folder. */
-export const MAX_BUNDLE_BYTES = 4 * 1024 ** 3;
+const MAX_BUNDLE_BYTES = 4 * 1024 ** 3;
 
 /**
  * Copy a file the agent user wrote (a bundle in its `.git`) to `to`, a new
@@ -90,7 +90,7 @@ export function copyAgentFile(from: string, to: string, uid: number, max = MAX_B
   chmodSync(to, 0o640);
 }
 
-export interface ReposOptions {
+interface ReposOptions {
   store: ConsoleStore;
   launcher: Launcher;
   paths: ConsolePaths;

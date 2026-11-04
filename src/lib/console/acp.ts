@@ -45,7 +45,7 @@ export function readSessionModel(result: Record<string, unknown>): { current: st
 export const ACP_PROTOCOL = 1;
 
 /** What one session/update means to the Console. */
-export type AcpUpdate =
+type AcpUpdate =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
   | { type: "tool"; id: string; kind: string; title: string }

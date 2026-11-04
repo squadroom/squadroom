@@ -10,7 +10,7 @@
 // build of another commit, so a pull without a build never serves old code
 // under new docs.
 
-export type WebMode = "start" | "dev";
+type WebMode = "start" | "dev";
 
 /** The stamp `npm run build` leaves in `.next`. */
 export const BUILD_STAMP = "squadroom-build.json";

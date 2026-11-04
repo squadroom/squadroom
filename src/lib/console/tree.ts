@@ -5,14 +5,14 @@
 /** What an agent's dot says. */
 export type TreeStatus = "working" | "needs_you" | "queued" | "idle" | "paused" | "error" | "creating";
 
-export interface TreeAgent {
+interface TreeAgent {
   id: string;
   name: string;
   status: TreeStatus;
   /** Its AI (`claude-code`, `codex`, …), for the kind badge. */
   kind?: string;
 }
-export interface TreeTab {
+interface TreeTab {
   id: string;
   name: string;
   paused: boolean;

@@ -3,7 +3,7 @@
 /** The accepted types: PNG, JPEG and WebP images, identified from the
  * bytes (never from a name or a declared type). SVG and everything else is
  * refused (SVG can carry script). */
-export type ImageMime = "image/png" | "image/jpeg" | "image/webp";
+type ImageMime = "image/png" | "image/jpeg" | "image/webp";
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /** The image type and size, read from the bytes, or null when the bytes are

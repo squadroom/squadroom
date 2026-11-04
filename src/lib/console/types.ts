@@ -16,7 +16,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
 };
 
 /** `creating`: the worker has not made its folder yet. */
-export type AgentState = "creating" | "ready" | "error" | "closed";
+type AgentState = "creating" | "ready" | "error" | "closed";
 /** An agent that can still take part: not closed, and its setup did not
  * fail. Where a failed agent still counts (its name is taken, the page
  * lists it), the check is `state !== "closed"` and says so. */
@@ -226,7 +226,7 @@ export const CONSOLE_SPEND_PAUSE = "Console spend limit: ";
 export const USAGE_PAUSE = "Usage not reported: ";
 
 /** One request in the Needs you tray. */
-export type RequestState = "open" | "allowed" | "denied" | "answered" | "expired";
+type RequestState = "open" | "allowed" | "denied" | "answered" | "expired";
 export interface ConsoleRequest {
   id: number;
   turnId: number;

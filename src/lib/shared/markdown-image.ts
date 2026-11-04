@@ -8,7 +8,7 @@
 import { createElement } from "react";
 import { defaultUrlTransform } from "react-markdown";
 
-export type ImageDecision = { show: true; src: string } | { show: false; text: string };
+type ImageDecision = { show: true; src: string } | { show: false; text: string };
 
 /** A base64 image carried inline (`data:image/…`), which may be shown and
  * which the Markdown URL transform lets through for an image's `src`. */

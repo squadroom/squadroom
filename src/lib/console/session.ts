@@ -58,7 +58,7 @@ export interface TurnRequest {
 }
 
 /** The context gauge's figures. */
-export interface GaugeUpdate {
+interface GaugeUpdate {
   tokens?: number;
   contextWindow?: number | null;
   model?: string | null;
@@ -272,7 +272,7 @@ export const oneLine = (redactor: Redactor, text: string) => redactor.shorten(te
 const STDERR_HOLD = 16_384;
 const STDERR_KEEP = 8_192;
 /** The most of it a turn's reason carries. */
-export const STDERR_TAIL_CHARS = 300;
+const STDERR_TAIL_CHARS = 300;
 
 /** One stdout line longer than this is not the protocol: the client's
  * `onOversize` (the turn stops on "output limit", a server is ended). */
@@ -393,7 +393,7 @@ export abstract class ClientProcess {
 export type LateReply = (reply: { result: Record<string, unknown> } | { refused: string }) => void;
 
 /** How a JSON-RPC call is made (`RpcProcess.request`). */
-export interface RpcCallOptions {
+interface RpcCallOptions {
   /** 0: no timeout. */
   timeoutMs: number;
   /** Whether the request reached the program's input: false when the

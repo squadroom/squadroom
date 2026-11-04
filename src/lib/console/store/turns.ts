@@ -31,7 +31,7 @@ export interface TabTurn {
   finalText: string | null;
   costUsd: number | null;
 }
-export interface SearchHit {
+interface SearchHit {
   turnId: number;
   /** The agent's final reply; otherwise the turn's message. */
   reply: boolean;

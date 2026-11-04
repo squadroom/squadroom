@@ -1,12 +1,15 @@
 import type { ModelConfig, TokenPrices } from "../../config/models.ts";
 
+// What a model's tokens cost: the prices in force when the request was made,
+// the cost in dollars, and how a cost is shown.
+
 /** What a price is worked out from: a catalog model, less who bills it (the
  * Console also prices OpenRouter models, which are not in the catalog). */
 export type PricedModel = Omit<ModelConfig, "provider">;
 
 /** Input is the TOTAL prompt including cache reads/writes. The request clock
  * fixes the tariff before the provider call; stored costs are never repriced. */
-export interface BillingUsage {
+interface BillingUsage {
   cachedInputTokens?: number;
   cacheWriteInputTokens?: number;
   longCacheWriteInputTokens?: number;

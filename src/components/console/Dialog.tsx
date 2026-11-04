@@ -2,6 +2,8 @@ import Icon from "@/components/shared/Icon";
 import { useDialogFocus } from "./useDialogFocus";
 import styles from "./console.module.css";
 
+// The Console's dialog box, and the panel Settings shows in its place.
+
 /** A Settings section's screen: shown in place, under the page's own
  * heading, instead of over the page. */
 export function Panel({ title, children }: { title: string; children: React.ReactNode }) {

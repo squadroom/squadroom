@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 // no server-sent events, no sessions, tools only.
 
 /** A tool call's result, as MCP's `tools/call` returns it. */
-export interface ToolContent {
+interface ToolContent {
   type: "text" | "image";
   text?: string;
   data?: string;
@@ -18,10 +18,10 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-export const MCP_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const MCP_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const MAX_BODY = 256 * 1024;
 /** The name a server reports. */
-export interface ServerInfo {
+interface ServerInfo {
   name: string;
   version: string;
 }
@@ -34,13 +34,13 @@ export interface McpBackend {
   tools(token: string): unknown[];
   call(token: string, name: string, args: unknown): Promise<ToolResult>;
 }
-export interface McpRequest {
+interface McpRequest {
   method: string;
   path: string;
   headers: Record<string, string | undefined>;
   body: string;
 }
-export interface McpResponse {
+interface McpResponse {
   status: number;
   headers: Record<string, string>;
   body?: string;

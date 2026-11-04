@@ -47,7 +47,7 @@ export function mailSettings(env: Record<string, string | undefined>): MailSetti
   return { apiKey, from, to, origin };
 }
 
-export type SendResult =
+type SendResult =
   | { ok: true }
   | { ok: false; retryable: boolean; status: number | null };
 

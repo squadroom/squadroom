@@ -8,6 +8,10 @@ import Dialog from "./Dialog";
 import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
 
+// The small dialogs opened from a project's or a tab's menu: pause, network,
+// folders, closed tabs, spend limit, steps, templates and the archive
+// confirmation.
+
 /** Pause a tab, a project or everything: after current turns, or now. */
 export function PauseDialog({ scope, id, name, run, onClose }: { scope: "tab" | "project" | "all"; id: string | null; name: string; run: Run; onClose: () => void }) {
   const pause = (mode: "now" | "after") => {

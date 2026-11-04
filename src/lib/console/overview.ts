@@ -18,7 +18,7 @@ const DAY_MS = 24 * 60 * 60_000;
 /** Problems shown: failed and interrupted turns of the last 24 hours. */
 const PROBLEMS_MAX = 50;
 
-export interface OverviewSpend {
+interface OverviewSpend {
   tabs: { tabId: string; tabName: string; projectId: string; projectName: string; today: number; month: number; sinceReset: TabSpend }[];
   /** API keys by name and where they are set (a project's own, or the
    * global one), this month, against the provider-side cap. */
@@ -54,7 +54,7 @@ export function spendWindows(now: number): { dayStart: number; monthStart: numbe
 /** A charged key: its name and where it is set; `row` is the key there now,
  * or null when the turn was paid by another key since replaced there (its
  * spend stays with that earlier key). */
-export interface ChargedKey {
+interface ChargedKey {
   name: string;
   projectId: string | null;
   row: KeyRow | null;

@@ -13,10 +13,10 @@ export const PARTIAL_MS = 10 * 60_000;
 export const SESSION_MS = 30 * 24 * 60 * 60_000;
 /** The default window in which a confirmation counts as fresh. */
 export const FRESH_CODE_MS = 10 * 60_000;
-export const MAX_WRONG_CODES = 5;
+const MAX_WRONG_CODES = 5;
 export const LOCK_MS = 15 * 60_000;
 /** At most one code e-mail per minute. */
-export const CODE_INTERVAL_MS = 60_000;
+const CODE_INTERVAL_MS = 60_000;
 /** How long an e-mailed code is valid. */
 export const CODE_MS = 10 * 60_000;
 export const EMERGENCY_MS = 10 * 60_000;
@@ -49,13 +49,13 @@ export interface CodeMailer {
 }
 /** Step 1: the GitHub account behind an authorization code. `challenge`
  * and `verifier` are PKCE's (S256): only this server can exchange the code. */
-export interface GitHubIdentity {
+interface GitHubIdentity {
   authorizeUrl(state: string, challenge: string): string;
   /** The numeric account ID, or null. The user token is not kept. */
   accountId(code: string, verifier: string): Promise<number | null>;
 }
 
-export type SignInFailure = "failed" | "code" | "locked" | "wait" | "expired" | "limited" | "unavailable" | "noMail";
+type SignInFailure = "failed" | "code" | "locked" | "wait" | "expired" | "limited" | "unavailable" | "noMail";
 const MESSAGES: Record<SignInFailure, string> = {
   failed: "Sign-in failed. Start again.",
   code: "The code was not accepted.",

@@ -3,6 +3,9 @@ import { ComposerStore, afterSend, heldUploadIds, type Composer, type ComposerUp
 import { checkUpload } from "@/lib/console/files";
 import { api, awaitJob } from "./api";
 
+// Each agent's composer on the page: its text and attached files, kept while
+// the page is open, with the held uploads renewed.
+
 /** Every agent's composer on this page: its text, the
  * queued message being edited and its attached files outlive the window,
  * so maximizing another window or switching tab or project loses nothing,

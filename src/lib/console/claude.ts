@@ -12,7 +12,7 @@ import type { TurnUsage } from "./types.ts";
 
 export const PERMISSION_TOOL = "mcp__console__approve";
 
-export interface ClaudeLaunch {
+interface ClaudeLaunch {
   model: AgentModel;
   effort: ConsoleEffort | null;
   settings: unknown;

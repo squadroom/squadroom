@@ -3,13 +3,13 @@ import { applyTaskOp, EMPTY_TASKS, taskCount, type TaskItem, type TaskListState,
 import { json } from "./rows.ts";
 
 /** Helpers recorded per turn. */
-export const HELPERS_PER_TURN = 50;
+const HELPERS_PER_TURN = 50;
 /** Task calls awaiting their result per agent; more are not followed and
  * the list shows as possibly out of date. */
-export const TASK_CALLS_PENDING = 200;
+const TASK_CALLS_PENDING = 200;
 /** How long a file attached in the composer stays held for its message
  * without the composer renewing it. */
-export const UPLOAD_HOLD_MS = 60 * 60_000;
+const UPLOAD_HOLD_MS = 60 * 60_000;
 /** File reads (and their content) are kept this long. */
 const READ_KEPT_MS = 15 * 60_000;
 const NO_TASKS = { state: EMPTY_TASKS, pending: {} as Record<string, TaskOp> };

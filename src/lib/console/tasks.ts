@@ -30,7 +30,7 @@ export type TaskOp =
 export const TASKS_MAX = 100;
 export const TASK_TEXT_MAX = 300;
 /** A longer call or task id is not followed (the list may be out of date). */
-export const TASK_ID_MAX = 100;
+const TASK_ID_MAX = 100;
 const CREATED = /^Task #(\S+) created successfully/;
 
 export const EMPTY_TASKS: TaskListState = { items: [], incomplete: false, stale: false };

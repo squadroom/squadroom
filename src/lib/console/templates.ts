@@ -19,7 +19,7 @@ export interface TabTemplate {
 
 export const TEMPLATE_NAME_MAX = 60;
 export const STEPS_MAX = 20;
-export const STEP_FILES_MAX = 50;
+const STEP_FILES_MAX = 50;
 const STEP_NAME_MAX = 60;
 const FILE_MAX = 200;
 

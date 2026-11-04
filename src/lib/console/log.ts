@@ -8,7 +8,7 @@ import { Redactor } from "./redact.ts";
 // the way out. At its size limit the file becomes `<file>.1`, replacing
 // the one before, so at most twice the limit is kept.
 
-export const LOG_MAX_BYTES = 5 * 1024 * 1024;
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
 /** How much of each file the Logs page reads: its latest entries. */
 const TAIL_BYTES = 512 * 1024;
 
