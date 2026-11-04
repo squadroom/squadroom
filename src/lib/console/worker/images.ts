@@ -39,7 +39,7 @@ export const pause = (ms: number, signal: AbortSignal) =>
 class Settled extends ImageError {}
 
 export const images = {
-  /** Offered to a Claude Code window at Edit in a project with Image tools
+  /** Offered to a Claude Code window at Code edit in a project with Image tools
    * on, while the Keys page has a Krea key with a cap. */
   imageToolsOffered(this: ConsoleWorker, agent: ConsoleAgent, project: ConsoleProject | undefined): boolean {
     if (agent.kind !== "claude-code" || agent.permission !== "edit" || !project?.imageTools) return false;

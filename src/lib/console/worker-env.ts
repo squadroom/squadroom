@@ -1,8 +1,8 @@
 import nextEnv from "@next/env";
 
 // What the Console worker takes from the .env files: the backup folder, the
-// e-mail settings, the dead-man's switch and the Codex review switch, nothing
-// else. The process's own environment wins, as in Next.js.
+// e-mail settings (with SERVER_PUBLIC_ORIGIN, for links in them), the
+// dead-man's switch and the Codex review switch, nothing else. The process's own environment wins, as in Next.js.
 
 const WORKER_ENV_NAMES = [
   "CONSOLE_BACKUP_DIR",

@@ -31,7 +31,8 @@ In scope, for example:
 
 Known limits, documented in [docs/threat-model.md](docs/threat-model.md),
 are not vulnerabilities by themselves: for example, agents share one macOS
-user and can read each other's environment while running, redaction
+user and can read each other's environment while running, Claude Code
+and Codex share your launchd session, redaction
 only recognises the values and key shapes it knows, and the push check
 finds a credential only byte for byte, not encoded some other way.
 

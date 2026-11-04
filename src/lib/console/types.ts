@@ -53,7 +53,7 @@ export interface ConsoleProject {
   /** A change asked for that waits for the project's ACP sessions to
    * restart (the switch shows as changed only then), or null. */
   acpNetworkPending: boolean | null;
-  /** Image tools for its Claude Code windows at Edit: off unless the owner
+  /** Image tools for its Claude Code windows at Code edit: off unless the owner
    * switched them on; offered from each session's start. */
   imageTools: boolean;
   createdAt: number;

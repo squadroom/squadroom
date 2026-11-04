@@ -45,7 +45,8 @@ tabs. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 
-Every agent works in its own Git clone on its own `console/…` branch.
+Every agent works in its own Git clone on its own `console/…` branch (a
+Code analysis agent, which changes no files, sits on the base branch).
 Squadroom commits what changed at the end of each turn, so you can check the
 work one turn at a time in the window's **Changes** view. Each commit's
 message holds your whole request for that turn, and pushing the branch
@@ -133,8 +134,9 @@ with its turn.
 - **Spend, across Squadroom.** API-key spend across every tab is limited
   to $25 per calendar month (UTC) unless you change it on the Overview,
   anywhere from $0.01 to $10,000. When it is reached, every tab with an
-  API-key agent pauses until you raise the limit or press **Reset Console
-  spend**. Making new tabs doesn't get round it.
+  API-key agent pauses until you press **Reset Console spend**, or until
+  you raise the limit and press **Resume**. Making new tabs doesn't get
+  round it.
 - **Spend, per key.** Each paid API key needs a monthly cap that you set on
   the provider's own site first and then enter in Squadroom. No agent gets
   the key until you do. The provider's cap is the real ceiling.
@@ -217,8 +219,8 @@ npm run console:worker            # in a second terminal: the worker that runs a
 Then point your https proxy at port 3011 (for example
 `tailscale serve --bg 3011`), open `https://<your address>/console`, sign in
 with GitHub, and add your keys under **Settings**, **Keys and
-connections**. For daily use, install both processes as LaunchAgents (`scripts/install-web-launch-agent.sh` and
-`scripts/console/install-launch-agent.sh`) and update with `npm run update`;
+connections**. For daily use, install both processes as LaunchAgents (`scripts/install-web-launch-agent.sh install` and
+`scripts/console/install-launch-agent.sh install`) and update with `npm run update`;
 when it says the launcher changed, run the setup script again.
 
 ## Configuration
@@ -265,13 +267,14 @@ and how each part works in [docs/architecture.md](docs/architecture.md).
   needs a signed-in session; commands also need a same-origin `Origin`.
   Pages carry a Content-Security-Policy that keeps them to Squadroom's own
   address, its forms to its own address and stops other sites framing
-  them; it does allow inline scripts, which Next.js needs. Pages also ask
+  them; it does allow inline scripts, which Next.js needs, and inline
+  styles. Pages also ask
   the browser to keep to https (HSTS) and not to guess content types.
 - **Agents run as a separate macOS user** (`agent`) that cannot read your
   home folder, through a root-owned launcher that passes only the one
-  credential an agent needs. Claude Code runs in its sandbox, Codex under
-  per-thread permission profiles, and ACP agents inside a macOS sandbox
-  profile. File writes are limited to the agent's own clone (see the known
+  credential an agent needs. The commands Claude Code runs are sandboxed
+  by its own sandbox, those Codex runs by per-thread permission profiles,
+  and ACP agents run inside a macOS sandbox profile. File writes are limited to the agent's own clone (see the known
   limits in [docs/threat-model.md](docs/threat-model.md)).
 - **GitHub is touched only by the worker.** Agents have no GitHub
   credential. Pushes go through your mirror, only to `console/` branches,

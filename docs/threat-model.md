@@ -44,10 +44,10 @@ only restates one of them is not a new finding.
   Content-Security-Policy keeps the page to its own address for scripts,
   styles, fonts, images (plus inline `data:` ones) and requests, and no
   other site may frame it. It does allow inline scripts, which Next.js
-  needs to start each page, so it is a second line of defence: what keeps
-  an agent's output from making your browser call out, or call one of
-  Squadroom's own routes with your cookies, is that its Markdown is
-  rendered without raw HTML.
+  needs to start each page, and inline styles, so it is a second line of
+  defence: what keeps an agent's output from making your browser call
+  out, or call one of Squadroom's own routes with your cookies, is that
+  its Markdown is rendered without raw HTML.
   The Console's e-mails never carry model-written text.
 - **A stolen session cookie.** Weighty actions
   ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
