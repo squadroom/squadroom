@@ -80,6 +80,10 @@ only restates one of them is not a new finding.
 - **Your Mac's own account.** Anyone who can run code as you, or as root,
   can read the store and the key file. Squadroom is single-user; it is not a
   multi-tenant sandbox.
+- **Claude Code's and Codex's own programs.** They run as `agent` outside
+  the sandbox (the commands they run are sandboxed) and share your launchd
+  session, so if one were taken over it could start a background job that
+  runs as you.
 - **Without mail**, GitHub is the only sign-in factor (weighty actions
   are then off).
 - **Programs left running.** A program an agent left running keeps the
