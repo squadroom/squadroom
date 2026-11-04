@@ -11,7 +11,7 @@ import "./markdown.css";
  * code highlighting (a reply still streaming). */
 export default function Markdown({ children, onLink, highlight = true }: { children: string; onLink?: (href: string) => boolean; highlight?: boolean }) {
   return (
-    <div className="markdown text-[15px] leading-relaxed">
+    <div className="markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={highlight ? [rehypeHighlight] : []}

@@ -4,6 +4,8 @@
   margin-top: 0.75em;
 }
 .markdown {
+  font-size: 15px;
+  line-height: 1.625;
   min-width: 0;
   overflow-wrap: anywhere;
 }
