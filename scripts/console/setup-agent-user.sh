@@ -311,7 +311,7 @@ done
 step "Allowing $OWNER to run only the launcher as '$AGENT' ($SUDOERS)"
 tmp=$(/usr/bin/mktemp)
 cat > $tmp <<EOF
-# Agent Console. The owner may run only the launcher
+# Squadroom. The owner may run only the launcher
 # as the agent user. env_reset stays on; only these credentials cross.
 Defaults!$LAUNCHER env_reset
 Defaults!$LAUNCHER env_keep = "CLAUDE_CODE_OAUTH_TOKEN CODEX_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY XAI_API_KEY GEMINI_API_KEY DEEPSEEK_API_KEY ZAI_API_KEY MOONSHOT_API_KEY OPENROUTER_API_KEY"

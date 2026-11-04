@@ -41,7 +41,7 @@ test("OpenCode is offered at Code edit and Code analysis; at Code edit an edit i
   assert.equal(existsSync(outside), false);
 });
 
-test("a turn end to end: sandboxed at Look only, network off, the model confirmed, only its key crosses, streamed, charged at catalog prices", async (t) => {
+test("a turn end to end: sandboxed at Code analysis, network off, the model confirmed, only its key crosses, streamed, charged at catalog prices", async (t) => {
   const h = await acp(t);
   const scout = h.acpAgent();
   await h.ready(scout.id);
@@ -54,7 +54,7 @@ test("a turn end to end: sandboxed at Look only, network off, the model confirme
   assert.equal(row.costBasis, "reported");
   assert.equal(row.costUsd, chargeTurn(LUNA, HELLO_USAGE)!.usd);
   assert.ok(row.costUsd! > 0);
-  // The launcher's sandbox profile: Look only, no network, the Console's port.
+  // The launcher's sandbox profile: Code analysis, no network, the Console's port.
   assert.match(h.log(), /^sandbox --sandbox look$/m);
   assert.match(h.log(), /^sandbox --net off$/m);
   assert.match(h.log(), /^sandbox --port \d+$/m);

@@ -43,7 +43,7 @@ export const teamGit = {
     if (this.store.tabSteps(me.tabId)) throw new TeamError("In a tab with steps, teammates do not pull each other's work: a merge could change files outside the current step.");
     const from = this.teammate(c.team, me, c.args.from);
     if (from.state !== "ready" || !from.folder) throw new TeamError(`${from.name} has no folder to pull from.`);
-    // A Look only agent shows other agents' commits, not work of its own.
+    // A Code analysis agent shows other agents' commits, not work of its own.
     if (from.permission !== "edit" || !this.store.agentBase(from.id).branch) throw new TeamError(`${from.name} does not edit code on a branch of its own, so there is nothing of its own to pull.`);
     return once(this, c, async () => {
       // Room for its record before the clone is changed.

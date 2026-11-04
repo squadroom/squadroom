@@ -1,5 +1,5 @@
 #!/bin/zsh -f
-# console-agent — the Agent Console's launcher.
+# console-agent — Squadroom's launcher.
 #
 # Installed root-owned at /usr/local/libexec/console-agent by
 # setup-agent-user.sh, and run only through sudo as the `agent` user:
@@ -98,7 +98,7 @@ case ${1-} in
     # worker with --deny), the local bare repositories, every other agent's
     # temporary folder, the Codex, Claude and Kimi Code folders (and
     # ~/.claude.json, which names every Claude agent's folder) and the shared
-    # folder. Writes only in its own clone and temporary folder (Look only:
+    # folder. Writes only in its own clone and temporary folder (Code analysis:
     # the temporary folder alone), and no preferences (`defaults write`).
     # Network is off unless the owner switched it on for the project, except
     # the Console's own team tools on the loopback port the worker names.
@@ -171,7 +171,7 @@ case ${1-} in
       /bin/mkdir -p -m 700 -- $xdg/data $xdg/config $xdg/cache $xdg/state
       export XDG_DATA_HOME=$xdg/data XDG_CONFIG_HOME=$xdg/config XDG_CACHE_HOME=$xdg/cache XDG_STATE_HOME=$xdg/state
       # Clients that keep their state in a folder of their own in the home
-      # instead (live qualification, 2026-10-22): Gemini CLI (~/.gemini,
+      # instead (seen in live checks on 2026-10-22): Gemini CLI (~/.gemini,
       # moved by GEMINI_CLI_HOME) and Grok Build (~/.grok, moved by
       # GROK_HOME, which also must not update itself). Each window keeps
       # them in its own temporary folder; their keys come in the environment.

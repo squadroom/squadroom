@@ -460,7 +460,7 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   setStep(store, input) {
     // A tab's step: back to any earlier step at once; forward only once
     // every editing agent's current commit is approved, after a reviewer's
-    // review when the tab has a Look only agent.
+    // review when the tab has a Code analysis agent.
     const tab = store.tab(id(input.tabId, "Tab"));
     const stepped = tab && store.tabSteps(tab.id);
     if (!tab || !stepped) throw new CommandError("That tab has no steps.");

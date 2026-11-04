@@ -78,7 +78,7 @@ export class Clone {
     return (await this.head())!;
   }
   /** A GitHub project's clone, filled from the mirror's bundle. An editing
-   * agent works on its own `console/` branch; a Look only agent on the base
+   * agent works on its own `console/` branch; a Code analysis agent on the base
    * branch, detached. */
   async createFromBundle(bundle: string, base: string, branch: string | null): Promise<string> {
     // Git refuses to fetch into the branch HEAD names, so the empty
@@ -323,7 +323,7 @@ export class Clone {
   async setRef(ref: string, sha: string) {
     await this.git(["update-ref", ref, sha], "Recording the commit");
   }
-  /** `force`: a Look only reviewer's folder is a mirror of its teammates'
+  /** `force`: a Code analysis reviewer's folder is a mirror of its teammates'
    * commits, so a file of its own in the way of the checkout is
    * overwritten rather than failing the refresh. */
   async checkoutDetached(sha: string, force = false) {

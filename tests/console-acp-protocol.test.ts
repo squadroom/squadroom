@@ -38,7 +38,7 @@ test("the ACP readers: updates, tool results, plans, the context gauge; usage th
     assert.deepEqual(readAcpUsage({ inputTokens: 1000, outputTokens: 200, ...bad }), {}, JSON.stringify(bad));
 });
 
-test("an ACP agent's permission requests: reads allowed; edits never at Look only, only in its folder; commands and network to the owner", () => {
+test("an ACP agent's permission requests: reads allowed; edits never at Code analysis, only in its folder; commands and network to the owner", () => {
   const look = { folder: "/w/p/a", permission: "look" as const };
   const edit = { folder: "/w/p/a", permission: "edit" as const };
   assert.equal(decideAcp({ kind: "read", title: "Read" }, look).behavior, "allow");

@@ -3,7 +3,7 @@
 
 /** Where uploads go inside an agent's folder. Never committed (the turn's
  * commit leaves it out) and never pushed (a push whose commits add a file
- * here is refused); read-only for a Look only agent (its sandbox denies
+ * here is refused); read-only for a Code analysis agent (its sandbox denies
  * writes to its whole folder). */
 export const UPLOADS_DIR = ".console-uploads";
 export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;

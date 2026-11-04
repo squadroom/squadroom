@@ -317,7 +317,7 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   assert.match(h.said(lead.id).at(-1)!, new RegExp(`^team_pr: Comment ${gh.comments.length} on pull request #100, from octocat:\\n\\n## QA\\n\\n\\| # \\| Result \\|`));
   await h.ended(h.send(lead.id, call("team_pr", { comment: 0 })));
   assert.match(h.said(lead.id).at(-1)!, /error: comment must be a comment's number/);
-  // A Look only agent has no pull request of its own.
+  // A Code analysis agent has no pull request of its own.
   await h.ended(h.send(look.id, call("team_pr")));
   assert.match(h.said(look.id).at(-1)!, /error: A Code analysis agent has no branch/);
 

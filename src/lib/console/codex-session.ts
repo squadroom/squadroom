@@ -194,12 +194,12 @@ class CodexSession implements AgentSession {
       });
     result ??= await server.call("thread/start", { ...params, ephemeral: false });
     const id = String((result.thread as { id?: unknown } | undefined)?.id ?? "");
-    // The profile and its parent: Look only must resolve to `:read-only`.
+    // The profile and its parent: Code analysis must resolve to `:read-only`.
     const active = result.activePermissionProfile as { id?: unknown; extends?: unknown } | undefined;
     const parent = agent.permission === "look" ? ":read-only" : ":workspace";
     if (active?.id !== CODEX_PROFILE || active.extends !== parent) {
       // Codex is off entirely when its permission profile does not take
-      // effect: Look only relies on the profile as well.
+      // effect: Code analysis relies on the profile as well.
       const reason = "Codex did not apply the Console's permission profile, so Codex windows are off until it does.";
       host.log(`Codex is off: ${reason}`);
       host.setFlag(CODEX_DISABLED, reason);

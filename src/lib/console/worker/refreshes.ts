@@ -83,7 +83,7 @@ export const refreshes = {
     }
   },
 
-  /** After a teammate's turn commits, each Look only agent of its tab is
+  /** After a teammate's turn commits, each Code analysis agent of its tab is
    * shown that commit before its next turn. The obligation is a store row:
    * a commit recorded by addCommit writes its rows in the same
    * transaction; commits made otherwise (the agent's own, a merge) are
@@ -97,7 +97,7 @@ export const refreshes = {
   refreshOwed(this: ConsoleWorker): string[] {
     return this.store.reviewersWithPendingRefresh().filter((id) => (this.refreshFailures.get(id) ?? 0) < REFRESH_ATTEMPTS);
   },
-  /** What a Look only agent is told about commits still owed to it that
+  /** What a Code analysis agent is told about commits still owed to it that
    * could not be shown (the kept diff is still readable with team_diff). */
   owedNote(this: ConsoleWorker, reviewerId: string): string {
     const owed = this.store.pendingRefreshes().filter((r) => r.reviewerId === reviewerId);

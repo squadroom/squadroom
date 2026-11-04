@@ -132,7 +132,7 @@ test("the worker starts sudo with only a fixed PATH and the selected credential"
 
 // ACP agent programs run in the launcher's
 // sandbox profile. Allow-default reads, except the listed folders; writes
-// only in the clone and its temporary folder (Look only: the temporary
+// only in the clone and its temporary folder (Code analysis: the temporary
 // folder alone); no network but the Console's loopback port unless the
 // project's switch is on. The real script and the real sandbox-exec run
 // here (macOS only), with the agent's home and the shared folder pointed at
@@ -252,11 +252,11 @@ test("spawn --sandbox --login kimi: each window has its own Kimi Code folder; on
   assert.equal(link, `${home}/credentials`);
   assert.deepEqual([login, config], ["x", "x"]);
   // The login's refresh writes a new file and renames it over the login,
-  // at Look only too.
+  // at Code analysis too.
   const refresh = kimi("look", 'echo new > "$KIMI_CODE_HOME/credentials/t.tmp" && mv "$KIMI_CODE_HOME/credentials/t.tmp" "$KIMI_CODE_HOME/credentials/kimi-code.json"');
   assert.equal(refresh.status, 0, refresh.stderr);
   assert.equal(readFileSync(`${home}/credentials/kimi-code.json`, "utf8"), "new\n");
-  // Nothing else of the shared folder is read or written, and Look only
+  // Nothing else of the shared folder is read or written, and Code analysis
   // still keeps the clone.
   for (const script of [`cat ${home}/sessions/q.jsonl`, `cat ${home}/config.toml`, `ls ${home}`, `echo x > ${home}/config.toml`, `echo x > ${home}/mcp.json`, `echo x > ${s.mine}/probe`])
     assert.notEqual(kimi("look", script).status, 0, script);
@@ -283,7 +283,7 @@ test("spawn --sandbox: no preferences are written (defaults write)", { skip: !sa
   assert.notEqual(spawnSync("/usr/bin/defaults", ["read", domain, "k"], { stdio: "ignore" }).status, 0);
 });
 
-test("spawn --sandbox: writes only in the clone and its temporary folder; Look only writes neither its clone", { skip: !sandboxed }, (t) => {
+test("spawn --sandbox: writes only in the clone and its temporary folder; Code analysis writes neither its clone", { skip: !sandboxed }, (t) => {
   const s = sandboxLauncher(t);
   const edit = s.run("edit", `echo y > ${s.mine}/new.txt && echo z > "$TMPDIR/t.txt" && echo ok`);
   assert.equal(edit.status, 0, edit.stderr);

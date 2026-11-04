@@ -49,8 +49,8 @@ function ownTeamTool(toolCall: Record<string, unknown>, client: string | undefin
 
 /**
  * How an ACP agent's permission request is decided: reads and thinking are
- * allowed; edits only in its own folder, and never at Look only; commands
- * run in the sandbox (Look only: the owner decides); network fetches, and
+ * allowed; edits only in its own folder, and never at Code analysis; commands
+ * run in the sandbox (Code analysis: the owner decides); network fetches, and
  * anything else, go to the owner. Ask me first sends every one that is not
  * refused to the owner.
  */

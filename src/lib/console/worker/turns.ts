@@ -104,7 +104,7 @@ export const turns = {
     const mergeNote = merging
       ? `Your merge of ${merging.fromName}'s work is not finished: resolve the conflict markers in ${merging.files.slice(0, 20).join(", ")}, or call team_pull_abort. The Console commits the merge when your turn ends.\n\n`
       : "";
-    // A Look only agent hears which teammates' commits its folder now has
+    // A Code analysis agent hears which teammates' commits its folder now has
     // (kept in the store, so a worker restart does not lose it).
     const shown = rt.agent.permission === "look" ? this.store.shown(rt.agent.id) : [];
     const shownNote = (shown.length ? this.shownNote(shown) : "") + (rt.agent.permission === "look" ? this.owedNote(rt.agent.id) : "");
@@ -192,7 +192,7 @@ export const turns = {
     rt.session?.interrupt();
   },
 
-  /** The teammates' commits a Look only agent's folder was given. */
+  /** The teammates' commits a Code analysis agent's folder was given. */
   shownNote(this: ConsoleWorker, shown: { authorId: string; name: string; sha: string; current: boolean }[]): string {
     const lines = shown.map(({ authorId, ...c }) => {
       const where = c.current ? "HEAD" : `refs/console/team/${authorId}`;
