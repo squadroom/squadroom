@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Squadroom",
-  description: "A browser console for running a squad of coding agents.",
+  description: "A browser console for running a team of coding agents.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -14,9 +14,12 @@
 
 /* The reset the page's CSS is written on: no default margins, padding or
    borders, plain lists, links and headings, and form controls that take the
-   surrounding font and colour. Adapted from Tailwind CSS's preflight (MIT,
-   Tailwind Labs). It sits in a layer, so any other rule in the app's CSS
-   wins over it, whatever its specificity. */
+   surrounding font and colour. Adapted from Tailwind CSS's preflight. It
+   sits in a layer, so any other rule in the app's CSS wins over it,
+   whatever its specificity.
+
+   Tailwind CSS preflight: MIT License
+   Copyright (c) Tailwind Labs, Inc. */
 @layer base {
   *,
   ::after,

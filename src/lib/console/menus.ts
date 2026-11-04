@@ -75,7 +75,7 @@ export function projectMenu(project: ConsoleProject, { view, projects, open, run
     // agents see the change at their next session.
     {
       label: project.imageTools ? "Turn image tools off" : "Turn image tools on",
-      hint: `${project.imageTools ? "On" : "Off"}: Claude Code at Edit makes images with the Krea key, charged to the tab. Reaches agents at their next session`,
+      hint: `${project.imageTools ? "On" : "Off"}: Claude Code at Code edit makes images with the Krea key, charged to the tab. Reaches agents at their next session`,
       icon: project.imageTools ? ("check" as const) : ("blank" as const),
       onSelect: () => void run({ action: "setImageTools", projectId: project.id, on: !project.imageTools }),
     },

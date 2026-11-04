@@ -32,7 +32,7 @@ You need:
   The worker makes no new agent copy when free disk would fall below 5 GB.
 - **Node.js** 24 or newer (the version in `.nvmrc`), from Homebrew
   (`brew install node@24`) or the official installer. The setup script
-  uses the first Node 24 it finds in `/opt/homebrew/bin`, `/usr/local/bin`,
+  uses the first Node 24 or newer it finds in `/opt/homebrew/bin`, `/usr/local/bin`,
   Homebrew's `node@24` folder (`brew install node@24` doesn't link it into
   `bin`) or on your own `PATH`, and puts that folder on the agents' `PATH`.
   The `agent` user must be able to run it, so a Node inside your home folder
@@ -70,9 +70,11 @@ Agents never run as you. They run as a separate, hidden macOS user named
 sudo zsh scripts/console/setup-agent-user.sh
 ```
 
-It asks for your password once and is safe to run again, with the worker
-stopped: while any `agent` program is running it stops and says so.
-`--force` stops them all instead, ending their turns. It:
+It asks for your password once and is safe to run again. It stops the
+worker's LaunchAgent while it runs and starts it again at the end. A
+worker you run in a terminal must be stopped first (Ctrl-C). While a turn
+or any other `agent` program is running it stops and says so. `--force` stops
+them all instead, ending their turns. It:
 
 1. **Creates the `agent` user and group** (id 600). The account is hidden
    from the login window, has no login shell and no password at all (it
@@ -100,7 +102,8 @@ The agent host's paths default to `/Users/agent` (`CONSOLE_AGENT_HOME`),
 (`CONSOLE_LAUNCHER`) and `/opt/console-clients` (`CONSOLE_CLIENTS_DIR`). To
 move one, pass the same name to the script
 (`sudo CONSOLE_SHARED=/path zsh scripts/console/setup-agent-user.sh`), which
-bakes it into the launcher, and set it in the worker's environment too.
+bakes it into the launcher, and set it in the worker's environment and in
+`.env.local` too (the web server reads them as well).
 
 When an update changes the launcher or the pinned agent programs,
 `npm run update` says so. Run the setup script again; it stops the
@@ -277,7 +280,7 @@ Open `https://<your address>/console` and sign in.
 Open **Settings** (at the right of the top bar), then **Keys and
 connections**. The page writes `~/.squadroom/console-keys.json`
 (mode 0600, in a 0700 folder, never backed up, unreadable to `agent`).
-Every change needs an e-mailed code from the last 8 hours (step 6), so
+Every key change needs an e-mailed code from the last 8 hours (step 6), so
 mail must be configured.
 
 - **`CLAUDE_CODE_OAUTH_TOKEN`**: the token from step 4. No cap.
@@ -528,7 +531,7 @@ either access level:
   message its team, but not change files.
 
 The four ACP kinds have been tested at Code edit with a stand-in agent
-program, not yet with the real clients, so expect rough edges.
+program, not yet at Code edit with the real clients, so expect rough edges.
 
 OpenCode's models and the key each one uses:
 
@@ -555,12 +558,12 @@ usage statistics are switched off.
 
 OpenCode 1.19.5 was tried on a real Mac on 2026-11-01 with DeepSeek V4.1
 Flash, DeepSeek V4 Pro, Kimi K3, GLM-5.3, GLM-5.3-Flash and Qwen 3.8 Max,
-each at Code analysis (then called Look only) with network on. Each one answered, named its model and
+each at Code analysis with network on. Each one answered, named its model and
 reported its usage. A short turn cost from $0.0013 (GLM-5.3-Flash) to
 $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.
-Gemini CLI 0.65.0 had live turns on 2026-11-01 with a Gemini API key; they
-showed how it reports usage (see `readGeminiUsage` in
+Gemini CLI was tested at 0.65.0 on 2026-11-01 with a Gemini API key; its
+live turns showed how it reports usage (see `readGeminiUsage` in
 `src/lib/console/acp.ts`). Kimi Code has not had a live turn yet.
 
 If an agent program stops right after it starts, the turn's reason ends
@@ -576,8 +579,8 @@ sudo -u agent /usr/local/libexec/console-agent spawn /Users/agent /opt/console-c
 
 No restart is needed after adding a kind's key (step 8): press **Check
 connection** on its panel. An ACP agent has no network except the Console's own team tools,
-unless you switch network on for the whole project (Project settings,
-needs a fresh confirmation). After switching it off again, restart the
+unless you switch network on for the whole project (the project menu's
+**Network…**, needs a fresh confirmation). After switching it off again, restart the
 worker: a program an agent left running keeps the network it started
 with until then.
 
@@ -646,8 +649,10 @@ agent work unrecorded.
   the worker and run the setup script again (end of step 3).
 - **"The shared folder … is not in the agent user's group"**: run
   `sudo zsh scripts/console/setup-agent-user.sh` again.
-- **"Another Console worker is running"**: one already runs, or one just
-  stopped (it waits up to a minute for its lease).
+- **"waiting for the previous worker's lease to expire…"** (on the Logs
+  page, or in `~/.squadroom/logs/console.jsonl`): the worker waits and
+  tries again every 5 seconds. If another worker is running, stop it. If
+  one just stopped, this one starts within a minute.
 - **"The Console key file …"**: `~/.squadroom/console-keys.json` must be
   yours with mode 0600, in a 0700 folder. "has no provider-side monthly
   cap": record the key's cap on the Keys page.

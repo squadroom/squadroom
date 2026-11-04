@@ -22,9 +22,9 @@ browser ──https──▶ TLS proxy (e.g. Tailscale Serve) ──▶ web serv
 
 - **The web server** (`npm run web`, a built Next.js app) serves the
   Console page, its API (`/api/console`, live streams under
-  `/api/console/events`) and the sign-in (`/login`, `/api/auth/*`). Every
-  other path is 404, Next's image optimizer (`/_next/image`) included: it
-  is switched off. Responses carry no `X-Powered-By` header. It never runs
+  `/api/console/events`) and the sign-in (`/login`, `/api/auth/*`). `/`
+  redirects to `/console`, and every other path is 404, Next's image
+  optimizer (`/_next/image`) included: it is switched off. Responses carry no `X-Powered-By` header. It never runs
   an agent: it validates commands, writes them into the store, and reads
   views back. Like the worker, it refuses to start while `.env.local` can
   be read by every account on the Mac.
@@ -202,7 +202,10 @@ changes how objects read. Every Git command it runs there reads objects as
 stored: `--no-replace-objects`, `core.commitGraph=false`, and in the
 launcher `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE=/dev/null`.
 Without that, a replace ref could make a commit look like it holds another
-tree, and a file outside a step would look unchanged. Before the step
+tree, and a file outside a step would look unchanged. These commands, and
+those in the owner's mirror, also run with automatic maintenance off
+(`maintenance.auto=false`), so no background repack races the next
+command. Git that the agent runs itself is unchanged. Before the step
 check and the uncommitted-changes check it also clears skip-worktree and
 assume-unchanged flags, and a merge in progress is Git's own `MERGE_HEAD`
 file, never a ref of that name. A step commit is checked again against

@@ -1,8 +1,9 @@
 // The Console's worker: the only process that runs Console agents, with
 // its own lease and store, separate from the web server (restarting one
 // never interrupts the other). `npm run console:worker`. It keeps nothing
-// from the .env files but the backup folder, the e-mail settings, the
-// dead-man's switch and the Codex review switch; agents get only the
+// from the .env files but the backup folder, the e-mail settings,
+// SERVER_PUBLIC_ORIGIN (for links in its e-mails), the dead-man's switch
+// and the Codex review switch; agents get only the
 // credential the worker selects from ~/.squadroom/console-keys.json.
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { ConsoleWorker } from "../src/lib/console/worker.ts";

@@ -10,8 +10,13 @@ has one maintainer, so expect a reply in about a week.
 2. **Open a pull request** against `main`. Describe what changed, why, and
    how you tested it.
 3. **Checks must pass.** CI runs the four checks below on every pull
-   request, and a `macos` job that runs the launcher, sandbox and setup
-   tests (`npm run test:macos`).
+   request, and a `macos` job that runs the launcher, sandbox, setup and
+   web server tests (`npm run test:macos`). A third workflow, **Fresh
+   install** (`.github/workflows/install.yml`), runs the setup on a clean
+   Mac. It runs on pull requests that touch `scripts/console/**`,
+   `src/lib/console/clients.ts`, `.nvmrc`, `package-lock.json` or the
+   workflow itself, on pushes to `main`, and on demand. It is not
+   required, but if it fails, look at why.
 4. **The maintainer merges.** `main` is protected: every pull request
    needs the two CI jobs, `checks` and `macos`, to pass, and the
    maintainer merges it.
