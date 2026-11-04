@@ -38,6 +38,8 @@ function ownerSpawn(args: string[], token: string | null, cwd: string | undefine
   const config: [string, string][] = [
     ["core.hooksPath", "/dev/null"],
     ["core.fsmonitor", "false"],
+    // No background maintenance racing the next command (NO_AUTO_MAINTENANCE).
+    ["maintenance.auto", "false"],
     ["credential.helper", ""],
     ["core.commitGraph", "false"],
     ["core.useReplaceRefs", "false"],
