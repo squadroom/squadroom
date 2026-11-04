@@ -28,7 +28,7 @@ export function expectedKeySource(model: AgentModel): string {
 }
 
 /** One model's figures in a result's `modelUsage`. */
-export type ModelPart = { model: string; usage: TurnUsage; webSearches: number | undefined };
+type ModelPart = { model: string; usage: TurnUsage; webSearches: number | undefined };
 
 /**
  * This turn's share of Claude Code's per-model usage. `modelUsage` is a
@@ -102,7 +102,7 @@ export function apiKeyTurnUsage(model: AgentModel, now: ModelPart[], before: Mod
 
 /** Totals the store kept (`storedTotals`), or null when they do not read
  * as a list of models with numeric figures. */
-export function readTotals(value: unknown): ModelPart[] | null {
+function readTotals(value: unknown): ModelPart[] | null {
   if (!Array.isArray(value)) return null;
   const num = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
   const ok = value.every(

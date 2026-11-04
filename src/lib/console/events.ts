@@ -10,7 +10,7 @@ import { LIMITS, type EventBody, type EventKind } from "./types.ts";
 // the redactor's reach and then cut by the redactor; a stream row's end is
 // chosen by the redactor so that no credential is divided between two rows.
 
-export interface EventSink {
+interface EventSink {
   /** Write one row; returns the bytes it stored. */
   write(kind: EventKind, body: EventBody): number;
 }

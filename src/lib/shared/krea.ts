@@ -6,14 +6,14 @@ import { MAX_IMAGE_BYTES } from "./image.ts";
 // agents only ever reach its tools. One request is one output.
 
 /** How a provider call failed. */
-export type ProviderErrorKind = "rejected_by_provider" | "content_filtered" | "provider_unavailable";
+type ProviderErrorKind = "rejected_by_provider" | "content_filtered" | "provider_unavailable";
 
 export const KREA_API = "https://api.krea.ai";
 const REQUEST_MS = 20_000;
 const PENDING = new Set(["backlogged", "queued", "scheduled", "processing", "sampling", "intermediate-complete"]);
 
 /** What a design provider must offer the design server. */
-export interface DesignProviderClient {
+interface DesignProviderClient {
   /** Submit one job; returns the provider's job ID. */
   submit(model: DesignModel, input: ProviderInput, signal?: AbortSignal): Promise<string>;
   job(jobId: string, signal?: AbortSignal): Promise<ProviderJob>;
@@ -24,7 +24,7 @@ export interface DesignProviderClient {
   /** An output, only from the model's listed hosts. */
   download(model: DesignModel, url: string, signal?: AbortSignal): Promise<Buffer>;
 }
-export interface ProviderInput {
+interface ProviderInput {
   prompt: string;
   aspectRatio?: string;
   seed?: number;
@@ -33,7 +33,7 @@ export interface ProviderInput {
   width?: number;
   height?: number;
 }
-export interface ProviderJob {
+interface ProviderJob {
   status: "pending" | "completed" | "failed" | "cancelled";
   urls: string[];
   error?: ProviderErrorKind;

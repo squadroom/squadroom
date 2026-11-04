@@ -244,7 +244,7 @@ function askFirst(tool: string, input: Record<string, unknown>): Decision | null
 /** A host as the network rules name it: lower case, whole, no longer
  * than a host name can be (so two hosts never share a rule key); null for
  * anything else. */
-export function hostKey(host: unknown): string | null {
+function hostKey(host: unknown): string | null {
   if (typeof host !== "string") return null;
   const name = host.trim().toLowerCase();
   return name && name.length <= HOST_MAX && !/\s/.test(name) ? name : null;

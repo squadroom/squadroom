@@ -142,7 +142,7 @@ async function githubGraphql(gh: GitHubApi, query: string, variables: Record<str
 }
 
 /** One review thread on a pull request (team_pr). */
-export interface ReviewThread {
+interface ReviewThread {
   id: string;
   resolved: boolean;
   outdated: boolean;
@@ -154,7 +154,7 @@ export interface ReviewThread {
 }
 /** What team_pr reads: the pull request, its review threads and
  * its conversation. */
-export interface PullRequestReview {
+interface PullRequestReview {
   number: number;
   url: string;
   title: string;

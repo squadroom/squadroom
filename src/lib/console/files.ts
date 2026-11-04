@@ -11,7 +11,7 @@ export const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 export const TEXT_MAX_BYTES = 512 * 1024;
 export const BLOB_MAX_BYTES = 3 * 1024 * 1024;
 
-export type FileKind = "markdown" | "text" | "image" | "other";
+type FileKind = "markdown" | "text" | "image" | "other";
 
 const TEXT_EXT: Record<string, string> = {
   txt: "text", md: "markdown", markdown: "markdown", json: "json", jsonl: "json", csv: "csv", tsv: "text", ts: "typescript", tsx: "tsx",

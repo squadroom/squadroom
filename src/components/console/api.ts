@@ -41,7 +41,7 @@ export async function api<T = unknown>(body?: ConsoleCommand, query = "", confir
 }
 
 /** The fresh-confirmation dialog was cancelled: not an error to show. */
-export class CancelledError extends Error {
+class CancelledError extends Error {
   constructor() {
     super("Cancelled.");
     this.name = "Cancelled";

@@ -10,7 +10,7 @@ import type { Redactor } from "./redact.ts";
 // the agent account's own) `login status`. It never sends a model request.
 
 /** A credential an agent kind's models need, and where the key file has it. */
-export interface CredentialPresence {
+interface CredentialPresence {
   name: string;
   global: boolean;
   /** Projects with their own override. */
@@ -19,7 +19,7 @@ export interface CredentialPresence {
   needsCap: boolean;
 }
 /** What the last Check connection found. */
-export interface ConnectionCheck {
+interface ConnectionCheck {
   /** The version the client reported, or null when none could be read. */
   installed: string | null;
   /** `--version` failed to run (not installed, not executable). */

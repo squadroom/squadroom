@@ -24,7 +24,7 @@ export const ACP_CLIENTS = {
 } as const;
 /** Where scripts/console/setup-agent-user.sh installs the Console's clients
  * by default (`CONSOLE_CLIENTS_DIR` moves it; src/lib/console/config.ts). */
-export const DEFAULT_CONSOLE_CLIENTS_DIR = "/opt/console-clients";
+const DEFAULT_CONSOLE_CLIENTS_DIR = "/opt/console-clients";
 /** A client's executable under the clients folder. */
 export function consoleClientPath(name: string, dir: string = DEFAULT_CONSOLE_CLIENTS_DIR): string {
   return `${dir}/bin/${name}`;

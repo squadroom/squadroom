@@ -101,7 +101,7 @@ export function usageAddsUp(usage: TurnUsage | null | undefined): usage is TurnU
 
 const FIELDS = ["inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens"] as const;
 /** Two usages added, field by field (a field neither has stays out). */
-export function addUsage(a: TurnUsage | null, b: TurnUsage): TurnUsage {
+function addUsage(a: TurnUsage | null, b: TurnUsage): TurnUsage {
   const out: TurnUsage = {};
   for (const f of FIELDS) if (a?.[f] !== undefined || b[f] !== undefined) out[f] = (a?.[f] ?? 0) + (b[f] ?? 0);
   return out;
@@ -177,7 +177,7 @@ function price(priced: PricedModel, usage: TurnUsage & { inputTokens: number; ou
 }
 
 /** Requests the turn was seen to make. */
-export function requestsSeen(r: RunningUsage): number {
+function requestsSeen(r: RunningUsage): number {
   return Math.max(r.starts, r.gauges, r.reported + r.unreported);
 }
 

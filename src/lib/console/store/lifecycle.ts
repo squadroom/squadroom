@@ -8,7 +8,7 @@ import { SUMMARY_MAX } from "./turns.ts";
 type Charge = { usd: number; basis: "reported" | "allowance"; hold?: string };
 /** What a turn is priced as and the key that pays for it, kept with it when
  * it starts. `print`: the key's fingerprint ("" for none). */
-export interface TurnBilling {
+interface TurnBilling {
   model: BilledModel;
   key: { scope: "project" | "global" | null; print: string };
 }

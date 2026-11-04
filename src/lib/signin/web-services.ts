@@ -13,10 +13,10 @@ import { escapeHtml, mailSettings, sendWithResend, type MailSettings } from "../
 const global = globalThis as typeof globalThis & { signInStore?: SignInDatabase };
 
 /** The data folder: `SERVER_SIGNIN_DIR`, or `~/.squadroom`. */
-export function signInDir(): string {
+function signInDir(): string {
   return setting(serverEnv(), "SERVER_SIGNIN_DIR") ?? join(homedir(), ".squadroom");
 }
-export function signInStore(): SignInDatabase {
+function signInStore(): SignInDatabase {
   global.signInStore ??= new SignInDatabase(join(signInDir(), SIGN_IN_FILE));
   return global.signInStore;
 }

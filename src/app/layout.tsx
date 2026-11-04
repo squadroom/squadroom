@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+// The root layout every page shares: the page language, the fonts and the
+// global styles.
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],

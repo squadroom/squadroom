@@ -2,7 +2,7 @@
 // Console need. Nothing else under src/ reads `process.env` (scripts load
 // .env files themselves). See .env.example.
 
-export type Env = Record<string, string | undefined>;
+type Env = Record<string, string | undefined>;
 
 /** A setting by name, or undefined when it is unset. */
 export function setting(env: Env, name: string): string | undefined {
@@ -75,7 +75,7 @@ export function serverSettings(env: Env = process.env): ServerSettings {
 /** The paths the server serves: a path is served exactly, or with anything
  * below it when it ends in "/". Everything else is 404; the routes check
  * the session. */
-export const SERVED_PATHS: Record<string, readonly string[]> = {
+const SERVED_PATHS: Record<string, readonly string[]> = {
   console: ["/console", "/console/", "/api/console", "/api/console/"],
   signIn: ["/login", "/api/auth", "/api/auth/"],
 };

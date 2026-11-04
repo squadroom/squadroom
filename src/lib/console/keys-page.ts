@@ -12,7 +12,7 @@ import { readKeyFile, UNCAPPED, writeKeyFile, type KeyCap, type KeyEntry, type K
 // A stored value is never shown again: the page sees its last four
 // characters only. Every write needs a fresh code (`needsFreshCode`).
 
-export interface CredentialInfo {
+interface CredentialInfo {
   /** The environment variable the client reads. */
   name: string;
   label: string;

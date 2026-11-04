@@ -163,7 +163,7 @@ export function readCodexNotification(method: string, params: Record<string, unk
  * definitive error reply, `ended` the server's exit, and `unknown` a
  * timeout, after which the server may well have accepted the request and
  * be acting on it. */
-export type CodexOutcome = "refused" | "ended" | "unknown";
+type CodexOutcome = "refused" | "ended" | "unknown";
 export class CodexError extends Error {
   readonly outcome: CodexOutcome;
   constructor(message: string, outcome: CodexOutcome = "refused") {

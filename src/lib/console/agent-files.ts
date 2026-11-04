@@ -64,7 +64,7 @@ my $n = 0;
 while ($n < $max) { my $r = sysread($f, my $c, ($max - $n > 65536 ? 65536 : $max - $n)); last unless $r; print $c; $n += $r; }
 exit 0;`;
 /** Longer than any credential, so one across the panel's cut is read whole. */
-export const READ_OVERLAP = 4096;
+const READ_OVERLAP = 4096;
 const READ_ERRORS: Record<number, string> = {
   3: "That file does not exist (any more).",
   4: "The file could not be read.",
@@ -102,7 +102,7 @@ export async function readAgentFile(launcher: Launcher, folder: string, path: st
   return { path: rel, kind, size, mime: mime ?? "application/octet-stream", base64: bytes.toString("base64") };
 }
 
-export interface UploadPlacement {
+interface UploadPlacement {
   state: "done" | "failed" | "exists";
   message: string;
   path: string;

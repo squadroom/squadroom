@@ -21,9 +21,9 @@ import type { RunResult } from "./launcher.ts";
 //   /opt/console-shared, agent → its own .git.
 
 /** The most a push's credential check reads (objects not yet on GitHub). */
-export const SCAN_BYTES = 100 * 1024 * 1024;
-export const SCAN_OBJECTS = 200_000;
-export const CREDENTIAL_IN_BRANCH = "The branch contains a credential the Console handed to an agent, so it was not pushed. Remove it from the branch's history first.";
+const SCAN_BYTES = 100 * 1024 * 1024;
+const SCAN_OBJECTS = 200_000;
+const CREDENTIAL_IN_BRANCH = "The branch contains a credential the Console handed to an agent, so it was not pushed. Remove it from the branch's history first.";
 export const CONSOLE_FILES_IN_BRANCH = `The branch's commits add files under ${UPLOADS_DIR} (the owner's uploads) or .console-tmp, so it was not pushed. Remove them from the branch's history first.`;
 
 /** GitHub's basic-auth header for a token, kept out of every command line. */

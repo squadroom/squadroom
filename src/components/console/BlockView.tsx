@@ -5,6 +5,10 @@ import type { Block } from "@/lib/console/transcript";
 import { markdownPieces } from "@/lib/shared/markdown-stream";
 import styles from "./console.module.css";
 
+// One block of an agent's transcript: the owner's message, the agent's text
+// and thinking, a tool call, an upload, a permission, a team message, a push,
+// a status, an error or a note.
+
 /** One finished piece of a streaming reply: rendered once. */
 const Piece = memo(function Piece({ text, onLink, highlight }: { text: string; onLink: (href: string) => boolean; highlight: boolean }) {
   return (

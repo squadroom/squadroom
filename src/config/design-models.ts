@@ -3,12 +3,11 @@
 // charged in full at submit. IDs are permanent history keys: never reuse
 // one for a different model. Sources and prices: docs/image-models.md.
 
-export type DesignProvider = "krea";
-export type DesignKind = "image" | "edit";
+type DesignProvider = "krea";
+type DesignKind = "image" | "edit";
 
 /** Krea 2's documented aspect ratios (Krea's OpenAPI description). */
 export const ASPECT_RATIOS = ["1:1", "4:3", "3:2", "16:9", "2.35:1", "4:5", "3:4", "2:3", "9:16"] as const;
-export type AspectRatio = (typeof ASPECT_RATIOS)[number];
 
 export interface DesignModel {
   /** Stable key stored in attempts and assets. */

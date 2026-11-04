@@ -5,6 +5,9 @@ import { markdownUrlTransform, SafeImage } from "@/lib/shared/markdown-image";
 import CodeBlock from "./CodeBlock";
 import "./markdown.css";
 
+// Markdown as the pages show it: GitHub-flavoured, with code highlighted and
+// images and links checked first (markdown-image.ts).
+
 /** `onLink`, when given, sees every link first: true means it handled the
  * click (the Console opens agents' files in its panel); other links then
  * open in a new tab instead of leaving the page. `highlight={false}` skips

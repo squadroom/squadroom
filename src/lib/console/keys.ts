@@ -94,7 +94,7 @@ function entry(name: string, raw: unknown, where: string): KeyEntry {
   return out;
 }
 
-export function parseKeyFile(raw: Record<string, unknown>): KeyFile {
+function parseKeyFile(raw: Record<string, unknown>): KeyFile {
   if (!isObject(raw.keys))
     throw new LauncherError('The Console key file has no "keys" (an older flat file?): move it aside and re-save it from the Keys page.');
   const keys: Record<string, KeyEntry> = {};

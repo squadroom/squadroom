@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { returnTarget, trapTab } from "@/lib/console/focus";
 
+// Keyboard focus for dialogs and the file panel: moved in when one opens,
+// kept inside a dialog, and moved back when it closes.
+
 const CONTROLS = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 /** Each open file panel's return target, so a panel that replaces another

@@ -14,7 +14,7 @@ export type ConsoleMail =
   | { kind: "needs_you"; counts: NeedsCounts };
 
 /** Needs you by kind, as the e-mail counts them. */
-export interface NeedsCounts {
+interface NeedsCounts {
   approvals: number;
   questions: number;
   interrupted: number;

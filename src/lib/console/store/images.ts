@@ -9,8 +9,8 @@ import type { EndedTurn } from "./turns.ts";
 // sequence is its transcript note's event id, so Reset spend (which moves
 // the tab's mark to the newest event) covers it like a turn.
 
-export type ImageCallState = "open" | "done" | "failed" | "cancelled" | "interrupted";
-export interface ImageCallRow {
+type ImageCallState = "open" | "done" | "failed" | "cancelled" | "interrupted";
+interface ImageCallRow {
   id: number;
   turnId: number;
   tabId: string;

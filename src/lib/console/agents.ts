@@ -12,7 +12,7 @@ export type AgentKind = "claude-code" | "codex" | "opencode" | "gemini-cli" | "g
 export type ConsoleEffort = "low" | "medium" | "high" | "xhigh" | "max";
 /** Who bills an API-key model: a catalog provider, or OpenRouter, which
  * resells other providers' models through its own key. */
-export type AgentProvider = Provider | "openrouter";
+type AgentProvider = Provider | "openrouter";
 
 export interface AgentModel {
   /** Stored with the agent; a stable history key, never reused. */
