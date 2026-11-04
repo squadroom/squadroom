@@ -25,6 +25,17 @@ export const SYSTEM_LAUNCHER_PATH = "/usr/local/libexec/console-agent";
 export const LAUNCHER_VERSION = 2;
 const BASE_ENV = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8" };
 
+/**
+ * Before every Git command the worker runs in an agent's repository (the
+ * mirror sets the same in its own environment). After a fetch, merge or
+ * commit, Git by default starts `git maintenance run --auto` in the
+ * background. That can repack loose objects and remove their emptied
+ * `objects/xx` folders while the worker's next command, a merge say, is
+ * writing objects there, and that command then fails. Git reads `gc.auto`
+ * only when this is unset.
+ */
+const NO_AUTO_MAINTENANCE = ["-c", "maintenance.auto=false"];
+
 /** The environment sudo starts with: a fixed PATH and only the credentials
  * named here. Nothing is read from the worker's environment. */
 export function launcherEnvironment(credentials: Record<string, string>): Record<string, string> {
@@ -149,9 +160,11 @@ export class Launcher {
     if (result.code !== 0) throw new LauncherError(`The folder could not be created: ${result.stderr || `exit ${result.code}`}`);
   }
   /** Git as `agent` in one repository, in the launcher's sandbox (hooks,
-   * filters, fsmonitor and credential helpers off; no network). */
+   * filters, fsmonitor and credential helpers off; no network), with no
+   * automatic maintenance (`init` is the launcher's own action, recognised
+   * by its first argument). */
   git(repo: string, args: string[], maxStdout = 1024 * 1024, timeoutMs = 120_000): Promise<RunResult> {
-    return run(this.config, ["git", repo, ...args], timeoutMs, maxStdout);
+    return run(this.config, ["git", repo, ...(args[0] === "init" ? args : [...NO_AUTO_MAINTENANCE, ...args])], timeoutMs, maxStdout);
   }
   /** Signal a process group. False when the launcher could not send it
    * (sudo or the launcher missing, a timeout, or a group that no longer

@@ -409,3 +409,37 @@ test("a new-folder project: one shared repository, a branch per editing agent, a
   await h.passes();
   assert.equal(h.store.turn(said)!.commitAfter, null);
 });
+
+// After a fetch, merge or commit Git starts its automatic maintenance, in
+// the background by default, and that can remove `objects/xx` folders while
+// the worker's next command writes there. These repository settings make it
+// run after every such command, in the foreground, and pack the loose
+// objects into a `loose-*` pack; the worker's Git never starts it.
+test("the worker's Git starts no automatic maintenance, in an agent's clone or in the mirror", async (t) => {
+  const eager = (repo: string) => {
+    for (const [key, value] of [["maintenance.auto", "true"], ["maintenance.autoDetach", "false"], ["maintenance.loose-objects.enabled", "true"], ["maintenance.loose-objects.auto", "-1"]]) git(repo, "config", key, value);
+  };
+  const loosePacks = (objects: string) => readdirSync(join(objects, "pack")).filter((f) => f.startsWith("loose-"));
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent();
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder!;
+  eager(folder);
+  await h.ended(h.send(lead.id, "put notes.md from the agent"));
+  await h.until(() => h.store.commits(lead.id).some((c) => c.files.includes("notes.md")), "committed");
+  assert.deepEqual(loosePacks(join(folder, ".git", "objects")), []);
+  // The mirror: a new commit on "GitHub", fetched as loose objects.
+  const bare = origin(t);
+  const dir = join(h.root, "mirror.git");
+  await new Mirror(dir, "owner/repo", bare).update("tok");
+  eager(dir);
+  const work = join(bare, "..", "work");
+  writeFileSync(join(work, "later.md"), "later\n");
+  git(work, "add", "later.md");
+  git(work, "-c", "user.name=Owner", "-c", "user.email=o@x", "commit", "--quiet", "-m", "later");
+  git(work, "push", "--quiet", bare, "main");
+  await new Mirror(dir, "owner/repo", bare).update("tok");
+  assert.equal(git(dir, "rev-parse", "main"), git(work, "rev-parse", "HEAD"));
+  assert.deepEqual(loosePacks(join(dir, "objects")), []);
+});

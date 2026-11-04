@@ -350,6 +350,14 @@ test("git reads objects as stored: an agent's replace refs, grafts and commit-gr
   assert.equal(launched("config", "core.commitGraph"), "false");
 });
 
+test("the worker's Git through the launcher runs with automatic maintenance off", { skip: !sandboxed }, async (t) => {
+  const s = sandboxLauncher(t);
+  spawnSync("git", ["init", "-q"], { cwd: s.mine, env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null" } as unknown as NodeJS.ProcessEnv });
+  const r = await new Launcher({ command: ["/bin/zsh", "-f", s.path] }).git(s.mine, ["config", "maintenance.auto"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "false");
+});
+
 // The shared folder holds every agent's MCP settings (with their tokens).
 test("git reads nothing in the shared folder but the bundle its command names", { skip: !sandboxed }, (t) => {
   const s = sandboxLauncher(t);
