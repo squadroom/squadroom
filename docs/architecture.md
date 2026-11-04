@@ -231,7 +231,8 @@ sign-in ends the browser's previous session. Step 2, when Resend is
 configured, is an 8-digit code generated on the server, stored as a hash, e-mailed to your configured address, valid
 for 10 minutes and used once; five wrong codes lock sign-in for 15 minutes.
 Sessions are random IDs stored by hash in `signin.sqlite`, sent as a
-`__Host-` cookie, for 30 days. Weighty commands also need an e-mailed code
+`__Host-` cookie, for 30 days. Weighty commands ([listed in
+setup.md](setup.md#6-sign-in-settings)) also need an e-mailed code
 entered in the last 8 hours; without mail they are refused. An emergency
 link made on the server (`npm run emergency`) can replace the sign-in's
 code step once when mail is down; it does not confirm weighty commands.

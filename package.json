@@ -15,7 +15,6 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "node scripts/web.ts --dev",
     "build": "next build && node scripts/check-build-trace.ts && node scripts/build-stamp.ts",
     "lint": "eslint",
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=4 \"tests/*.test.ts\"",

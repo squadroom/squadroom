@@ -38,7 +38,10 @@ You need:
   The `agent` user must be able to run it, so a Node inside your home folder
   (nvm, for example) won't do. Homebrew's `node@24` isn't on your own `PATH`
   either, so add it before `npm ci` (step 2).
-- **Git**, and `sudo` rights on the Mac.
+- **Xcode Command Line Tools** (`xcode-select --install`), or Xcode
+  itself. They bring Git, and the launcher finds Git through them
+  (`/usr/bin/xcrun --find git`), so a Git from Homebrew alone won't do.
+- **`sudo` rights** on the Mac.
 - **A [Resend](https://resend.com) account** with a sender on a domain you
   verified there, for e-mailed codes (step 6). Without it Squadroom signs
   in, but refuses weighty actions, adding keys among them.
@@ -110,8 +113,7 @@ sudo zsh scripts/console/setup-agent-user.sh
 ```
 
 The launcher has a version number, and the worker refuses to start with
-any launcher but its own version. The current one is version 2, so an
-install made with version 1 needs the setup script run again.
+any launcher but its own version.
 
 If you used Kimi Code with launcher version 1, check
 `/Users/agent/.kimi-code/config.toml` and `/Users/agent/.kimi-code/mcp.json`
@@ -148,20 +150,18 @@ a key: if the client reports the other one, the turn stops. Web search is
 off for the API-key models, because it is billed per search and Squadroom
 can't work out its cost from the usage the client reports. Each turn is
 charged once for its own usage, also after the worker restarts. A turn
-that fails is charged what it reported plus the allowance for at least one request (one
-may have been under way), and its tab pauses too. A turn you stop is
-charged what it reported plus, for each request its report doesn't cover
-(at least one), a request the size of the largest it sent, with the
-model's longest reply (a reply cut short can't be measured), and its tab
-pauses. If a helper (subagent) ran in it, it gets the full allowance. On a model with a large context window that is much less
-than the full allowance.
+that fails, or that you stop, is charged what it reported plus an
+allowance for the requests it didn't report, and its tab pauses;
+[How a paid turn is charged](architecture.md#how-a-paid-turn-is-charged)
+has the details.
 
 ## 5. An https address
 
 The web server listens only on `127.0.0.1`. Put a TLS proxy on the same Mac
 in front of it, so you reach it at one https address. With
-[Tailscale](https://tailscale.com) (HTTPS certificates enabled for your
-tailnet):
+[Tailscale](https://tailscale.com), first turn on MagicDNS and HTTPS
+certificates for your tailnet in its admin console (see
+[Enabling HTTPS](https://tailscale.com/kb/1153/enabling-https)), then:
 
 ```bash
 tailscale serve --bg 3011
@@ -335,9 +335,9 @@ current tab, use **Add**:
 - **From a template** starts a new tab from the built-in Document review
   template or a tab you saved.
 
-Roles live under **Settings**, **Roles**. **New role** makes your own (a
-name, a description, the access, a suggested AI and a prompt), and a
-built-in role's prompt can be rewritten and reset.
+Roles live under **Settings**, **Roles**; the
+[README](../README.md#roles) lists the built-in ones and how to make your
+own.
 
 Things to know while using it:
 
@@ -590,7 +590,7 @@ with until then.
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
 | Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
 | Paid API spend across every tab in one UTC month (API-key models and image calls; a turn counts in the month it started), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
-| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus the full allowance (the model's whole context window in, at its highest input rate, and its maximum output out) for each request its usage doesn't cover, at least one; the tab pauses until you Resume that pause. A turn you stopped has those requests sized by the largest input it sent instead of the whole window, unless a helper (subagent) ran in it. An ACP turn the provider refused as unauthorized (401 or 403) before anything happened costs nothing |
+| A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus an allowance for each request its usage doesn't cover, at least one ([How a paid turn is charged](architecture.md#how-a-paid-turn-is-charged)); the tab pauses until you Resume that pause |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |
@@ -665,6 +665,10 @@ agent work unrecorded.
 
 ## Uninstalling
 
+Push or copy any work you want to keep first: deleting the `agent` user
+also deletes its home folder, `/Users/agent`, with every agent's clone in
+it.
+
 ```bash
 scripts/install-web-launch-agent.sh uninstall
 scripts/console/install-launch-agent.sh uninstall
@@ -672,6 +676,7 @@ sudo rm /etc/sudoers.d/console-agent /usr/local/libexec/console-agent
 sudo sysadminctl -deleteUser agent
 sudo dscl . -delete /Groups/agent
 sudo rm -rf /opt/console-clients /opt/console-shared
+tailscale serve reset   # if you used Tailscale Serve; clears all of this Mac's Serve settings
 ```
 
 `~/.squadroom/` holds your data and keys; remove it yourself when you no
