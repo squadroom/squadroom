@@ -3,7 +3,7 @@ import { agentKind } from "./agents.ts";
 import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "./acp.ts";
 import type { SandboxSpec } from "./launcher.ts";
 import { inside, outsideStep, realInside, type Decision } from "./permissions.ts";
-import { TEAM_TOOL_NAMES } from "./team.ts";
+import { TEAM_TOOL_NAMES } from "./team-tools.ts";
 import { acpToolLabel } from "./transcript.ts";
 import { errorMessage as message, guarded, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
 import type { ConsoleAgent, ConsoleProject } from "./types.ts";

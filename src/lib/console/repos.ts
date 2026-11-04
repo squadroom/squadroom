@@ -1,24 +1,20 @@
 import { chmodSync, closeSync, constants, fstatSync, mkdirSync, openSync, readSync, rmSync, statfsSync, statSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { Clone, STORED_OBJECTS } from "./clone.ts";
+import { CONSOLE_BRANCH, consoleBranch, GitError } from "./git.ts";
 import {
   checkGitHub,
-  Clone,
   commentOnPullRequest,
-  CONSOLE_BRANCH,
-  CONSOLE_FILES_IN_BRANCH,
-  consoleBranch,
   findPullRequest,
-  GitError,
-  Mirror,
   openPullRequest,
   readPullRequest,
   readReviewThreadComments,
   replyToReviewThread,
   reviewThreadOwner,
-  STORED_OBJECTS,
   type GitHubApi,
-} from "./git.ts";
+} from "./github-api.ts";
+import { CONSOLE_FILES_IN_BRANCH, Mirror } from "./mirror.ts";
 import { CODEX_REVIEW, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { agentModel } from "./agents.ts";
 import type { Launcher } from "./launcher.ts";

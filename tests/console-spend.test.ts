@@ -4,7 +4,7 @@ import { AGENT_KINDS, agentModel } from "../src/lib/console/agents.ts";
 import { MODELS } from "../src/config/models.ts";
 import { costUsd } from "../src/lib/shared/pricing.ts";
 import { chargeTurn, fingerprint, loginKey, NO_REQUESTS, readRunning, requestGauged, requestStarted, requestUsage, usageAddsUp } from "../src/lib/console/spend.ts";
-import { TEAM_TOOLS, teamToolsFor } from "../src/lib/console/team.ts";
+import { TEAM_TOOLS, teamToolsFor } from "../src/lib/console/team-tools.ts";
 import { harness } from "./helpers/console-harness.ts";
 
 // and: logins by credential, each

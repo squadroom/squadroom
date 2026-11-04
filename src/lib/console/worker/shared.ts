@@ -1,7 +1,7 @@
 import type { AgentModel } from "../agents.ts";
 import type { TurnEvents } from "../events.ts";
 import type { AgentSession } from "../session.ts";
-import { TEAM_NOTE } from "../team.ts";
+import { TEAM_NOTE } from "../team-tools.ts";
 import type { RunningUsage } from "../spend.ts";
 import type { ConsoleAgent, TurnStatus } from "../types.ts";
 

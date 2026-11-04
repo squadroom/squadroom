@@ -1,6 +1,7 @@
 import { isOpen, type ConsoleAgent } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
-import { claimsOverlap, holdCycle, HoldCycleError, REPORTS_PER_TURN, TeamError, type ToolCall } from "../team.ts";
+import { claimsOverlap, holdCycle } from "../claims.ts";
+import { HoldCycleError, REPORTS_PER_TURN, TeamError, type ToolCall } from "../team.ts";
 
 type Call = { turnId: number; agentId: string; key: string; tool: string; summary: string };
 

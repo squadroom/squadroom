@@ -4,7 +4,7 @@ import { setting } from "../../config/server-env.ts";
 // The pull request the Console opens after a push: its title and
 // description, from what the agent gave team_push, else from its latest
 // report and the branch's commits. Pure: the worker redacts and the GitHub
-// calls live in git.ts.
+// calls live in github-api.ts.
 
 /** What the agent (team_push) or the owner (Push branch) asked for. */
 export interface PushRequest {

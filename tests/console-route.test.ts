@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerHooks } from "node:module";
 import { ConsoleStore } from "../src/lib/console/store.ts";
-import { needsFreshCode } from "../src/lib/console/commands.ts";
+import { needsFreshCode, runCommand } from "../src/lib/console/commands.ts";
 import { DOCUMENT_REVIEW_ID } from "../src/lib/console/templates.ts";
 import { ownerHeaders, signInState, useSignedInEnv } from "./helpers/signed-in.ts";
 
@@ -260,6 +260,13 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   // The gate comes after sign-in: no session, no 403 either.
   const anonymous = await post({ "x-workspace-request": "1", origin: "https://squadroom.example", "sec-fetch-site": "same-origin" }, gated[0]);
   assert.equal(anonymous.status, 401);
+});
+
+test("an action that is not a string is unknown, so no check can be bypassed by wrapping a name", () => {
+  for (const action of [["setAcpNetwork"], ["resetSpend"], { toString: () => "rename" }, 1, null]) {
+    assert.equal(needsFreshCode({ action }), false);
+    assert.throws(() => runCommand({} as ConsoleStore, { action }), /Unknown action\./);
+  }
 });
 
 test("Ask me first: in a project that uses it, a stale session cannot make agents, teams or template tabs without it", async (t) => {

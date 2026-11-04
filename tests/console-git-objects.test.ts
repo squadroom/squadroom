@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Clone } from "../src/lib/console/git.ts";
+import { Clone } from "../src/lib/console/clone.ts";
 import type { Launcher } from "../src/lib/console/launcher.ts";
 import { inStep } from "../src/lib/console/permissions.ts";
 import { copyAgentFile, Repos } from "../src/lib/console/repos.ts";

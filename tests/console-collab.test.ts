@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
-import { claimCovers, claimPattern, claimsOverlap, holdCycle } from "../src/lib/console/team.ts";
+import { claimCovers, claimPattern, claimsOverlap, holdCycle } from "../src/lib/console/claims.ts";
 import { transcript } from "../src/lib/console/transcript.ts";
 import { harness, TOKEN } from "./helpers/console-harness.ts";
 
