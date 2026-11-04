@@ -6,7 +6,7 @@ type Author = { id: string; name: string };
 const files = (v: unknown) => JSON.parse((v as string) || "[]") as string[];
 
 // The Git side (worker): turns' commits and progress, reviewer refreshes,
-// what a Look only folder was shown, diffs and push jobs.
+// what a Code analysis folder was shown, diffs and push jobs.
 export const git = {
   setTurnCommit(this: ConsoleStore, epoch: number, turnId: number, which: "before" | "after", sha: string | null) {
     this.write(epoch, `UPDATE console_turns SET commit_${which} = ? WHERE id = ?`, sha, turnId);
@@ -115,7 +115,7 @@ export const git = {
   },
 
   // ── Reviewer refreshes (durable) ─────────────
-  /** Each Look only teammate of an editing author is owed its latest
+  /** Each Code analysis teammate of an editing author is owed its latest
    * commit before its next turn: one pending row per (reviewer, author),
    * the newest commit replacing an older one not yet applied. Every
    * insert or replacement takes the next `seq`: the order the refreshes
@@ -175,7 +175,7 @@ export const git = {
   dropRefresh(this: ConsoleStore, epoch: number, refreshId: number) {
     this.write(epoch, "DELETE FROM console_refreshes WHERE id = ?", refreshId);
   },
-  /** A teammate's commit a Look only agent's folder was given, not yet
+  /** A teammate's commit a Code analysis agent's folder was given, not yet
    * told to it. The newest checked-out one is `current`. */
   addShown(this: ConsoleStore, epoch: number, agentId: string, author: Author, sha: string, current: boolean) {
     this.transaction(() => {

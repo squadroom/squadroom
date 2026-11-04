@@ -59,7 +59,7 @@ test("a paid turn's cost: reported usage at catalog prices, cache included; miss
   const reported = chargeTurn(LUNA, usage)!;
   assert.equal(reported.basis, "reported");
   const catalogModel = MODELS.find((m) => m.id === "gpt-5.6-luna")!;
-  assert.equal(reported.usd, costUsd(catalogModel, 10_000, 500, 0, { cachedInputTokens: 6_000, cacheWriteInputTokens: 1_000 }));
+  assert.equal(reported.usd, costUsd(catalogModel, 10_000, 500, { cachedInputTokens: 6_000, cacheWriteInputTokens: 1_000 }));
   // Cache reads cost less than input.
   assert.ok(reported.usd < chargeTurn(LUNA, { inputTokens: 10_000, outputTokens: 500 })!.usd);
   // The full allowance: the whole window as input, the maximum output.
@@ -90,7 +90,7 @@ test("long-context rates apply per request: ten small requests are not one large
   for (let i = 0; i < 10; i++) running = requestUsage(running, small, SOL);
   const ten = chargeTurn(SOL, running.usage, AT, running)!;
   assert.equal(ten.basis, "reported");
-  assert.equal(ten.usd, costUsd(dispatch, 50_000, 1_000, 0, { requestedAt: AT.toISOString() }) * 10);
+  assert.equal(ten.usd, costUsd(dispatch, 50_000, 1_000, { requestedAt: AT.toISOString() }) * 10);
   // One request of 500,000 is long-context: twice the input, 1.5 times the output.
   const large = { inputTokens: 500_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 10_000 };
   const one = requestUsage(NO_REQUESTS, large, SOL);
@@ -98,7 +98,7 @@ test("long-context rates apply per request: ten small requests are not one large
   assert.ok(chargeTurn(SOL, one.usage, AT, one)!.usd > ten.usd * 1.5);
   // Mixed: only the large request is at the long-context rates.
   const mixed = requestUsage(requestUsage(NO_REQUESTS, small, SOL), large, SOL);
-  assert.equal(chargeTurn(SOL, mixed.usage, AT, mixed)!.usd, costUsd(dispatch, 50_000, 1_000, 0, { requestedAt: AT.toISOString() }) + chargeTurn(SOL, one.usage, AT, one)!.usd);
+  assert.equal(chargeTurn(SOL, mixed.usage, AT, mixed)!.usd, costUsd(dispatch, 50_000, 1_000, { requestedAt: AT.toISOString() }) + chargeTurn(SOL, one.usage, AT, one)!.usd);
 
   // A client that reports the turn's total only (Grok Build): the long-
   // context rates apply only when the largest request the gauge saw was above
@@ -165,7 +165,7 @@ test("a stopped turn is charged its reported usage plus each request it did not 
   const reported = chargeTurn(HAIKU, usage, AT)!.usd;
   // Haiku's cache writes cost more than its input: the request's input is
   // priced at that rate, with the model's maximum output.
-  const one = (input: number) => costUsd({ ...HAIKU.paid!.prices, id: HAIKU.id, label: HAIKU.label, model: HAIKU.model }, input, HAIKU.paid!.maxOutputTokens, 0, { requestedAt: AT.toISOString(), cacheWriteInputTokens: input });
+  const one = (input: number) => costUsd({ ...HAIKU.paid!.prices, id: HAIKU.id, label: HAIKU.label, model: HAIKU.model }, input, HAIKU.paid!.maxOutputTokens, { requestedAt: AT.toISOString(), cacheWriteInputTokens: input });
   let claude = NO_REQUESTS;
   for (let i = 0; i < 3; i++) claude = requestStarted(claude);
   claude = requestGauged(requestGauged(claude, 1_000), 1_500);
@@ -201,10 +201,10 @@ test("the allowance prices the window's input at the model's highest input-side 
   const priced = { ...haiku.paid!.prices, id: haiku.id, label: haiku.label, model: haiku.model, longContext: haiku.paid!.longContext };
   const { contextWindow, maxOutputTokens } = haiku.paid!;
   assert.ok(haiku.paid!.prices.cacheWritePerMtok! > haiku.paid!.prices.inputPerMtok);
-  assert.equal(chargeTurn(haiku, null, AT)!.usd, costUsd(priced, contextWindow, maxOutputTokens, 0, { requestedAt: AT.toISOString(), cacheWriteInputTokens: contextWindow }));
+  assert.equal(chargeTurn(haiku, null, AT)!.usd, costUsd(priced, contextWindow, maxOutputTokens, { requestedAt: AT.toISOString(), cacheWriteInputTokens: contextWindow }));
   // A model with no dearer rate: its plain input.
   const grok = MODELS.find((m) => m.id === "grok-4.7")!;
-  assert.equal(chargeTurn(GROK, null, AT)!.usd, costUsd(grok, GROK.paid!.contextWindow, GROK.paid!.maxOutputTokens, 0, { requestedAt: AT.toISOString() }));
+  assert.equal(chargeTurn(GROK, null, AT)!.usd, costUsd(grok, GROK.paid!.contextWindow, GROK.paid!.maxOutputTokens, { requestedAt: AT.toISOString() }));
 });
 
 test("each agent is offered only the team tools it may use", () => {

@@ -141,7 +141,7 @@ test("an ask is answered once by the turn's final message, and the answer comes 
     [reply.from, reply.to, reply.kind, reply.state, reply.correlationId],
     ["Reviewer", "Lead", "reply", "done", ask.correlationId],
   );
-  // The Look only Reviewer is first told which of the Lead's commits its
+  // The Code analysis Reviewer is first told which of the Lead's commits its
   // folder now shows, then gets the messages.
   assert.match(
     reply.text,
@@ -517,7 +517,7 @@ test("Codex uses the team tools (its elicitation is accepted) and gets the answe
   );
 });
 
-test("a Look only reviewer is shown each finished commit of its tab, detached; team_push needs GitHub", async (t) => {
+test("a Code analysis reviewer is shown each finished commit of its tab, detached; team_push needs GitHub", async (t) => {
   const h = await harness(t);
   await h.worker.start();
   const lead = h.agent("Lead");

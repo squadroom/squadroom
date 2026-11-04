@@ -100,7 +100,7 @@ export interface OwnerAnswer {
 /** A review reply's most characters: all of it is shown in Needs you. */
 export const REPLY_MAX = 1_500;
 
-/** What an agent is told about its folder and its commits: a Look only agent
+/** What an agent is told about its folder and its commits: a Code analysis agent
  * where its teammates' work shows up; an editing agent that the Console's
  * commits are local checkpoints, and where its branch started. */
 export const SYSTEM = (agent: ConsoleAgent, base: { branch: string | null; baseCommit: string | null; commits: boolean }) =>

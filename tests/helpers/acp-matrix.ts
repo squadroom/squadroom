@@ -129,7 +129,7 @@ export function acpConformance(v: AcpVendor) {
     assert.equal(existsSync(own), false);
   });
 
-  test(`${v.label}: a turn end to end, sandboxed at Look only, its model confirmed, only its own key crossing`, async (t) => {
+  test(`${v.label}: a turn end to end, sandboxed at Code analysis, its model confirmed, only its own key crossing`, async (t) => {
     const h = await acp(t);
     const scout = agent(h);
     await h.ready(scout.id);

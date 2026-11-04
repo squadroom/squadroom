@@ -83,7 +83,7 @@ function BranchDetails({ agentId, diff }: { agentId: string; diff: NonNullable<C
 type Approval = Changes["approval"];
 
 /** The approve gate: approve the branch's current commit, optionally only
- * after a Look only teammate reviewed it; a later commit cancels the approval. */
+ * after a Code analysis teammate reviewed it; a later commit cancels the approval. */
 function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Approval; run: Run }) {
   const [reviewerId, setReviewerId] = useState("");
   const reviewer = approval.reviewers.find((r) => r.id === reviewerId);

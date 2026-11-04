@@ -132,7 +132,7 @@ test("team_pull: a clean merge, never the teammate's uncommitted work; conflicts
   assert.equal(readFileSync(join(bFolder, "f.txt"), "utf8"), "from B again\n");
   await h.ended(h.send(b.id, call("team_pull_abort")));
   assert.match(h.said(b.id).at(-1)!, /error: No merge is in progress/);
-  // A Look only agent cannot pull.
+  // A Code analysis agent cannot pull.
   const look = h.agent("Reviewer", "look");
   await h.ready(look.id);
   await h.ended(h.send(look.id, call("team_pull", { from: "Lead A" })));
@@ -175,7 +175,7 @@ test("claims: Claude's writes are refused inside a teammate's claim; overlapping
   // A path holding a credential is never claimed (nor stored).
   await h.ended(h.send(b.id, call("team_claim", { paths: ["src/$TOKEN"], note: "" })));
   assert.match(h.said(b.id).at(-1)!, /error: A path holds a credential; it was not claimed/);
-  // Look only agents cannot claim.
+  // Code analysis agents cannot claim.
   const look = h.agent("Orchestrator", "look");
   await h.ready(look.id);
   await h.ended(h.send(look.id, call("team_claim", { paths: ["**"], note: "everything" })));
@@ -309,7 +309,7 @@ test("a team turn already made waits while its agent is held; team_resume is rec
   assert.ok(needsView(h.store).notices.every((n) => !n.text.includes(TOKEN)));
 });
 
-test("team_pull: claimed paths it brings in are flagged (not the source's own); never from a Look only agent; a conflict on a credential-named file is abandoned", async (t) => {
+test("team_pull: claimed paths it brings in are flagged (not the source's own); never from a Code analysis agent; a conflict on a credential-named file is abandoned", async (t) => {
   const h = await harness(t);
   await h.worker.start();
   const a = h.agent("Lead A");

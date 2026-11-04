@@ -86,7 +86,7 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   assert.equal(branch, consoleBranch(lead.id, "Lead"));
   assert.equal(git(leadFolder, "rev-parse", "--abbrev-ref", "HEAD"), branch);
   assert.equal(readFileSync(join(leadFolder, "README.md"), "utf8"), "# Demo\n");
-  // Look only: the base branch, detached, no branch of its own.
+  // Code analysis: the base branch, detached, no branch of its own.
   assert.equal(git(h.store.agent(look.id)!.folder, "rev-parse", "--abbrev-ref", "HEAD"), "HEAD");
   assert.equal(h.store.agentBase(look.id).branch, null);
   // The bundle the agents read is not world-readable.
@@ -203,7 +203,7 @@ test("team_push: the owner approves in Needs you; the branch is pushed after the
   await h.ended(h.send(lead.id, "team_push"));
   assert.equal(h.store.openRequests().length, 0);
   assert.match(h.said(lead.id).at(-1)!, /^team_push: Approved/);
-  // A Look only agent has no branch to push.
+  // A Code analysis agent has no branch to push.
   await h.ended(h.send(look.id, "team_push"));
   assert.match(h.said(look.id).at(-1)!, /error: A Code analysis agent has no branch to push/);
 });

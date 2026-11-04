@@ -246,7 +246,7 @@ test("a path through `..`, a link leading outside the folder or a link to nothin
   assert.equal(realInside(join(root, "missing"), join(root, "missing", "a.txt")), false);
 });
 
-test("Claude settings: the sandbox, the read block, the hidden folders, and Look only's write blocks", () => {
+test("Claude settings: the sandbox, the read block, the hidden folders, and the Code analysis write blocks", () => {
   const paths = { agentHome: "/Users/agent", shared: "/opt/console-shared" };
   const edit = claudeSettings("/Users/agent/work/p/a", "edit", paths);
   assert.deepEqual(edit.sandbox.filesystem.denyRead, ["/opt/console-shared", "/Users/agent/.codex", "/Users/agent/.claude", "/Users/agent/.kimi-code", "/Users/agent/.claude.json"]);

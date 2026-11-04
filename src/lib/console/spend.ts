@@ -171,7 +171,7 @@ export function pricedAt(turn: { startedAt: number | null } | undefined, now: nu
  * from requests above the threshold, or all of it, or none. */
 function price(priced: PricedModel, usage: TurnUsage & { inputTokens: number; outputTokens: number }, long: TurnUsage | boolean, requestedAt: string): number {
   const at = (u: TurnUsage, longContext: boolean) =>
-    costUsd(priced, u.inputTokens ?? 0, u.outputTokens ?? 0, 0, { cachedInputTokens: u.cacheReadTokens ?? 0, cacheWriteInputTokens: u.cacheWriteTokens ?? 0, requestedAt, longContext });
+    costUsd(priced, u.inputTokens ?? 0, u.outputTokens ?? 0, { cachedInputTokens: u.cacheReadTokens ?? 0, cacheWriteInputTokens: u.cacheWriteTokens ?? 0, requestedAt, longContext });
   if (typeof long === "boolean") return at(usage, long);
   return at(subtract(usage, long), false) + at(long, true);
 }
@@ -239,7 +239,7 @@ function allowanceUsd(model: BilledModel, priced: PricedModel, at: Date, input =
   const longWrite = rates.longCacheWritePerMtok ?? 0;
   const top = Math.max(rates.inputPerMtok, write, longWrite);
   const side = top === rates.inputPerMtok ? {} : top === write ? { cacheWriteInputTokens: input } : { longCacheWriteInputTokens: input };
-  return costUsd(priced, input, model.paid!.maxOutputTokens, 0, { requestedAt: at.toISOString(), ...side });
+  return costUsd(priced, input, model.paid!.maxOutputTokens, { requestedAt: at.toISOString(), ...side });
 }
 
 /** Dollars as the Needs you tray shows them. */

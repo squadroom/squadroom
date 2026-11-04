@@ -49,12 +49,12 @@ only restates one of them is not a new finding.
   Squadroom's own routes with your cookies, is that its Markdown is
   rendered without raw HTML.
   The Console's e-mails never carry model-written text.
-- **A stolen session cookie.** Weighty actions need a fresh e-mailed code
-  (and are refused when mail is off), so a cookie alone cannot raise
-  limits, change keys or grant permanent permissions. New tabs start with
-  their own limit, but the Console-wide monthly limit caps them all, and
-  raising or resetting it is weighty. In a project that uses Ask me first,
-  making agents without it is weighty too.
+- **A stolen session cookie.** Weighty actions
+  ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
+  e-mailed code (and are refused when mail is off), so a cookie alone
+  cannot raise limits, change keys, grant permanent permissions or drop
+  Ask me first. New tabs start with their own limit, but the Console-wide
+  monthly limit caps them all, and raising or resetting it is weighty.
 - **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
   their spend limit, and every tab with an API-key agent pauses at the
   Console-wide monthly limit; a turn whose usage cannot be trusted is

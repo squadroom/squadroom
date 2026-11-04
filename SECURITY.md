@@ -37,4 +37,5 @@ finds a credential only byte for byte, not encoded some other way.
 
 ## Supported versions
 
-Only the latest commit on `main` is supported.
+There are no numbered releases yet. Only the latest commit on `main` is
+supported.

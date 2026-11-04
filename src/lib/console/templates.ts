@@ -27,7 +27,7 @@ const FILE_MAX = 200;
 export const PARKING_LOT = "parking-lot.md";
 const ORCHESTRATOR_ROLE = "Role: Orchestrator.";
 
-/** The tab's Orchestrator, as the setup screen makes it: Look only,
+/** The tab's Orchestrator, as the setup screen makes it: Code analysis,
  * with the Orchestrator role. */
 export const isOrchestrator = (a: Pick<ConsoleAgent, "permission" | "role">) =>
   a.permission === "look" && (a.role === ORCHESTRATOR_ROLE || a.role.startsWith(`${ORCHESTRATOR_ROLE}\n`));
@@ -144,7 +144,7 @@ export function stepNote(s: { steps: TemplateStep[]; index: number }, editing: b
 
 /** The Document review template: a lead-and-reviewer document sequence as
  * a Console tab. A Claude Code lead writes each step's Markdown; a Codex
- * reviewer of the other model family reads it, Look only; each hands the
+ * reviewer of the other model family reads it, Code analysis; each hands the
  * other its work by a route phrase. */
 export const DOCUMENT_REVIEW_ID = "document-review";
 const LEAD_PROMPT = [

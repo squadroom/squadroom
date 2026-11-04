@@ -274,7 +274,7 @@ test("Codex is off when its profile does not take effect, and when it is not sig
   assert.ok(!h.codexCalls().some((c) => c.method === "turn/start"));
 });
 
-test("Codex is off when the profile's parent is not the window's (a Look only thread resolving to :workspace)", async (t) => {
+test("Codex is off when the profile's parent is not the window's (a Code analysis thread resolving to :workspace)", async (t) => {
   const h = await harness(t, {}, false, { codex: { extendsAs: ":workspace" } });
   await h.worker.start();
   const reviewer = h.codexAgent("Reviewer", "look");

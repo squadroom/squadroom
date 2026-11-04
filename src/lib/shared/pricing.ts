@@ -17,12 +17,12 @@ export interface BillingUsage {
   longContext?: boolean;
 }
 
-export function tokenPrices(model: PricedModel, at = new Date(), peak = false): TokenPrices {
+export function tokenPrices(model: PricedModel, at = new Date()): TokenPrices {
   let prices: TokenPrices = model;
   if (model.scheduledPrices && at.getTime() >= Date.parse(model.scheduledPrices.effectiveFrom)) {
     prices = model.scheduledPrices.prices;
   }
-  if (model.offPeakPrices && !peak) {
+  if (model.offPeakPrices) {
     const day = at.getUTCDay();
     const hour = at.getUTCHours();
     const isPeak = day >= 1 && day <= 5 && ((hour >= 1 && hour < 4) || (hour >= 6 && hour < 10));
@@ -35,7 +35,6 @@ export function costUsd(
   model: PricedModel,
   inputTokens: number,
   outputTokens: number,
-  imageCount = 0,
   usage: BillingUsage = {},
 ): number {
   const rates = tokenPrices(model, usage.requestedAt ? new Date(usage.requestedAt) : new Date());
@@ -52,8 +51,7 @@ export function costUsd(
       cached * (rates.cachedInputPerMtok ?? rates.inputPerMtok) +
       write * (rates.cacheWritePerMtok ?? rates.inputPerMtok) +
       longWrite * (rates.longCacheWritePerMtok ?? rates.cacheWritePerMtok ?? rates.inputPerMtok)) * (longContext?.inputMultiplier ?? 1) +
-      outputTokens * rates.outputPerMtok * (longContext?.outputMultiplier ?? 1)) / 1_000_000 +
-    (model.perImageUsd ?? 0) * imageCount
+      outputTokens * rates.outputPerMtok * (longContext?.outputMultiplier ?? 1)) / 1_000_000
   );
 }
 

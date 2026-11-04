@@ -310,7 +310,7 @@ function boundaries(
   }
   if (tool === "Bash") {
     // Commands run in Claude's sandbox, which confines writes to the folder
-    // (none at Look only) and blocks the hidden folders. A request to leave
+    // (none at Code analysis) and blocks the hidden folders. A request to leave
     // the sandbox is refused; the settings refuse it as well.
     if (input.dangerouslyDisableSandbox === true)
       return { behavior: "deny", reason: "Commands always run in the sandbox here." };

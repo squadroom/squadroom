@@ -311,7 +311,7 @@ AGENT_KINDS.push({
     "src/lib/console/clients.ts: opencode-ai pinned",
     "OpenCode 1.19.5's bundled models.dev catalog (checked 2026-11-01): provider ids `deepseek` (DEEPSEEK_API_KEY), `moonshotai` (MOONSHOT_API_KEY), `zai` (ZHIPU_API_KEY) and `openrouter` (OPENROUTER_API_KEY); model ids and limits",
     "https://openrouter.ai/api/v1/models/qwen/qwen3.8-max-0902/endpoints (2026-11-01): one provider (Alibaba), $2 / $6 / $0.25 cache reads per million",
-    "Live checks 2026-11-01 (OpenCode 1.19.5, network on, Look only): every API-key model answered, named its model and reported usage",
+    "Live checks 2026-11-01 (OpenCode 1.19.5, network on, Code analysis, then called Look only): every API-key model answered, named its model and reported usage",
   ],
 });
 
@@ -366,7 +366,7 @@ AGENT_KINDS.push(
     // Live check 2026-10-22: its usage is in session/prompt's _meta.usage.
     acpUsage: "xai-meta",
     credential: null,
-    // Qualified live at Look only on 2026-10-22/23: model, usage, and the
+    // Qualified live at Code analysis (then called Look only) on 2026-10-22/23: model, usage, and the
     // sandbox breakout tests with the real client.
     offered: true,
     models: [

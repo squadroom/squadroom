@@ -228,7 +228,7 @@ test("the pause banner: everything, then the project, then the tab; a spend paus
   });
 });
 
-test("agent kinds: offered ones, Codex off, a role's kind, first model, Look only", () => {
+test("agent kinds: offered ones, Codex off, a role's kind, first model, Code analysis", () => {
   assert.deepEqual(
     offeredKinds(null).map((k) => k.kind),
     AGENT_KINDS.filter((k) => k.offered).map((k) => k.kind),

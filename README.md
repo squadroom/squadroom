@@ -4,7 +4,7 @@ Squadroom lets you put several coding agents on a job as a team. They
 message each other on their own, each in a role you pick from the built-in
 ones or write yourself as a prompt, and they only come to you when they
 need a decision. It's a web page you run on your own Mac, and you can have
-several repos open with a different squad on each piece of work.
+several repos open with a different team on each piece of work.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-desktop-dark.png">
@@ -15,15 +15,17 @@ Website: [squadroom.github.io](https://squadroom.github.io)
 
 It uses your own accounts and keys, and you open it in a browser (a phone
 works too) at a private https address that only your GitHub account can
-sign in to.
+sign in to. Inside the app, and in its settings and file names,
+Squadroom calls itself the Console.
 
 **Status: early, and macOS only.** It works, but it isn't packaged yet.
 Setup takes an afternoon and needs `sudo` once. Linux and Windows aren't
-supported.
+supported. There are no numbered releases yet: use the latest commit on
+`main`.
 
-## How a squad works together
+## How a team works together
 
-A squad is the group of agents on one piece of work. Each of them has team
+A team is the group of agents on one piece of work. Each of them has team
 tools, and with them an agent can send a teammate a message (`team_send`),
 ask a question and get the answer back (`team_ask`, `team_reply`), merge in
 a teammate's work (`team_pull`), claim the files it's about to edit
@@ -34,8 +36,8 @@ finishes its current turn, then arrives as its next prompt. Routes pass one
 agent's finished reply straight to another, for example when the Lead ends
 with "ready for review".
 
-With a team you give the goal to the Orchestrator, and it reports back to
-you in its window. With a pair you talk to the Lead. You can type into any
+When a team has an Orchestrator you give it the goal, and it reports back
+to you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one
 tray, **Needs you**, which covers every project: network requests,
 questions, pushes, notes agents leave for you (`team_report`) and paused
@@ -67,7 +69,7 @@ ordered list of stages, each with the files the agents may change during
 it. Any team can have steps, from a Lead and a Reviewer to an Orchestrator
 with seven members.
 
-## Projects, tabs and squads
+## Projects, tabs and teams
 
 - **Projects.** A project is usually a GitHub repo. It can also be a new
   local folder, or no files at all for agents that only talk. You can have
@@ -75,19 +77,19 @@ with seven members.
 - **Tabs.** A tab is one piece of work inside a project, such as a feature,
   a security review or the docs. Tabs run at the same time, and each has
   its own agents.
-- **Squads.** The agents in a tab work as a squad. It can be one agent, a
-  pair (a Lead and a Reviewer), or a team with an Orchestrator and up to
-  seven members, and you can add more agents by hand. Each agent has its own
+- **Teams.** The agents in a tab work as a team. It can be one agent, a
+  pair (a Lead and a Reviewer), or an Orchestrator with up to seven
+  members, and you can add more agents by hand. Each agent has its own
   name, model and thinking level, and works at Code edit or Code analysis.
-  You can mix tools in one squad.
+  You can mix tools in one team.
 
 Up to six agent turns run at once across everything, and three per account
 or API key. Anything over that waits in a queue.
 
-## Agent tools
+## Agents you can run
 
-You can pick any of these when you add an agent or set up a team, and you
-can mix them in one squad.
+You can pick any of these when you add an agent or set up a team, and one
+team can mix them.
 
 - **Claude Code**, on your Claude subscription or an Anthropic API key.
 - **Codex**, on your ChatGPT login or an OpenAI API key.
@@ -136,7 +138,7 @@ with its turn.
 - **Spend, per key.** Each paid API key needs a monthly cap that you set on
   the provider's own site first and then enter in Squadroom. No agent gets
   the key until you do. The provider's cap is the real ceiling.
-- **Runaway squads.** A tab pauses when one message from you has led to 40
+- **Runaway teams.** A tab pauses when one message from you has led to 40
   agent turns or two hours of work, or when two agents have sent each other
   12 messages with no new commit.
 - **Turns.** A turn stops after 30 minutes, or 10 minutes with no output.
@@ -174,6 +176,7 @@ The pictures use invented demo data; they follow your light or dark setting.
 ## Requirements
 
 - **A Mac** with about 10 GB of free disk.
+- **Xcode Command Line Tools** (`xcode-select --install`), for Git.
 - **Node.js** 24 or newer (the version in [`.nvmrc`](.nvmrc)), from
   Homebrew (`brew install node@24`) or the official installer. The setup
   script finds it in `/opt/homebrew/bin`, `/usr/local/bin`, Homebrew's
@@ -253,9 +256,8 @@ and how each part works in [docs/architecture.md](docs/architecture.md).
 
 - **One owner.** Only the configured GitHub account can sign in. With mail
   configured, sign-in also needs an 8-digit code e-mailed to you, and
-  weighty actions (permanent permission rules, deleting folders, raising
-  or resetting spend limits, every key change, and agents without Ask me
-  first in a project that uses it) need a code from the last 8 hours.
+  weighty actions need a code from the last 8 hours (the setup guide
+  [lists them](docs/setup.md#6-sign-in-settings)).
   Without mail, GitHub is the only step and those actions are refused until
   mail is configured.
 - **Requests from the Mac itself aren't trusted either.** The web server

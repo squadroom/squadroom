@@ -210,7 +210,7 @@ export class Repos {
 
   /**
    * A new agent's folder, always its own clone. An editing agent works on
-   * its own `console/` branch; a Look only agent on the base, detached.
+   * its own `console/` branch; a Code analysis agent on the base, detached.
    * Returns the folder, branch and the commit its changes are compared
    * with.
    * - GitHub: checked on GitHub again, then filled from a bundle of
@@ -286,7 +286,7 @@ export class Repos {
   }
 
   /**
-   * A Look only reviewer sees a teammate's finished commit: the
+   * A Code analysis reviewer sees a teammate's finished commit: the
    * commit crosses by bundle (the author's clone → the shared folder → the
    * reviewer's clone, as `agent`, hooks off) and is checked out detached.
    */

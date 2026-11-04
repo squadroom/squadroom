@@ -1,6 +1,7 @@
 # Contributing
 
-Squadroom is a small project. Issues and pull requests are welcome.
+Squadroom is a small project. Issues and pull requests are welcome. It
+has one maintainer, so expect a reply in about a week.
 
 ## Contributing workflow
 

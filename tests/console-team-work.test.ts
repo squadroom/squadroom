@@ -84,7 +84,7 @@ test("team_diff text: whole files within the allowance, a path or glob picks fil
   assert.equal(teamDiffMissing(DIFF, undefined), null);
 });
 
-test("a Look only teammate is told which commit its folder shows, once, and team_diff reads an editing teammate's branch", async (t) => {
+test("a Code analysis teammate is told which commit its folder shows, once, and team_diff reads an editing teammate's branch", async (t) => {
   const h = await harness(t);
   await h.worker.start();
   const lead = h.agent("Lead A");
@@ -106,7 +106,7 @@ test("a Look only teammate is told which commit its folder shows, once, and team
   assert.match(read, /\+the fix/);
   await h.ended(h.send(rev.id, call("team_diff", { from: "Lead A", path: "fix.txt" })));
   assert.match(h.said(rev.id).at(-1)!, /\+the fix/);
-  // A Look only agent has no branch of its own to read.
+  // A Code analysis agent has no branch of its own to read.
   await h.ended(h.send(lead.id, call("team_diff", { from: "Reviewer" })));
   assert.match(h.said(lead.id).at(-1)!, /error: Reviewer does not edit code on a branch of its own/);
   await h.ended(h.send(lead.id, call("team_diff", { from: "Nobody" })));
@@ -128,7 +128,7 @@ test("a Look only teammate is told which commit its folder shows, once, and team
   await h.until(() => h.store.diff(lead.id)?.files.includes("own.txt") === true, "own commit in the kept diff");
 });
 
-test("agents are told how their folder works: a Look only agent where teammates' work shows up; an editing one that commits are local checkpoints and where its branch began", () => {
+test("agents are told how their folder works: a Code analysis agent where teammates' work shows up; an editing one that commits are local checkpoints and where its branch began", () => {
   const agent = (permission: "edit" | "look") =>
     ({ id: "a1", name: "Lead A", folder: "/Users/agent/work/p/a1", permission, role: "" }) as unknown as ConsoleAgent;
   const edit = SYSTEM(agent("edit"), { branch: "console/a1-lead-a", baseCommit: "ab1ac106ebc82aff", commits: true });

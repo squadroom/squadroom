@@ -378,7 +378,7 @@ export function changesView(store: ConsoleStore, agentId: string) {
     commits: store.commits(agentId),
     diff: diff && { base: diff.base, head: diff.head, stat: diff.stat, files: diff.files, updatedAt: diff.updatedAt },
     push: store.latestJob(agentId) ?? null,
-    // The approve gate: its approval, and the tab's Look only agents with
+    // The approve gate: its approval, and the tab's Code analysis agents with
     // whether each has reviewed the current head.
     approval: approvalView(store, agent, diff),
   };
