@@ -83,6 +83,7 @@ export const holds = {
    * however it got there (an allowance, a charge just before a restart):
    * the pause never depends on a write after the charge. */
   spendHolds(this: ConsoleWorker): void {
+    this.safe(() => this.store.unlimitedSpendPauses(this.epoch!));
     for (const tab of this.store.allTabs()) if (!tab.paused && tab.archivedAt === null) this.overSpend(tab.id);
     this.consoleOverSpend();
   },

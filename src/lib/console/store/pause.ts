@@ -202,6 +202,21 @@ export const pause = {
     });
   },
 
+  /** A spend pause whose limit is no longer set (one of the old $5 and $25
+   * defaults, or a limit since removed) becomes an ordinary pause, so the
+   * page offers Resume and Resume lifts it. Pauses under a limit that is
+   * still set are left alone. The worker runs this on each pass. */
+  unlimitedSpendPauses(this: ConsoleStore, epoch?: number) {
+    this.transaction(() => {
+      for (const r of this.all("SELECT id FROM console_tabs WHERE paused = 1 AND spend_limit_usd IS NULL AND substr(pause_reason, 1, ?) = ?", SPEND_PAUSE.length, SPEND_PAUSE))
+        this.run("UPDATE console_tabs SET pause_reason = ? WHERE id = ?", spendRaisedReason(this.tabSpend(r.id as string), null), r.id as string);
+      if (this.flag(CONSOLE_SPEND_LIMIT) !== null) return;
+      const paused = this.get("SELECT COUNT(*) AS n FROM console_tabs WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE)!;
+      if (Number(paused.n))
+        this.run("UPDATE console_tabs SET pause_reason = ? WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", consoleSpendRaisedReason(this.consoleSpend().usd, null), CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
+    }, epoch);
+  },
+
   // ── The Console-wide spend limit ───────────────────────────────────────
   /** API-key spend across every tab, open or closed, this UTC month and
    * since the owner's last reset: a turn in the month it started (as the

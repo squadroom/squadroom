@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { currentSpendLimit, freshCodeContext, needsFreshCode, runCommand, spendLimitInput } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
+import { pauseBanner } from "../src/lib/console/ui.ts";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { chargeTurn } from "../src/lib/console/spend.ts";
 import { harness } from "./helpers/console-harness.ts";
@@ -369,6 +370,33 @@ test("a restart interrupts a paid prompted turn and charges it in the same trans
   assert.equal(store.turn(turn)!.status, "running");
   assert.equal(store.interruptEarlier(epoch, () => ({ usd: 2, basis: "allowance", hold: "Usage not reported: r" })), 1);
   assert.deepEqual([store.turn(turn)!.status, store.turn(turn)!.costUsd, store.tab(tab.id)!.pauseReason], ["interrupted", 2, "Usage not reported: r"]);
+});
+
+test("spend pauses left from the old defaults become ordinary pauses the page offers Resume for; pauses under a limit still set stay", (t) => {
+  const store = new ConsoleStore(":memory:", () => 5_000_000);
+  t.after(() => store.close());
+  const project = runCommand(store, { action: "createProject", name: "P", source: "none" }).project as { id: string };
+  const old = store.tabs(project.id)[0];
+  const kept = store.createTab(project.id, "Kept");
+  const wide = store.createTab(project.id, "Wide");
+  store.setSpendLimit(kept.id, 1, false);
+  const epoch = store.takeLease("w", 5_000_000)!;
+  store.pauseTab(epoch, old.id, "Spend limit: old $5 default");
+  store.pauseTab(epoch, kept.id, "Spend limit: over");
+  store.pauseTab(epoch, wide.id, "Console spend limit: old $25 default");
+  store.unlimitedSpendPauses(epoch);
+  const reason = (id: string) => store.tab(id)!.pauseReason ?? "";
+  assert.match(reason(old.id), /^Spend limit removed: .*Resume to let it continue\./);
+  assert.match(reason(wide.id), /^Console spend limit removed: .*Resume to let this tab continue\./);
+  assert.equal(reason(kept.id), "Spend limit: over");
+  // The page's banner now offers Resume, not a reset.
+  assert.equal(pauseBanner(null, { ...project, paused: false, pauseReason: null }, store.tab(old.id)!)!.button, "Resume tab");
+  assert.equal(pauseBanner(null, { ...project, paused: false, pauseReason: null }, store.tab(wide.id)!)!.button, "Resume tab");
+  // A Console-wide limit that is set keeps its pauses.
+  store.setConsoleSpendLimit(1, false);
+  store.run("UPDATE console_tabs SET pause_reason = 'Console spend limit: over' WHERE id = ?", wide.id);
+  store.unlimitedSpendPauses(epoch);
+  assert.equal(reason(wide.id), "Console spend limit: over");
 });
 
 test("Resume of a tab, its project or everything never lifts a spend-limit pause while the limit is set: only Reset spend does", (t) => {
