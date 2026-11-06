@@ -59,7 +59,7 @@ export function acpConformance(v: AcpVendor) {
     // The tab's spend limit is raised: a full allowance (Grok's is about $8)
     // would otherwise reach the $5 default and pause for spend, which the
     // OpenCode matrix tests on its own; this one checks the usage pause.
-    const h = await harness(t, { tabSpendUsd: 1_000 }, false, { acp: JSON.parse(base(setup)), ...extra });
+    const h = await harness(t, {}, false, { acp: JSON.parse(base(setup)), ...extra });
     keys(h.keysFile);
     await h.worker.start();
     return h;

@@ -220,7 +220,7 @@ test("the per-turn cap and the tab's limit refuse a call with no provider call; 
   await stop(turnId);
   // The tab's limit: spend $0.03 so far; a limit of $0.05 fits one more
   // $0.015 call, not two, however they race.
-  h.store.setSpendLimit(h.tab.id, 0.05, 5, true);
+  h.store.setSpendLimit(h.tab.id, 0.05, true);
   const next = await running();
   const submits = krea.submits();
   const results = await Promise.allSettled([h.worker.imageCall(next.rt, "image_generate", generate), h.worker.imageCall(next.rt, "image_generate", { ...generate, name: "other" })]);
@@ -249,7 +249,7 @@ test("Stop cancels the open job and refunds it; a call open at a restart stays c
   const admitted = h.store.chargeImageCall(
     h.worker.epoch!,
     { turnId: second.turnId, agent: h.store.agent(lead.id)!, tool: "image_generate", model: "krea-2-turbo", label: "Krea 2 Turbo", priceUsd: 0.015, path: "design/x" },
-    { calls: 8, turnUsd: 1, defaultTabUsd: 5 },
+    { calls: 8, turnUsd: 1 },
   );
   assert.ok("id" in admitted);
   await stop(second.turnId);
@@ -356,21 +356,21 @@ test("a Stop during the source read submits nothing; claims are checked again be
   await assert.rejects(h.worker.imageCall(second.rt, "image_generate", generate), /without an image.*charged \$0\.015/);
   krea.state.urls = true;
   assert.deepEqual(h.store.imageCalls(second.turnId).map((c) => [c.state, c.costUsd]), [["failed", 0.015], ["failed", 0.015]]);
-  // The tab's own stored limit, not the default the worker passes.
-  h.store.setSpendLimit(h.tab.id, 0.04, 5, true);
+  // The tab's own stored limit.
+  h.store.setSpendLimit(h.tab.id, 0.04, true);
   const admitted = h.store.chargeImageCall(
     h.worker.epoch!,
     { turnId: second.turnId, agent: h.store.agent(lead.id)!, tool: "image_generate", model: "krea-2-turbo", label: "Krea 2 Turbo", priceUsd: 0.015, path: "design/x" },
-    { calls: 8, turnUsd: 1, defaultTabUsd: 5 },
+    { calls: 8, turnUsd: 1 },
   );
   assert.deepEqual(admitted, { refused: "This call ($0.015) would take the tab's spend ($0.03) past its limit of $0.04. Ask the owner to raise it or reset spend." });
   // The Console-wide limit holds too, whatever the tab's own limit.
-  h.store.setSpendLimit(h.tab.id, 5, 5, true);
+  h.store.setSpendLimit(h.tab.id, null, true);
   h.store.setConsoleSpendLimit(0.04, false);
   const overConsole = h.store.chargeImageCall(
     h.worker.epoch!,
     { turnId: second.turnId, agent: h.store.agent(lead.id)!, tool: "image_generate", model: "krea-2-turbo", label: "Krea 2 Turbo", priceUsd: 0.015, path: "design/x" },
-    { calls: 8, turnUsd: 1, defaultTabUsd: 5 },
+    { calls: 8, turnUsd: 1 },
   );
   assert.deepEqual(overConsole, { refused: "This call ($0.015) would take the Console's spend this month ($0.03) past its limit of $0.04. Ask the owner to raise it or reset it on the Overview." });
   await stop(second.turnId);

@@ -123,7 +123,7 @@ export default function NeedsTray({
             <b>{p.scope === "all" ? "Everything" : p.name}</b> {p.projectId && p.scope === "tab" && project(p.projectId)} · paused
           </p>
           {p.reason && <p className={styles.needText}>{p.reason}</p>}
-          {p.scope === "tab" && p.id && p.spend && p.reason.startsWith(SPEND_PAUSE) && <SpendLimit key={p.spend.limitUsd} tabId={p.id} spend={p.spend} run={run} />}
+          {p.scope === "tab" && p.id && p.spend && p.reason.startsWith(SPEND_PAUSE) && <SpendLimit key={p.spend.limitUsd ?? "none"} tabId={p.id} spend={p.spend} run={run} />}
           <div className={styles.dialogButtons}>
             {/* A tab's spend counts until a Reset spend, so its
                 pause offers that; Resume alone pauses it again at once. */}

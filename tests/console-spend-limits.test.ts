@@ -7,14 +7,16 @@ import { chargeTurn } from "../src/lib/console/spend.ts";
 import { harness } from "./helpers/console-harness.ts";
 import { acp, HELLO_USAGE, keys, LUNA, prompted } from "./helpers/acp-harness.ts";
 
-// Spend limits: a tab's, the owner's and the Console-wide one; how a
+// Spend limits: a tab's and the Console-wide one, each none until the
+// owner sets it; how a
 // charge without usage it can trust pauses a tab; and what Resume and Reset
 // spend lift. Most run on a store alone; the rest run OpenCode turns
 // against the scripted fake agent (fake-acp.mjs).
 
 test("the spend limit: the tab pauses at it; Resume does not reset it; only Reset spend, behind a fresh code, does", async (t) => {
   const per = chargeTurn(LUNA, HELLO_USAGE)!.usd;
-  const h = await acp(t, {}, { tabSpendUsd: per * 1.5 });
+  const h = await acp(t);
+  h.store.setSpendLimit(h.tab.id, per * 1.5, false);
   const scout = h.acpAgent();
   await h.ready(scout.id);
   const first = h.send(scout.id, "hello");
@@ -42,12 +44,13 @@ test("the spend limit: the tab pauses at it; Resume does not reset it; only Rese
 
 test("the owner's spend limit: lowering needs no code; the tab pauses at it; a raise needs a fresh code and leaves the tab for Resume", async (t) => {
   const per = chargeTurn(LUNA, HELLO_USAGE)!.usd;
-  const h = await acp(t, {}, { tabSpendUsd: 1_000 });
+  const h = await acp(t);
   const scout = h.acpAgent();
   await h.ready(scout.id);
   const limit = Math.max(0.01, Math.round(per * 150) / 100);
-  // Lowering from the default ($5) needs no code.
-  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: h.tab.id, limitUsd: limit }, { spendLimit: 5 }), false);
+  // A new tab has no limit; setting one needs no code.
+  assert.equal(h.store.tab(h.tab.id)!.spendLimitUsd, null);
+  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: h.tab.id, limitUsd: limit }, { spendLimit: null }), false);
   runCommand(h.store, { action: "setSpendLimit", tabId: h.tab.id, limitUsd: limit });
   assert.equal(h.store.tab(h.tab.id)!.spendLimitUsd, limit);
   let n = 0;
@@ -79,14 +82,15 @@ test("the owner's spend limit: lowering needs no code; the tab pauses at it; a r
 
 test("the Console-wide spend limit: every tab with an API-key agent pauses at it, new tabs too; Resume does not lift it; a raise needs a fresh code", async (t) => {
   const per = chargeTurn(LUNA, HELLO_USAGE)!.usd;
-  const h = await acp(t, {}, { tabSpendUsd: 1_000 });
+  const h = await acp(t);
   const scout = h.acpAgent();
   const other = h.store.createTab(h.project.id, "Other");
   const second = h.store.createAgent({ tabId: other.id, name: "Scout", role: "", kind: "opencode", model: LUNA.id, effort: null, permission: "look" });
   await h.ready(scout.id);
   await h.ready(second.id);
   const limit = Math.max(0.01, Math.round(per * 150) / 100);
-  // Lowering it from the default needs no code.
+  // None is set out of the box; setting one needs no code.
+  assert.equal(h.store.consoleSpend().limitUsd, null);
   const lower = { action: "setConsoleSpendLimit", limitUsd: limit };
   assert.equal(needsFreshCode(lower, freshCodeContext(h.store, lower)), false);
   runCommand(h.store, lower);
@@ -145,9 +149,21 @@ test("Console-wide spend counts this UTC month from the last reset; Reset needs 
   charged(4, now, lastMonth);
   assert.equal(store.consoleSpend().usd, 0);
   charged(2, now);
+  // No limit is set, so nothing pauses at any spend.
+  assert.equal(store.consoleSpend().limitUsd, null);
+  // A tab paused at the old $25 default, before there was none: an
+  // ordinary Resume lifts it now.
+  const epoch = store.takeLease("w", now)!;
+  store.pauseTab(epoch, tab.id, "Console spend limit: old default");
+  runCommand(store, { action: "resume", scope: "tab", id: tab.id });
+  assert.equal(store.tab(tab.id)!.paused, false);
   // Reset: a fresh code; it counts from now and lifts the Console's pauses only.
   assert.equal(needsFreshCode({ action: "resetConsoleSpend" }), true);
-  store.pauseTab(store.takeLease("w", now)!, tab.id, "Console spend limit: test");
+  store.pauseTab(epoch, tab.id, "Console spend limit: test");
+  // While a limit is set, Resume does not lift it.
+  store.setConsoleSpendLimit(1, false);
+  runCommand(store, { action: "resume", scope: "tab", id: tab.id });
+  assert.equal(store.tab(tab.id)!.paused, true);
   now += 1_000;
   runCommand(store, { action: "resetConsoleSpend" });
   assert.equal(store.consoleSpend().usd, 0);
@@ -160,6 +176,10 @@ test("Console-wide spend counts this UTC month from the last reset; Reset needs 
   assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: 25 }, { consoleSpendLimit: 25 }), false);
   assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: 25.01 }, { consoleSpendLimit: 25 }), true);
   assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: 1 }), true);
+  // Setting one where none is set is a lowering; removing one is a raise.
+  assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: 10_000 }, { consoleSpendLimit: null }), false);
+  assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: null }, { consoleSpendLimit: null }), false);
+  assert.equal(needsFreshCode({ action: "setConsoleSpendLimit", limitUsd: null }, { consoleSpendLimit: 25 }), true);
 });
 
 test("a spend limit set on a tab: validated, rounded to the cent; a raise still under the spend keeps the spend pause with the new limit", (t) => {
@@ -178,9 +198,11 @@ test("a spend limit set on a tab: validated, rounded to the cent; a raise still 
   assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: "x" }, { spendLimit: 5 }), false);
   assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: 5 }, { spendLimit: 5 }), false);
   assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: 5.01 }, { spendLimit: 5 }), true);
-  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: 1 }, { spendLimit: null }), true);
-  assert.equal(currentSpendLimit(store, tab.id), 5);
-  assert.equal(currentSpendLimit(store, "nope"), null);
+  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: 1 }), true);
+  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: 1_000 }, { spendLimit: null }), false);
+  assert.equal(needsFreshCode({ action: "setSpendLimit", tabId: tab.id, limitUsd: null }, { spendLimit: 5 }), true);
+  assert.equal(currentSpendLimit(store, tab.id), null);
+  assert.equal(currentSpendLimit(store, "nope"), undefined);
   runCommand(store, { action: "setSpendLimit", tabId: tab.id, limitUsd: "0.50" });
   assert.equal(currentSpendLimit(store, tab.id), 0.5);
   // Paused for spend at $0.50 with $2 spent: a raise to $1 keeps the spend pause, with the new limit.
@@ -194,15 +216,21 @@ test("a spend limit set on a tab: validated, rounded to the cent; a raise still 
   assert.match(store.tab(tab.id)!.pauseReason ?? "", /^Spend limit: .*\$2\.00.*limit is \$1\.00/);
   runCommand(store, { action: "resume", scope: "tab", id: tab.id });
   assert.equal(store.tab(tab.id)!.paused, true);
-  // Back to the default ($5, above the spend): an ordinary pause, which Resume lifts.
+  // Removed (a raise, so a fresh code): an ordinary pause, which Resume lifts.
+  assert.throws(() => runCommand(store, { action: "setSpendLimit", tabId: tab.id, limitUsd: null }), /changed meanwhile/);
   runCommand(store, { action: "setSpendLimit", tabId: tab.id, limitUsd: null }, { freshCode: true });
   assert.equal(store.tab(tab.id)!.spendLimitUsd, null);
-  assert.match(store.tab(tab.id)!.pauseReason ?? "", /^Spend limit raised to \$5\.00/);
+  assert.match(store.tab(tab.id)!.pauseReason ?? "", /^Spend limit removed: /);
+  runCommand(store, { action: "resume", scope: "tab", id: tab.id });
+  assert.equal(store.tab(tab.id)!.paused, false);
+  // A tab paused at the old $5 default, before there was none: with no
+  // limit stored, an ordinary Resume lifts it.
+  store.pauseTab(epoch, tab.id, "Spend limit: old default");
   runCommand(store, { action: "resume", scope: "tab", id: tab.id });
   assert.equal(store.tab(tab.id)!.paused, false);
   // The page sees the spend and the limit.
   const view = projectView(store, project.id)!;
-  assert.deepEqual(view.tabs[0].spend, { usd: 2, limitUsd: 5, isDefault: true, defaultUsd: 5 });
+  assert.deepEqual(view.tabs[0].spend, { usd: 2, limitUsd: null });
   // Another pause is left as it is by a limit change.
   runCommand(store, { action: "pause", scope: "tab", id: tab.id });
   const reason = store.tab(tab.id)!.pauseReason;
@@ -213,7 +241,8 @@ test("a spend limit set on a tab: validated, rounded to the cent; a raise still 
 
 test("a charge without trustworthy usage that also reaches the spend limit pauses for the usage first, then for the limit", async (t) => {
   const per = chargeTurn(LUNA, HELLO_USAGE)!.usd;
-  const h = await acp(t, {}, { tabSpendUsd: per * 3 });
+  const h = await acp(t);
+  h.store.setSpendLimit(h.tab.id, per * 3, false);
   const scout = h.acpAgent();
   await h.ready(scout.id);
   const missing = h.send(scout.id, "nousage");
@@ -342,11 +371,12 @@ test("a restart interrupts a paid prompted turn and charges it in the same trans
   assert.deepEqual([store.turn(turn)!.status, store.turn(turn)!.costUsd, store.tab(tab.id)!.pauseReason], ["interrupted", 2, "Usage not reported: r"]);
 });
 
-test("Resume of a tab, its project or everything never lifts a spend-limit pause: only Reset spend does", (t) => {
+test("Resume of a tab, its project or everything never lifts a spend-limit pause while the limit is set: only Reset spend does", (t) => {
   const store = new ConsoleStore(":memory:", () => 5_000_000);
   t.after(() => store.close());
   const project = runCommand(store, { action: "createProject", name: "P", source: "none" }).project as { id: string };
   const tab = store.tabs(project.id)[0];
+  store.setSpendLimit(tab.id, 1, false);
   const epoch = store.takeLease("w", 5_000_000)!;
   store.pauseTab(epoch, tab.id, "Spend limit: over");
   for (const [scope, id] of [["tab", tab.id], ["project", project.id], ["all", undefined]] as const) {
@@ -359,8 +389,9 @@ test("Resume of a tab, its project or everything never lifts a spend-limit pause
 
 test("a tab over its spend limit pauses from its stored costs, for every model: an allowance that crossed it, a charge just before a restart", async (t) => {
   const per = chargeTurn(LUNA, HELLO_USAGE)!.usd;
-  const h = await harness(t, { tabSpendUsd: per / 2 }, false, { acp: {} });
+  const h = await harness(t, {}, false, { acp: {} });
   keys(h.keysFile);
+  h.store.setSpendLimit(h.tab.id, per / 2, false);
   // A charge an earlier worker committed just before it died: nothing paused.
   const scout = h.acpAgent();
   const turn = h.send(scout.id, "hello");

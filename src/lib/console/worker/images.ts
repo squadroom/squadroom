@@ -96,7 +96,7 @@ export const images = {
         this.store.chargeImageCall(
           this.epoch!,
           { turnId: t.id, agent, tool, model: request.model.id, label: request.model.label, priceUsd: request.priceUsd, path: `${DESIGN_DIR}/${request.name}` },
-          { calls: this.limits.imageCallsPerTurn, turnUsd: this.limits.imageUsdPerTurn, defaultTabUsd: this.limits.tabSpendUsd },
+          { calls: this.limits.imageCallsPerTurn, turnUsd: this.limits.imageUsdPerTurn },
         ),
       );
       if (!admitted) throw new ImageError("The Console could not record this call.");

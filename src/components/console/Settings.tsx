@@ -138,9 +138,9 @@ export function ClosedTabsDialog({ closedTabs, run, onClose }: { closedTabs: Pro
   );
 }
 
-/** A tab's spend and its limit: the owner sets the limit in dollars or goes
- * back to the default. Raising it asks for a fresh code; setting it never
- * lifts a pause. */
+/** A tab's or the Console's spend and its limit: there is none until the
+ * owner sets one in dollars, and the owner can remove it again. Raising or
+ * removing a limit asks for a fresh code; setting it never lifts a pause. */
 export function SpendLimit({
   tabId,
   spend,
@@ -155,35 +155,36 @@ export function SpendLimit({
 }) {
   const { busy, guard } = useBusy();
   const set = (limitUsd: number | null) => guard(() => run(tabId ? { action: "setSpendLimit", tabId, limitUsd } : { action: "setConsoleSpendLimit", limitUsd }));
-  const [value, setValue] = useState(spend.limitUsd.toFixed(2));
+  const [value, setValue] = useState(spend.limitUsd?.toFixed(2) ?? "");
   const parsed = parseDollars(value);
   const changed = Number.isFinite(parsed) && parsed !== spend.limitUsd;
   return (
     <div className={styles.spendLimit}>
       <p className={styles.hint}>
-        Spent {money(spend.usd)} of {money(spend.limitUsd)}
-        {spend.isDefault ? " (the default)" : ""} on API-key models {since}.
+        {spend.limitUsd === null
+          ? `Spent ${money(spend.usd)} on API-key models ${since}. No limit is set.`
+          : `Spent ${money(spend.usd)} of ${money(spend.limitUsd)} on API-key models ${since}.`}
       </p>
       <label className={styles.inlineField}>
         <span>Limit $</span>
         <input inputMode="decimal" aria-label="Spend limit in dollars" value={value} onChange={(e) => setValue(e.target.value)} />
         <button
           disabled={busy || !changed || parsed < 0.01}
-          title={parsed > spend.limitUsd ? "Raising the limit needs a fresh code" : "Lowering the limit"}
+          title={spend.limitUsd === null ? "Set a limit" : parsed > spend.limitUsd ? "Raising the limit needs a fresh code" : "Lowering the limit"}
           onClick={() => set(parsed)}
         >
           Save
         </button>
-        {!spend.isDefault && (
+        {spend.limitUsd !== null && (
           <button
             disabled={busy}
-            title={`Use the default, ${money(spend.defaultUsd)}${spend.defaultUsd > spend.limitUsd ? " (needs a fresh code)" : ""}`}
+            title="Remove the limit (needs a fresh code)"
             onClick={() => {
-              setValue(spend.defaultUsd.toFixed(2));
+              setValue("");
               set(null);
             }}
           >
-            Use default
+            Remove limit
           </button>
         )}
       </label>
@@ -195,9 +196,9 @@ export function SpendLimit({
 export function SpendLimitDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][number]; run: Run; onClose: () => void }) {
   return (
     <Dialog title={`Spend limit: ${tab.name}`} onClose={onClose}>
-      <SpendLimit key={`${tab.spend.limitUsd}`} tabId={tab.id} spend={tab.spend} run={run} />
+      <SpendLimit key={tab.spend.limitUsd ?? "none"} tabId={tab.id} spend={tab.spend} run={run} />
       <p className={styles.hint}>
-        The tab pauses when its API-key models have spent this much. Subscription agents cost nothing here. The key&apos;s own monthly cap at its provider stays
+        With a limit set, the tab pauses when its API-key models have spent that much. Subscription agents cost nothing here. The key&apos;s own monthly cap at its provider stays
         the hard ceiling.
       </p>
     </Dialog>

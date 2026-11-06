@@ -126,20 +126,46 @@ with its turn.
 
 ## Limits
 
-- **Spend, per tab.** Each tab has a spend limit for API-key models: $5
-  unless you change it, anywhere from $0.01 to $1,000. When a tab reaches
-  it, the tab pauses until you press **Reset spend**. Subscription logins
-  (a Claude plan, a ChatGPT login) aren't counted. There are no separate
-  project or per-agent spend limits.
-- **Spend, across Squadroom.** API-key spend across every tab is limited
-  to $25 per calendar month (UTC) unless you change it on the Overview,
-  anywhere from $0.01 to $10,000. When it is reached, every tab with an
-  API-key agent pauses until you press **Reset Console spend**, or until
-  you raise the limit and press **Resume**. Making new tabs doesn't get
-  round it.
+Squadroom doesn't set any spend limits for you. Out of the box no tab and
+no month has a limit, and nothing pauses because of spend. You can set
+these yourself. They count only API-key models and image calls;
+subscription logins (a Claude plan, a ChatGPT login) aren't counted.
+
+- **Spend, per tab.** Open the tab's menu and choose **Spend limit…**,
+  then type an amount ($0.01 to $1,000) and press **Save**. When the tab
+  has spent that much it pauses. To carry on, press **Reset spend**, which
+  counts the tab's spend from zero again, or raise the limit (or press
+  **Remove limit**) and then **Resume**. There are no separate project or
+  per-agent limits.
+- **Spend, across Squadroom.** Open **Settings**, then **Overview**, and
+  set a limit under **Spend (API keys)** ($0.01 to $10,000). It covers
+  every tab for one calendar month (UTC). When it's reached, every tab
+  with an API-key agent pauses, and image calls are refused. To carry on,
+  press **Reset Console spend**, or raise or remove the limit and press
+  **Resume**. Making new tabs doesn't get round it.
 - **Spend, per key.** Each paid API key needs a monthly cap that you set on
-  the provider's own site first and then enter in Squadroom. No agent gets
-  the key until you do. The provider's cap is the real ceiling.
+  the provider's own site first and then enter in **Settings**, **Keys and
+  connections**. No agent gets the key until you do. This is the one
+  limit Squadroom requires, because the provider's cap is the real
+  ceiling: Squadroom's own figures are estimates.
+
+Some examples:
+
+- You're trying an unfamiliar model in a new tab and don't want it to
+  cost more than $2. Set that tab's limit to $2. If it pauses, look at
+  what it did before you press Reset spend.
+- You want all of Squadroom to stay under $50 a month. Set $50 on the
+  Overview. Tabs can still have their own, smaller limits.
+- A tab is doing a long build and keeps pausing at the limit you gave it.
+  Press **Remove limit** in its **Spend limit…** dialog, then **Resume**.
+  The provider's cap on the key still applies.
+
+Raising or removing a limit, Reset spend and Reset Console spend each ask
+for a recent e-mailed code, so a stolen browser session can't lift them.
+Lowering or setting a limit doesn't.
+
+Other limits:
+
 - **Runaway teams.** A tab pauses when one message from you has led to 40
   agent turns or two hours of work, or when two agents have sent each other
   12 messages with no new commit.

@@ -16,7 +16,7 @@ const OPENAI = "sk-proj-FAKE-openai-key-for-steps-000000000ABCD";
 const CAP = { usd: 10, url: "https://platform.openai.com/settings/organization/limits", checkedAt: "2026-10-20" };
 
 async function stepped(t: Parameters<typeof harness>[0], extra: Parameters<typeof harness>[3] = {}) {
-  const h = await harness(t, { tabSpendUsd: 1_000 }, false, extra);
+  const h = await harness(t, {}, false, extra);
   writeFileSync(h.keysFile, JSON.stringify({ keys: { CLAUDE_CODE_OAUTH_TOKEN: { value: TOKEN }, CONSOLE_GIT_TOKEN: { value: GIT_TOKEN }, OPENAI_API_KEY: { value: OPENAI, cap: CAP } }, projects: {} }), { mode: 0o600 });
   h.store.setTabSteps(h.tab.id, STEPS);
   await h.worker.start();

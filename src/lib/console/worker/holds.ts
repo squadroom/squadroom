@@ -11,24 +11,25 @@ import type { ConsoleWorker } from "../worker.ts";
 const HOLD_STALL = "Waiting on a hold that nobody is working to lift: ";
 
 export const holds = {
-  /** A tab's paid spend is at or over its limit, or (for a paid turn, or
-   * after one) the Console-wide spend is at or over its own. */
+  /** A tab's paid spend is at or over its limit, if it has one, or (for a paid turn, or
+   * after one) the Console-wide spend is at or over its own, if set. */
   overSpend(this: ConsoleWorker, tabId: string, paid = false): boolean {
     const tab = this.store.tab(tabId);
     if (!tab) return false;
-    const limit = tab.spendLimitUsd ?? this.limits.tabSpendUsd;
-    const spent = this.store.tabSpend(tabId);
-    if (spent >= limit) {
+    const limit = tab.spendLimitUsd;
+    const spent = limit === null ? 0 : this.store.tabSpend(tabId);
+    if (limit !== null && spent >= limit) {
       this.pause(tabId, spendPauseReason(spent, limit));
       return true;
     }
     return paid && this.consoleOverSpend();
   },
-  /** The Console-wide spend is at or over its limit: every open tab with an
-   * open API-key agent pauses (subscription work goes on). */
+  /** The Console-wide spend is at or over the owner's limit, when one is
+   * set: every open tab with an open API-key agent pauses (subscription
+   * work goes on). */
   consoleOverSpend(this: ConsoleWorker): boolean {
     const all = this.store.consoleSpend();
-    if (all.usd < all.limitUsd) return false;
+    if (all.limitUsd === null || all.usd < all.limitUsd) return false;
     const reason = consoleSpendPauseReason(all.usd, all.limitUsd);
     for (const tab of this.store.allTabs()) {
       if (tab.paused || tab.archivedAt !== null) continue;

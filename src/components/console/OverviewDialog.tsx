@@ -57,17 +57,24 @@ export default function OverviewDialog({ onShow, run }: { onShow: (agentId: stri
         ))}
       </ul>
       <h3 className={styles.subhead}>Spend (API keys)</h3>
-      {/* The Console-wide limit: raising or resetting it needs a fresh code. */}
-      <SpendLimit key={spend.console.limitUsd} tabId={null} spend={spend.console} run={runAndLoad} since="across every tab this month (UTC)" />
-      <button title="Count the Console's spend from zero again (needs a fresh code)" onClick={() => void runAndLoad({ action: "resetConsoleSpend" })}>
-        Reset Console spend
-      </button>
-      <p className={styles.hint}>At this limit every tab with an API-key agent pauses. Each tab&apos;s own limit still applies.</p>
+      {/* The Console-wide limit, none unless the owner sets one: raising,
+          removing or resetting it needs a fresh code. */}
+      <SpendLimit key={spend.console.limitUsd ?? "none"} tabId={null} spend={spend.console} run={runAndLoad} since="across every tab this month (UTC)" />
+      {spend.console.limitUsd !== null && (
+        <button title="Count the Console's spend from zero again (needs a fresh code)" onClick={() => void runAndLoad({ action: "resetConsoleSpend" })}>
+          Reset Console spend
+        </button>
+      )}
+      <p className={styles.hint}>
+        {spend.console.limitUsd === null
+          ? "Set a limit to pause every tab with an API-key agent when the month's spend reaches it. Each tab's own limit applies either way."
+          : "At this limit every tab with an API-key agent pauses. Each tab's own limit still applies."}
+      </p>
       {!spend.tabs.length && <p className={styles.hint}>No API-key spend this month.</p>}
       <ul>
         {spend.tabs.map((t) => (
           <li key={t.tabId}>
-            {t.projectName} › {t.tabName}: {money(t.today)} today, {money(t.month)} this month; {money(t.sinceReset.usd)} of its {money(t.sinceReset.limitUsd)} limit
+            {t.projectName} › {t.tabName}: {money(t.today)} today, {money(t.month)} this month; {money(t.sinceReset.usd)} since its last Reset spend{t.sinceReset.limitUsd === null ? ", no limit" : ` of its ${money(t.sinceReset.limitUsd)} limit`}
           </li>
         ))}
         {spend.keys.map((k) => (

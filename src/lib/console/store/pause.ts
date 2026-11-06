@@ -1,4 +1,4 @@
-import { CONSOLE_SPEND_PAUSE, LIMITS, SPEND_PAUSE, USAGE_PAUSE, type ConsoleAgent } from "../types.ts";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, USAGE_PAUSE, type ConsoleAgent } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { consoleSpendPauseReason, consoleSpendRaisedReason, spendPauseReason, spendRaisedReason } from "../spend.ts";
 
@@ -6,7 +6,8 @@ import { consoleSpendPauseReason, consoleSpendRaisedReason, spendPauseReason, sp
 export const PAUSE_ALL = "pause-all";
 /** Set ("on") when the owner wants the Needs you e-mail. */
 export const NEEDS_MAIL = "needs-mail";
-/** The Console-wide spend limit in dollars, when the owner set one. */
+/** The Console-wide spend limit in dollars, when the owner set one; there
+ * is none otherwise. */
 const CONSOLE_SPEND_LIMIT = "console-spend-limit";
 /** When the owner last reset the Console-wide spend (ms). */
 const CONSOLE_SPEND_FROM = "console-spend-from";
@@ -15,10 +16,8 @@ const CONSOLE_SPEND_FROM = "console-spend-from";
  * it: API-key spend since the start of this UTC month or the last reset. */
 export interface ConsoleSpend {
   usd: number;
-  limitUsd: number;
-  /** True when the owner has not set a limit of their own. */
-  isDefault: boolean;
-  defaultUsd: number;
+  /** The owner's limit, or null when none is set (nothing pauses). */
+  limitUsd: number | null;
   /** Spend counts from here: the month's start or the last reset. */
   from: number;
 }
@@ -68,15 +67,19 @@ export const pause = {
     this.transaction(() => {
       const now = this.now();
       const last = this.lastTurnId();
+      // A spend-limit pause (a tab's or the Console-wide one) outlasts
+      // Resume only while that limit is set: one left from an old default
+      // or from a limit since removed is an ordinary pause.
+      const consoleLimit = this.flag(CONSOLE_SPEND_LIMIT) !== null ? 1 : 0;
       const resumeTabs = (where: string, ...args: string[]) => {
         // A usage hold is lifted only by resuming that tab's own pause that
         // showed it; resuming a project or everything leaves it, and the
         // tab pauses again with it. A spend-limit pause outlasts any
-        // Resume: only Reset spend lifts it; the Console-wide one, only
-        // raising or resetting that limit.
+        // Resume while its limit is set: only Reset spend lifts it; the
+        // Console-wide one, only raising, removing or resetting that limit.
         this.run(
-          `UPDATE console_tabs SET usage_hold = CASE WHEN ? AND paused = 1 AND substr(pause_reason, 1, ?) = ? THEN NULL ELSE usage_hold END, paused = 0, pause_reason = NULL, count_from = ?, resumed_at = ? ${where ? `${where} AND` : "WHERE"} NOT (paused = 1 AND (substr(COALESCE(pause_reason, ''), 1, ?) = ? OR substr(COALESCE(pause_reason, ''), 1, ?) = ?))`,
-          scope === "tab" ? 1 : 0, USAGE_PAUSE.length, USAGE_PAUSE, last, now, ...args, SPEND_PAUSE.length, SPEND_PAUSE, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE,
+          `UPDATE console_tabs SET usage_hold = CASE WHEN ? AND paused = 1 AND substr(pause_reason, 1, ?) = ? THEN NULL ELSE usage_hold END, paused = 0, pause_reason = NULL, count_from = ?, resumed_at = ? ${where ? `${where} AND` : "WHERE"} NOT (paused = 1 AND ((spend_limit_usd IS NOT NULL AND substr(COALESCE(pause_reason, ''), 1, ?) = ?) OR (? AND substr(COALESCE(pause_reason, ''), 1, ?) = ?)))`,
+          scope === "tab" ? 1 : 0, USAGE_PAUSE.length, USAGE_PAUSE, last, now, ...args, SPEND_PAUSE.length, SPEND_PAUSE, consoleLimit, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE,
         );
         // The owner's Resume also lifts the agents' holds.
         this.run(`UPDATE console_holds SET released_at = ? WHERE released_at IS NULL AND tab_id IN (SELECT id FROM console_tabs ${where})`, now, ...args);
@@ -175,34 +178,27 @@ export const pause = {
       this.liftPause(tabId, SPEND_PAUSE);
     });
   },
-  /** A tab's spend limit as the worker applies it: its own, or the default. */
-  spendLimit(this: ConsoleStore, tabId: string, defaultUsd: number): number | null {
-    const tab = this.tab(tabId);
-    return tab ? (tab.spendLimitUsd ?? defaultUsd) : null;
-  },
   /**
-   * The owner sets a tab's spend limit: dollars, or null for the default.
-   * Raising it needs a fresh code; the caller says whether it checked one,
+   * The owner sets a tab's spend limit: dollars, or null for none.
+   * Raising or removing it needs a fresh code; the caller says whether it checked one,
    * and a raise without one is refused here, in the same transaction that
    * reads the limit, so a change made meanwhile from another device cannot
    * turn a lowering into a raise. Setting a limit
    * never lifts a pause: a tab paused at its old limit that is now under
-   * its new one waits for an ordinary Resume (or Reset spend); one still at
+   * its new one (or has none) waits for an ordinary Resume (or Reset spend); one still at
    * or over it stays paused for spend, with the new limit in its reason. A
    * lower limit the tab has already reached pauses it at the worker's next
    * check, from the costs stored with its turns.
    */
-  setSpendLimit(this: ConsoleStore, tabId: string, limitUsd: number | null, defaultUsd: number, mayRaise: boolean) {
+  setSpendLimit(this: ConsoleStore, tabId: string, limitUsd: number | null, mayRaise: boolean) {
     this.transaction(() => {
       const tab = this.tab(tabId);
       if (!tab) throw new Error("That tab does not exist.");
-      const before = tab.spendLimitUsd ?? defaultUsd;
-      const after = limitUsd ?? defaultUsd;
-      if (after > before && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
+      if ((limitUsd ?? Infinity) > (tab.spendLimitUsd ?? Infinity) && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
       this.run("UPDATE console_tabs SET spend_limit_usd = ? WHERE id = ?", limitUsd, tabId);
       if (!tab.paused || !(tab.pauseReason ?? "").startsWith(SPEND_PAUSE)) return;
       const spent = this.tabSpend(tabId);
-      this.run("UPDATE console_tabs SET pause_reason = ? WHERE id = ?", spent < after ? spendRaisedReason(spent, after) : spendPauseReason(spent, after), tabId);
+      this.run("UPDATE console_tabs SET pause_reason = ? WHERE id = ?", limitUsd === null || spent < limitUsd ? spendRaisedReason(spent, limitUsd) : spendPauseReason(spent, limitUsd), tabId);
     });
   },
 
@@ -224,24 +220,22 @@ export const pause = {
         from,
       )!.usd,
     );
-    const defaultUsd = LIMITS.consoleSpendUsd;
-    return { usd: spent, limitUsd: own === null ? defaultUsd : Number(own), isDefault: own === null, defaultUsd, from };
+    return { usd: spent, limitUsd: own === null ? null : Number(own), from };
   },
   /**
-   * The owner sets the Console-wide limit (dollars, or null for the
-   * default). Raising it needs a fresh code: the caller says whether it
+   * The owner sets the Console-wide limit (dollars), or removes it (null).
+   * Raising or removing it needs a fresh code: the caller says whether it
    * checked one, and a raise without one is refused in the transaction that
    * reads the limit. Tabs paused at it become ordinary pauses (Resume)
-   * once the limit is above the spend; others keep the new limit in their
-   * reason.
+   * once the limit is above the spend or gone; others keep the new limit
+   * in their reason.
    */
   setConsoleSpendLimit(this: ConsoleStore, limitUsd: number | null, mayRaise: boolean) {
     this.transaction(() => {
       const before = this.consoleSpend();
-      const after = limitUsd ?? before.defaultUsd;
-      if (after > before.limitUsd && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
+      if ((limitUsd ?? Infinity) > (before.limitUsd ?? Infinity) && !mayRaise) throw new Error("The limit changed meanwhile; set it again.");
       this.setFlag(CONSOLE_SPEND_LIMIT, limitUsd === null ? null : String(limitUsd));
-      const reason = before.usd < after ? consoleSpendRaisedReason(before.usd, after) : consoleSpendPauseReason(before.usd, after);
+      const reason = limitUsd === null || before.usd < limitUsd ? consoleSpendRaisedReason(before.usd, limitUsd) : consoleSpendPauseReason(before.usd, limitUsd);
       this.run("UPDATE console_tabs SET pause_reason = ? WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", reason, CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
     });
   },

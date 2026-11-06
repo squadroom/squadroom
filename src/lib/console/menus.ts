@@ -26,7 +26,7 @@ export interface MenuContext {
 export function tabMenu(t: ProjectView["tabs"][number], { view, open, run, renameTab }: MenuContext): MenuItem[] {
   return [
     { label: "Rename", hint: "Or double-click the tab", onSelect: () => renameTab(t.id) },
-    { label: "Spend limit…", hint: `${money(t.spend.usd)} of ${money(t.spend.limitUsd)} spent on API keys`, onSelect: () => open({ kind: "spend", tabId: t.id }) },
+    { label: "Spend limit…", hint: t.spend.limitUsd === null ? `${money(t.spend.usd)} spent on API keys, no limit` : `${money(t.spend.usd)} of ${money(t.spend.limitUsd)} spent on API keys`, onSelect: () => open({ kind: "spend", tabId: t.id }) },
     ...(t.steps ? [{ label: "Steps…", hint: `Step ${t.steps.index + 1} of ${t.steps.steps.length}`, onSelect: () => open({ kind: "steps", tabId: t.id }) }] : []),
     t.paused
       ? t.pauseReason?.startsWith(SPEND_PAUSE)

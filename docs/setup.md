@@ -147,7 +147,7 @@ Both can also run on an API key instead. Each Claude Code and Codex model
 has a second entry marked "(API key)": Claude Code's use
 `ANTHROPIC_API_KEY` and Codex's use `OPENAI_API_KEY`, from the Keys page
 (step 8). Those models are paid like any other API-key model and count
-toward the tab's spend limit. You can skip the logins above if you only
+toward the tab's spend limit, if you set one. You can skip the logins above if you only
 want the API-key models. A window never switches between its login and
 a key: if the client reports the other one, the turn stops. Web search is
 off for the API-key models, because it is billed per search and Squadroom
@@ -236,8 +236,8 @@ How sign-in works with and without them:
 
 Weighty actions are: **Always** permission rules, deleting folders in
 Clean up, switching **Ask me first** off, the ACP network switch, turning
-image tools on, raising a spend limit (a tab's or the Console-wide one),
-**Reset spend** and **Reset Console spend**, and every change on the Keys
+image tools on, raising or removing a spend limit (a tab's or the
+Console-wide one), **Reset spend** and **Reset Console spend**, and every change on the Keys
 page. In a project where any agent (open or closed) has Ask me first on,
 or in another project on the same GitHub repository, making an agent
 without it, a team or a tab from a template is weighty too, so closing a
@@ -593,8 +593,8 @@ with until then.
 | Turns running at once | 6 | Others wait, "Queued" |
 | Running turns per login (one token, API key or ChatGPT account) | 3 | Others wait; a rate limit pauses that login's queue only |
 | Agent processes alive | 8 | The least recently used idle one closes and resumes later |
-| Paid API spend per tab (API-key models), until **Reset spend** | $5 by default, $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend |
-| Paid API spend across every tab in one UTC month (API-key models and image calls; a turn counts in the month it started), until **Reset Console spend**; set on the Overview | $25 by default, $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it. Raising the limit above the spend turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
+| Paid API spend per tab (API-key models and image calls), until **Reset spend**; set in the tab's menu, **Spend limit…** | None unless you set one; $0.01 to $1,000 per tab | The tab pauses ("Spend limit") until Reset spend. Raising the limit above the spend, or removing it, turns the pause into one Resume lifts. Image calls past it are refused |
+| Paid API spend across every tab in one UTC month (API-key models and image calls; a turn counts in the month it started), until **Reset Console spend**; set in **Settings**, **Overview** | None unless you set one; $0.01 to $10,000 | Every open tab with an API-key agent pauses ("Console spend limit"); no Resume lifts it while the limit stands. Raising the limit above the spend, or removing it, turns the pauses into ones Resume lifts; Reset Console spend lifts them. Image calls past it are refused |
 | A paid turn that did not end normally (you stopped it, it failed or crashed, the worker restarted), or whose usage was not reported or does not add up | — | Charged what it did report plus an allowance for each request its usage doesn't cover, at least one ([How a paid turn is charged](architecture.md#how-a-paid-turn-is-charged)); the tab pauses until you Resume that pause |
 | Image calls per turn | 8 calls, $1 | The call is refused |
 | Stored output per tool call | 64 KB | Cut, with a note |
@@ -607,6 +607,37 @@ with until then.
 Time waiting for you (Needs you) does not count toward a turn's limits.
 The spend check runs after each turn, so a tab can overshoot by the turns
 already running; the provider's cap is the hard ceiling.
+
+### Spend limits
+
+Squadroom comes with no spend limits set: no tab and no month has one
+until you add it. The only spend control it insists on is the monthly cap
+on each paid key, set at the provider and recorded in **Settings**,
+**Keys and connections** (step 8). On top of that you can set:
+
+- **A tab's limit.** Open the tab's menu, choose **Spend limit…**, type an
+  amount and press **Save**. **Remove limit** takes it off again. When the
+  tab reaches it, the tab pauses and Needs you shows **Reset spend**, which
+  counts that tab's spend from zero. Or raise or remove the limit and
+  press **Resume**.
+- **A monthly limit across every tab.** Open **Settings**, then
+  **Overview**, and set it under **Spend (API keys)**. When the month's
+  spend reaches it, every tab with an API-key agent pauses, and Needs you
+  shows **Reset Console spend**. Or raise or remove the limit and press
+  **Resume**. The count starts again on the first of each month (UTC).
+
+Raising or removing either limit, and both resets, ask for a recent
+e-mailed code (step 6). Setting or lowering a limit doesn't.
+
+For example: give a tab $2 while you try a model you don't know yet; put
+$50 a month on the Overview to keep the whole of Squadroom under that; and
+when a long build keeps pausing at its tab's limit, remove that tab's
+limit and Resume, leaving the provider's cap as the ceiling.
+
+Earlier versions set $5 per tab and $25 a month by default. A tab that
+never had its own limit now has none, and a tab paused at one of those old
+defaults can be resumed with an ordinary **Resume**. A limit you set
+yourself is kept.
 
 ## What is stored
 
