@@ -231,8 +231,8 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   assert.equal((await post(stale.post, { action: "decide", requestId: replyRequest, decision: "deny" })).status, 200);
   assert.equal((await post(stale.post, { action: "decide", requestId: pushRequest, decision: "allow" })).status, 200);
   assert.equal(cs.request(pushRequest)!.state, "allowed");
-  // A tab's spend limit: a stale session may lower it, never
-  // raise it; with a fresh code the raise lands.
+  // A tab's spend limit: none until set; a stale session may set or lower
+  // it, never raise or remove it; with a fresh code the raise lands.
   const tabId = cs.tabs(project.project.id)[0].id;
   const limit = async (headers: Record<string, string>, limitUsd: number | null) => post(headers, { action: "setSpendLimit", tabId, limitUsd });
   assert.equal((await limit(stale.post, 1)).status, 200);
@@ -244,10 +244,10 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   assert.equal((await limit(fresh.post, null)).status, 200);
   assert.equal(cs.tab(tabId)!.spendLimitUsd, null);
   assert.equal((await post(stale.post, { action: "setSpendLimit", tabId: "t000000000000", limitUsd: 1 })).status, 403);
-  // The Console-wide limit: a stale session may lower it, never raise or
-  // reset it, so new tabs (each with a fresh tab limit) cannot spend past it.
+  // The Console-wide limit: none until set; a stale session may set or
+  // lower it, never raise, remove or reset it.
   const consoleLimit = (headers: Record<string, string>, limitUsd: number | null) => post(headers, { action: "setConsoleSpendLimit", limitUsd });
-  assert.equal(cs.consoleSpend().limitUsd, 25);
+  assert.equal(cs.consoleSpend().limitUsd, null);
   assert.equal((await consoleLimit(stale.post, 10)).status, 200);
   assert.equal(cs.consoleSpend().limitUsd, 10);
   assert.equal((await consoleLimit(stale.post, 11)).status, 403);
@@ -256,7 +256,7 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   assert.equal(cs.consoleSpend().limitUsd, 10);
   assert.equal((await consoleLimit(fresh.post, null)).status, 200);
   assert.equal((await post(fresh.post, { action: "resetConsoleSpend" })).status, 200);
-  assert.deepEqual([cs.consoleSpend().limitUsd, cs.consoleSpend().isDefault], [25, true]);
+  assert.equal(cs.consoleSpend().limitUsd, null);
   // The gate comes after sign-in: no session, no 403 either.
   const anonymous = await post({ "x-workspace-request": "1", origin: "https://squadroom.example", "sec-fetch-site": "same-origin" }, gated[0]);
   assert.equal(anonymous.status, 401);

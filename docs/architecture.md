@@ -109,7 +109,7 @@ client has reported so far, the prices it started with and the paying
 key's fingerprint are kept on its row (`running`, `billing`), so a restart
 charges it the same way even if its model has left the catalog. The
 Overview counts each turn in the UTC day and month it started, against the
-key that paid for it, and the Console-wide monthly limit counts it in the
+key that paid for it, and a Console-wide monthly limit, if you set one, counts it in the
 month it started too.
 
 ## Agents

@@ -53,11 +53,13 @@ only restates one of them is not a new finding.
   ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
   e-mailed code (and are refused when mail is off), so a cookie alone
   cannot raise limits, change keys, grant permanent permissions or drop
-  Ask me first. New tabs start with their own limit, but the Console-wide
-  monthly limit caps them all, and raising or resetting it is weighty.
-- **Runaway spend.** Paid keys must have a provider-side cap; tabs pause at
-  their spend limit, and every tab with an API-key agent pauses at the
-  Console-wide monthly limit; a turn whose usage cannot be trusted is
+  Ask me first. When the owner has set a Console-wide monthly limit, it
+  caps every tab, new ones too, and raising, removing or resetting it is
+  weighty.
+- **Runaway spend.** Paid keys must have a provider-side cap, which is the
+  only spend limit Squadroom requires. Tabs pause at a spend limit the
+  owner sets, and every tab with an API-key agent pauses at a Console-wide
+  monthly limit the owner sets; neither has a default. A turn whose usage cannot be trusted is
   charged the full allowance for each request it started without reporting
   usage, and pauses its tab. Claude Code reports `modelUsage` as a running
   total for its session, so an API-key turn is charged the change since the

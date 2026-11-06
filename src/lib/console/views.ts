@@ -8,7 +8,7 @@ import { roleLibrary, type RoleDef } from "./roles.ts";
 import { LEASE_TTL_MS, NEEDS_MAIL, PAUSE_ALL, type ConsoleStore, type TurnRow } from "./store.ts";
 import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, templateNames, type TabTemplate } from "./templates.ts";
 import { buildTree, type TreeProject, type TreeStatus } from "./tree.ts";
-import { CODEX_DISABLED, LIMITS, agentStatus, type AgentStatus, type ConsoleAgent, type ConsoleProject, type ConsoleTab, type ConsoleTurn } from "./types.ts";
+import { CODEX_DISABLED, agentStatus, type AgentStatus, type ConsoleAgent, type ConsoleProject, type ConsoleTab, type ConsoleTurn } from "./types.ts";
 
 /** An agent's current turn: working beats queued, since a later message may
  * wait behind a running turn. */
@@ -98,14 +98,12 @@ export interface TimelineEntry {
 }
 export interface TabSpend {
   usd: number;
-  limitUsd: number;
-  /** True when the tab has no limit of its own. */
-  isDefault: boolean;
-  defaultUsd: number;
+  /** The owner's limit, or null when none is set. */
+  limitUsd: number | null;
 }
 
 export function tabSpendView(store: ConsoleStore, tab: Pick<ConsoleTab, "id" | "spendLimitUsd">): TabSpend {
-  return { usd: store.tabSpend(tab.id), limitUsd: tab.spendLimitUsd ?? LIMITS.tabSpendUsd, isDefault: tab.spendLimitUsd === null, defaultUsd: LIMITS.tabSpendUsd };
+  return { usd: store.tabSpend(tab.id), limitUsd: tab.spendLimitUsd };
 }
 
 

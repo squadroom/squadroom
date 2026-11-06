@@ -66,7 +66,7 @@ export interface ConsoleTab {
   pauseReason: string | null;
   /** When the owner closed it, or null. */
   archivedAt: number | null;
-  /** Its paid spend limit; null: the default. */
+  /** Its paid spend limit; null: none (the owner sets one). */
   spendLimitUsd: number | null;
   createdAt: number;
 }
@@ -196,11 +196,6 @@ export const LIMITS = {
   claimMs: 2 * 60 * 60_000,
   /** How long a hold lasts unless lifted. */
   holdMs: 30 * 60_000,
-  /** Paid API spend per tab before it pauses. */
-  tabSpendUsd: 5,
-  /** Paid API spend across every tab in one UTC month before all paid work
-   * pauses: a cookie alone cannot make new tabs to spend past it. */
-  consoleSpendUsd: 25,
   /** Image calls per turn, and their list prices per turn. */
   imageCallsPerTurn: 8,
   imageUsdPerTurn: 1,
@@ -216,10 +211,11 @@ export const LIMITS = {
 };
 
 /** Where a pause by the tab's spend limit starts its reason; Reset spend
- * lifts it. */
+ * lifts it (and, once the owner removes that limit, Resume). */
 export const SPEND_PAUSE = "Spend limit: ";
-/** Where a pause by the Console-wide spend limit starts its reason: no
- * Resume lifts it; raising or resetting that limit does. */
+/** Where a pause by the Console-wide spend limit (when the owner set one)
+ * starts its reason: no Resume lifts it while that limit is set; raising,
+ * removing or resetting it does. */
 export const CONSOLE_SPEND_PAUSE = "Console spend limit: ";
 /** Where a pause for a turn without trustworthy usage starts its reason;
  * Resume lifts it. */

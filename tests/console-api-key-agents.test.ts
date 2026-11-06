@@ -82,7 +82,7 @@ test("Claude Code's modelUsage is a running total: a turn is charged the change 
 });
 
 test("Claude Code on an API key: each turn is charged once, across turns, a restart and a resume, never its history", async (t) => {
-  const h = await harness(t, { tabSpendUsd: 1_000 });
+  const h = await harness(t);
   keys(h.keysFile);
   await h.worker.start();
   const paid = h.agent("Paid", "edit", "claude-sonnet-5@api-key");

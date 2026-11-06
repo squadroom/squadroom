@@ -9,7 +9,7 @@ import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
 import { ASK_FIRST_CLAUDE_ONLY, NEEDS_MAIL, type ConsoleStore } from "./store.ts";
 import { usd } from "./spend.ts";
-import { CODEX_DISABLED, LIMITS, NAME_MAX, PROMPT_MAX, ROLE_MAX, isOpen, type ConsoleTab, type Permission } from "./types.ts";
+import { CODEX_DISABLED, NAME_MAX, PROMPT_MAX, ROLE_MAX, isOpen, type ConsoleTab, type Permission } from "./types.ts";
 import { allTemplates, rolesView, templatesView } from "./views.ts";
 
 // The owner's commands, validated here so the route stays glue; the
@@ -138,11 +138,11 @@ export const CONSOLE_CODE_MS = 8 * 60 * 60_000;
 /** What `needsFreshCode` measures a request against, read from the store
  * by `freshCodeContext`. */
 interface FreshCodeContext {
-  /** The tab's spend limit now (its own or the default); null when the
-   * tab is unknown, which needs a code. */
+  /** The tab's spend limit now, or null when it has none; undefined when
+   * the tab is unknown, which needs a code. */
   spendLimit?: number | null;
-  /** The Console-wide spend limit now. */
-  consoleSpendLimit?: number;
+  /** The Console-wide spend limit now, or null when none is set. */
+  consoleSpendLimit?: number | null;
   /** The project an agent, team or template tab is made in has an agent,
    * open or closed, with Ask me first on (or another project on the same
    * GitHub repository has). */
@@ -161,19 +161,22 @@ interface FreshCodeContext {
  */
 export function needsFreshCode(input: Record<string, unknown>, context: FreshCodeContext = {}): boolean {
   switch (input.action as CommandAction) {
-    // Raising a tab's spend limit, against the limit it has now. Lowering it, or a value the command
-    // refuses anyway, does not.
+    // Raising a tab's spend limit, against the limit it has now; removing
+    // it (null) is the highest raise. Lowering it, setting one where none
+    // is set, or a value the command refuses anyway, does not.
     case "setSpendLimit": {
       const next = spendLimitInput(input.limitUsd);
       if (next === undefined) return false;
-      return context.spendLimit == null || (next ?? LIMITS.tabSpendUsd) > context.spendLimit;
+      return context.spendLimit === undefined || (next ?? Infinity) > (context.spendLimit ?? Infinity);
     }
-    // The Console-wide limit, the same way: a cookie alone cannot spend
-    // past it by making new tabs, each with its own fresh tab limit.
+    // The Console-wide limit, the same way (removing it, null, is the
+    // highest raise): a cookie alone cannot spend past it by making new
+    // tabs, each with its own fresh tab limit. Setting one where none is
+    // set is a lowering.
     case "setConsoleSpendLimit": {
       const next = spendLimitInput(input.limitUsd, CONSOLE_SPEND_LIMIT_MAX);
       if (next === undefined) return false;
-      return context.consoleSpendLimit === undefined || (next ?? LIMITS.consoleSpendUsd) > context.consoleSpendLimit;
+      return context.consoleSpendLimit === undefined || (next ?? Infinity) > (context.consoleSpendLimit ?? Infinity);
     }
     case "resetConsoleSpend":
       return true;
@@ -215,7 +218,7 @@ const SPEND_LIMIT_MAX = 1_000;
 const CONSOLE_SPEND_LIMIT_MAX = 10_000;
 
 /** A spend limit as sent: dollars, rounded to the cent, from $0.01 to
- * `max`; null (the default); undefined when not valid. */
+ * `max`; null (no limit); undefined when not valid. */
 export function spendLimitInput(value: unknown, max = SPEND_LIMIT_MAX): number | null | undefined {
   if (value === null) return null;
   const n = typeof value === "number" ? value : typeof value === "string" && /^\s*\d+(\.\d+)?\s*$/.test(value) ? Number(value) : NaN;
@@ -677,8 +680,8 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   },
   setSpendLimit(store, input, options) {
     const limit = spendLimitInput(input.limitUsd);
-    if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(SPEND_LIMIT_MAX)}, or none for the default.`);
-    store.setSpendLimit(id(input.tabId, "Tab"), limit, LIMITS.tabSpendUsd, options.freshCode === true);
+    if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(SPEND_LIMIT_MAX)}, or none for no limit.`);
+    store.setSpendLimit(id(input.tabId, "Tab"), limit, options.freshCode === true);
     return { tab: store.tab(String(input.tabId)) };
   },
   resetSpend(store, input) {
@@ -687,7 +690,7 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   },
   setConsoleSpendLimit(store, input, options) {
     const limit = spendLimitInput(input.limitUsd, CONSOLE_SPEND_LIMIT_MAX);
-    if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(CONSOLE_SPEND_LIMIT_MAX)}, or none for the default.`);
+    if (limit === undefined) throw new CommandError(`Give the limit in dollars, from $0.01 to ${usd(CONSOLE_SPEND_LIMIT_MAX)}, or none for no limit.`);
     store.setConsoleSpendLimit(limit, options.freshCode === true);
     return { spend: store.consoleSpend() };
   },
@@ -745,8 +748,8 @@ export function runCommand(store: ConsoleStore, input: Record<string, unknown>, 
   return COMMANDS[action as RunAction](store, input, options, action);
 }
 
-/** A tab's spend limit as the worker applies it, or null for no such tab:
- * what raising it is measured against (`needsFreshCode`). */
-export function currentSpendLimit(store: ConsoleStore, tabId: unknown): number | null {
-  return typeof tabId === "string" ? store.spendLimit(tabId, LIMITS.tabSpendUsd) : null;
+/** A tab's spend limit (null: none), or undefined for no such tab: what
+ * raising it is measured against (`needsFreshCode`). */
+export function currentSpendLimit(store: ConsoleStore, tabId: unknown): number | null | undefined {
+  return typeof tabId === "string" ? store.tab(tabId)?.spendLimitUsd : undefined;
 }

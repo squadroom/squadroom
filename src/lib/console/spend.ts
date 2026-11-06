@@ -254,9 +254,9 @@ export function spendPauseReason(spent: number, limit: number): string {
 }
 
 /** A tab paused at its spend limit whose limit the owner raised above its
- * spend: an ordinary pause, which Resume lifts. */
-export function spendRaisedReason(spent: number, limit: number): string {
-  return `Spend limit raised to ${usd(limit)}: this tab has spent ${usd(spent)} on API-key models since its spend was last reset. Resume to let it continue.`;
+ * spend or removed (null): an ordinary pause, which Resume lifts. */
+export function spendRaisedReason(spent: number, limit: number | null): string {
+  return `${limit === null ? "Spend limit removed" : `Spend limit raised to ${usd(limit)}`}: this tab has spent ${usd(spent)} on API-key models since its spend was last reset. Resume to let it continue.`;
 }
 
 /** Why a tab with API-key agents is paused at the Console-wide limit. */
@@ -265,7 +265,9 @@ export function consoleSpendPauseReason(spent: number, limit: number): string {
 }
 
 /** A tab paused at the Console-wide limit, after the owner raised that
- * limit above the spend: an ordinary pause, which Resume lifts. */
-export function consoleSpendRaisedReason(spent: number, limit: number): string {
-  return `Console spend limit raised to ${usd(limit)}: the Console has spent ${usd(spent)} on API-key models this month (UTC). Resume to let this tab continue.`;
+ * limit above the spend or removed it (null): an ordinary pause, which
+ * Resume lifts. */
+export function consoleSpendRaisedReason(spent: number, limit: number | null): string {
+  const what = limit === null ? "Console spend limit removed" : `Console spend limit raised to ${usd(limit)}`;
+  return `${what}: the Console has spent ${usd(spent)} on API-key models this month (UTC). Resume to let this tab continue.`;
 }
