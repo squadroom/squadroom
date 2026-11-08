@@ -28,8 +28,8 @@
     "console:cleanup": "node scripts/console-cleanup.ts"
   },
   "dependencies": {
-    "@next/env": "16.4.3",
-    "next": "16.4.3",
+    "@next/env": "16.4.5",
+    "next": "16.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-markdown": "^10.1.0",
@@ -41,7 +41,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^10",
-    "eslint-config-next": "16.4.3",
+    "eslint-config-next": "16.4.5",
     "typescript": "^5"
   },
   "overrides": {
