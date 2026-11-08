@@ -2,6 +2,6 @@
   "name": "console-client-kimi",
   "private": true,
   "dependencies": {
-    "@moonshot-ai/kimi-code": "2.4.1"
+    "@moonshot-ai/kimi-code": "2.5.1"
   }
 }
