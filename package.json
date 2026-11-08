@@ -47,6 +47,7 @@
   "overrides": {
     "eslint-plugin-import": { "eslint": "$eslint" },
     "eslint-plugin-jsx-a11y": { "eslint": "$eslint" },
-    "eslint-plugin-react": { "eslint": "$eslint" }
+    "eslint-plugin-react": { "eslint": "$eslint" },
+    "minimatch@>=7.0.0 <11.0.1": "^11.0.1"
   }
 }
