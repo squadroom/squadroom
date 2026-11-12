@@ -30,8 +30,9 @@ tools, and with them an agent can send a teammate a message (`team_send`),
 ask a question and get the answer back (`team_ask`, `team_reply`), merge in
 a teammate's work (`team_pull`), claim the files it's about to edit
 (`team_claim`), ask a teammate to hold off (`team_hold`), ask you to push
-its branch and open a pull request (`team_push`), and read the review on it
-(`team_pr`). A message waits until the other agent
+its branch and open a pull request (`team_push`), read the review on it
+(`team_pr`), and read the checks GitHub Actions ran on it, with the end of
+a failed job's log (`team_checks`). A message waits until the other agent
 finishes its current turn, then arrives as its next prompt. Routes pass one
 agent's finished reply straight to another, for example when the Lead ends
 with "ready for review".
@@ -45,10 +46,20 @@ tabs. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 
+An agent can also propose a new tab with a team of its own
+(`team_propose_tab`), for work that is better done apart. The proposal
+shows up in Needs you with **Create**, **Edit…** and **Decline**. Nothing
+is made until you choose, and the agent is told what you chose. If you
+create the tab, its Orchestrator (or a pair's Lead) and the agent that
+proposed it can message each other across the two tabs, and the new tab's
+result is sent back when its team has finished.
+
 Every agent works in its own Git clone on its own `console/…` branch (a
 Code analysis agent, which changes no files, sits on the base branch).
 Squadroom commits what changed at the end of each turn, so you can check the
-work one turn at a time in the window's **Changes** view. Each commit's
+work one turn at a time in the window's **Changes** view. **Files**, in
+the same menu, lists everything in the agent's folder, Markdown documents
+first, and opens a file beside the conversation. Each commit's
 message holds your whole request for that turn, and pushing the branch
 publishes it. Nothing is pushed until you approve it, and when an agent
 opens a pull request you see its title and description before they are
@@ -82,7 +93,8 @@ with seven members.
   pair (a Lead and a Reviewer), or an Orchestrator with up to seven
   members, and you can add more agents by hand. Each agent has its own
   name, model and thinking level, and works at Code edit or Code analysis.
-  You can mix tools in one team.
+  You can mix tools in one team. **Model…** in an agent's menu changes its
+  model and thinking level later; it keeps its conversation.
 
 Up to six agent turns run at once across everything, and three per account
 or API key. Anything over that waits in a queue.
@@ -168,7 +180,9 @@ Other limits:
 
 - **Runaway teams.** A tab pauses when one message from you has led to 40
   agent turns or two hours of work, or when two agents have sent each other
-  12 messages with no new commit.
+  12 messages with no new commit. **Turn limits…** in a tab's menu changes
+  the first two for that tab (up to 1,000 turns and 24 hours). Raising
+  them asks for a recent e-mailed code; lowering them doesn't.
 - **Turns.** A turn stops after 30 minutes, or 10 minutes with no output.
 - You can pause a tab, a project or everything at any time.
 

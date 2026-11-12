@@ -556,6 +556,7 @@ export class ConsoleWorker {
       this.enforceLimits();
       this.schedule(open);
       this.stallCheck(open);
+      this.linkResults(open);
       this.clearHoldStalls(open);
       this.runJobs(open);
       this.runFiles();
@@ -649,8 +650,17 @@ export class ConsoleWorker {
         this.safe(() => this.store.clearWaitFor(epoch, agent.id));
       }
       // A team turn that waited (a slot, a push) still keeps to its
-      // instruction's wall time.
-      if (row.trigger === "team" && row.instructionId && this.instructionOverdue(agent.tabId, this.store.instructionUse(row.instructionId, agent.tabId).startedAt)) continue;
+      // instruction's wall time, and to its tab's turn limit as it is now
+      // (lowered since); the count includes this turn.
+      if (row.trigger === "team" && row.instructionId) {
+        const use = this.store.instructionUse(row.instructionId, agent.tabId);
+        if (this.instructionOverdue(agent.tabId, use.startedAt)) continue;
+        const limit = this.turnLimits(agent.tabId).turns;
+        if (use.turns > limit) {
+          this.pause(agent.tabId, `Limit reached: one instruction caused ${use.turns} agent turns (the limit is ${limit}). Resume to let the team continue.`);
+          continue;
+        }
+      }
       // A model or kind no longer offered, or the kind is off (Codex
       // without its permission profile).
       const model = agentModel(agent.kind, agent.model);

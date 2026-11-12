@@ -1,5 +1,6 @@
 import type { ConsoleCommand } from "@/lib/console/commands";
 import { useState } from "react";
+import type { Proposal } from "@/lib/console/team-setup";
 import type { needsView } from "@/lib/console/views";
 import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleProject } from "@/lib/console/types";
 import { needCount, wholeInput } from "@/lib/console/ui";
@@ -22,6 +23,7 @@ export default function NeedsTray({
   onClose,
   canShow,
   onShow,
+  onEditProposal,
   run,
 }: {
   needs: Needs;
@@ -32,6 +34,9 @@ export default function NeedsTray({
   onShow: (agentId: string) => void;
   /** False once the agent is closed (its notice can outlive it). */
   canShow: (agentId: string) => boolean;
+  /** Open a proposed tab's team in the setup screen, to change it before
+   * creating it. */
+  onEditProposal: (noticeId: number, proposal: Proposal) => void;
   run: Run;
 }) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -108,12 +113,22 @@ export default function NeedsTray({
       {needs.notices.map((n) => (
         <div key={`n${n.id}`} className={styles.need}>
           <p>
-            <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : "note"}
+            <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : "note"}
           </p>
           <p className={styles.needText}>{n.text}</p>
           <div className={styles.dialogButtons}>
-            {show(n.agentId)}
-            {act("Dismiss", { action: "dismissNotice", noticeId: n.id }, true)}
+            {show(n.agentId, n.proposal ? led : undefined)}
+            {n.proposal ? (
+              <>
+                {act("Decline", { action: "decideProposal", noticeId: n.id, decision: "decline" }, false, "Do not create it; its agent is told")}
+                <button onClick={() => onEditProposal(n.id, n.proposal!)} title="Change its team or goal before creating it">
+                  Edit…
+                </button>
+                {act("Create", { action: "decideProposal", noticeId: n.id, decision: "create" }, true, "Create the tab and its team as proposed")}
+              </>
+            ) : (
+              act("Dismiss", { action: "dismissNotice", noticeId: n.id }, true)
+            )}
           </div>
         </div>
       ))}

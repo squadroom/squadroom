@@ -137,9 +137,12 @@ export function stepNote(s: { steps: TemplateStep[]; index: number }, editing: b
   const step = s.steps[s.index];
   if (!step) return "";
   const where = `Step ${s.index + 1} of ${s.steps.length}: ${step.name}.`;
+  // How a step moves on, so nobody guesses (a push or a merge does not).
+  const next =
+    "Only the owner moves the tab to the next step: in the Console they approve each editing agent's current commit (that agent's window menu, Changes; after the reviewer's review when the tab has a reviewer), then choose the step in the tab's menu, Steps. Pushing, a pull request or a merge does not move it.";
   return editing
-    ? `${where} You may change only these files: ${step.files.join(", ")}. Earlier steps' documents are approved: read them, do not change them (the owner reopens an earlier step to change it).\n\n`
-    : `${where} The files of this step, the only ones its editing agents may change: ${step.files.join(", ")}.\n\n`;
+    ? `${where} You may change only these files: ${step.files.join(", ")}. Earlier steps' documents are approved: read them, do not change them (the owner reopens an earlier step to change it). ${next}\n\n`
+    : `${where} The files of this step, the only ones its editing agents may change: ${step.files.join(", ")}. ${next}\n\n`;
 }
 
 /** The Document review template: a lead-and-reviewer document sequence as

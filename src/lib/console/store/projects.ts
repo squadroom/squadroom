@@ -70,6 +70,16 @@ export const projects = {
     this.run("UPDATE console_agents SET ask_first = ? WHERE id = ?", on ? 1 : 0, agentId);
     return this.agent(agentId)!;
   },
+  /** An agent's model and thinking level, changed by the owner: its kind
+   * stays. A turn already running keeps what it started
+   * with; the next one starts a process with the new ones, in the same
+   * conversation. */
+  setAgentAi(this: ConsoleStore, agentId: string, model: string, effort: ConsoleEffort | null): ConsoleAgent {
+    const a = this.agent(agentId);
+    if (!a || a.state === "closed") throw new Error("That agent is closed.");
+    this.run("UPDATE console_agents SET model = ?, effort = ? WHERE id = ?", model, effort, agentId);
+    return this.agent(agentId)!;
+  },
   closeAgent(this: ConsoleStore, agentId: string) {
     this.transaction(() => {
       if (!this.agent(agentId)) throw new Error("That agent does not exist.");
@@ -143,6 +153,19 @@ export const projects = {
       if (t.archivedAt === null) throw new Error("That tab is not closed.");
       if (this.project(t.projectId)?.archivedAt != null) throw new Error("Restore its project first.");
       this.run("UPDATE console_tabs SET archived_at = NULL WHERE id = ?", id);
+    });
+  },
+
+  /** Check again: a GitHub project whose checks failed goes back to the
+   * worker, and its agents that never got a folder are set up again. */
+  recheckProject(this: ConsoleStore, id: string) {
+    this.transaction(() => {
+      const p = this.project(id);
+      if (!p) throw new Error("That project does not exist.");
+      if (p.archivedAt !== null) throw new Error("That project is archived. Restore it first.");
+      if (p.source !== "github" || p.state !== "error") throw new Error("Only a GitHub project whose checks failed can be checked again.");
+      this.run("UPDATE console_projects SET state = 'preparing', error = NULL WHERE id = ?", id);
+      this.run("UPDATE console_agents SET state = 'creating', error = NULL WHERE project_id = ? AND state = 'error' AND folder = ''", id);
     });
   },
 

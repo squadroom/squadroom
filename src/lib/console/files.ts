@@ -139,3 +139,19 @@ export function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** The path that stands for an agent's whole folder: its files, listed.
+ * Never a file's path (`agentFilePath` gives none for it). */
+export const FOLDER_LISTING = ".";
+/** The most files one listing shows. */
+export const LIST_MAX = 2_000;
+
+/** `git ls-files -z` output as the panel lists it: documents first
+ * (Markdown), then everything else, each by path. Only whole records: a
+ * path without its closing NUL is the cut end of output past the limit,
+ * and could be part of a name nothing would recognise (a credential's). */
+export function listedFiles(stdout: string): string[] {
+  const markdown = (p: string) => (fileKind(p).kind === "markdown" ? 0 : 1);
+  const whole = stdout.slice(0, stdout.lastIndexOf("\0") + 1);
+  return [...new Set(whole.split("\0").filter(Boolean))].sort((a, b) => markdown(a) - markdown(b) || a.localeCompare(b));
+}

@@ -68,6 +68,14 @@ export interface ConsoleTab {
   archivedAt: number | null;
   /** Its paid spend limit; null: none (the owner sets one). */
   spendLimitUsd: number | null;
+  /** Its own turn limits: the agent turns, and the minutes, one
+   * owner instruction may run through messages; null: the default (LIMITS). */
+  turnLimit: number | null;
+  timeLimitMin: number | null;
+  /** A tab an agent proposed: that agent, and this tab's agent
+   * linked to it (its Orchestrator, or a pair's Lead); else null. */
+  parentAgent: string | null;
+  leadAgent: string | null;
   createdAt: number;
 }
 export interface ConsoleAgent {
@@ -209,6 +217,18 @@ export const LIMITS = {
   /** Streamed text is coalesced into one row per this many ms per turn. */
   coalesceMs: 250,
 };
+
+/** The most a tab's own turn limits can be set to. */
+export const TURN_LIMIT_MAX = 1_000;
+export const TIME_LIMIT_MIN_MIN = 5;
+export const TIME_LIMIT_MAX_MIN = 24 * 60;
+/** A tab's turn limits in force: its own, else the defaults. */
+export function turnLimits(
+  tab: Pick<ConsoleTab, "turnLimit" | "timeLimitMin">,
+  limits: { turnsPerInstruction: number; instructionMs: number } = LIMITS,
+): { turns: number; ms: number } {
+  return { turns: tab.turnLimit ?? limits.turnsPerInstruction, ms: tab.timeLimitMin === null ? limits.instructionMs : tab.timeLimitMin * 60_000 };
+}
 
 /** Where a pause by the tab's spend limit starts its reason; Reset spend
  * lifts it (and, once the owner removes that limit, Resume). */

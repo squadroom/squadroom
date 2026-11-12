@@ -17,9 +17,18 @@ const memberKeys = (setup: TeamSetup) => setup.members.map(() => ++memberKey);
  * members it divides the work among (each with a role whose prompt can be
  * edited for that agent), and an optional goal it starts on by itself once
  * every window is set up. */
-export default function TeamSetupDialog(props: { codexOff: string | null; takenNames: string[]; roles: RoleDef[]; onClose: () => void; onCreate: (setup: TeamSetup) => Promise<void> }) {
-  const { codexOff, takenNames, roles, onClose, onCreate } = props;
-  const [setup, setSetup] = useState<TeamSetup>(() => defaultTeamSetup(!!codexOff, takenNames, roles));
+export default function TeamSetupDialog(props: {
+  codexOff: string | null;
+  takenNames: string[];
+  roles: RoleDef[];
+  /** A team to start from, and the tab it is for: one an agent proposed,
+   * which the owner changes before creating its tab. */
+  proposed?: { name: string; setup: TeamSetup };
+  onClose: () => void;
+  onCreate: (setup: TeamSetup) => Promise<void>;
+}) {
+  const { codexOff, takenNames, roles, proposed, onClose, onCreate } = props;
+  const [setup, setSetup] = useState<TeamSetup>(() => proposed?.setup ?? defaultTeamSetup(!!codexOff, takenNames, roles));
   const [keys, setKeys] = useState(() => memberKeys(setup));
   const checked = checkTeamSetup(setup, { takenNames, codexOff: !!codexOff, roles });
   const { busy, guard } = useBusy();
@@ -54,7 +63,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
     setKeys(memberKeys(preset));
   };
   return (
-    <Dialog title="Set up a coding team" onClose={onClose}>
+    <Dialog title={proposed ? `Proposed tab: ${proposed.name}` : "Set up a coding team"} onClose={onClose}>
       <div className={styles.teamRow} role="radiogroup" aria-label="Kind of team">
         <label>
           <input type="radio" name="team-kind" checked={orchestrated} onChange={() => switchTo(false)} /> With an Orchestrator
@@ -147,7 +156,7 @@ export default function TeamSetupDialog(props: { codexOff: string | null; takenN
       <div className={styles.dialogButtons}>
         <button onClick={onClose}>Cancel</button>
         <button className={styles.primary} disabled={busy || !checked.ok} onClick={() => guard(() => onCreate(setup))}>
-          Create team
+          {proposed ? "Create tab" : "Create team"}
         </button>
       </div>
     </Dialog>

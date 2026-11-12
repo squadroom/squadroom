@@ -127,6 +127,20 @@ export const teamGit = {
     }
   },
 
+  /** team_checks: the pull request's GitHub Actions jobs, or the end of
+   * one job's log. */
+  async teamChecks(this: ConsoleWorker, { me, args }: TeamCall): Promise<string> {
+    const project = this.store.project(me.projectId);
+    if (project?.source !== "github") throw new TeamError("Only a GitHub project's agents have pull requests and their checks.");
+    if (me.permission !== "edit") throw new TeamError("A Code analysis agent has no branch, so no pull request of its own.");
+    if (args.job !== undefined && !(Number.isSafeInteger(args.job) && (args.job as number) >= 1)) throw new TeamError("job must be a job's number from team_checks.");
+    try {
+      return await this.repos.readAgentChecks(me, project, args.job as number | undefined);
+    } catch (error) {
+      throw new TeamError(this.redactor.text(message(error)));
+    }
+  },
+
   async teamPrReply(this: ConsoleWorker, c: TeamCall): Promise<string> {
     const { me, t, args, epoch, key } = c;
     const project = this.store.project(me.projectId);

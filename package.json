@@ -25,7 +25,8 @@
     "update": "zsh scripts/update.sh",
     "emergency": "node scripts/emergency.ts",
     "console:worker": "node scripts/console-worker.ts",
-    "console:cleanup": "node scripts/console-cleanup.ts"
+    "console:cleanup": "node scripts/console-cleanup.ts",
+    "console:prepare-repo": "node scripts/console-prepare-repo.ts"
   },
   "dependencies": {
     "@next/env": "16.4.5",

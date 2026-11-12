@@ -752,6 +752,19 @@
 }
 
 /* File panel and uploads. */
+/* The folder's files, to open in the panel. */
+.fileList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fileList button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
 .filePanel {
   position: fixed;
   top: 0;

@@ -85,17 +85,24 @@ type Approval = Changes["approval"];
 /** The approve gate: approve the branch's current commit, optionally only
  * after a Code analysis teammate reviewed it; a later commit cancels the approval. */
 function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Approval; run: Run }) {
-  const [reviewerId, setReviewerId] = useState("");
+  // Where a step waits for a review (a tab with steps and a reviewer),
+  // only an approval after one is offered, the finished review first.
+  const [reviewerId, setReviewerId] = useState(() => (approval.reviewNeeded ? ((approval.reviewers.find((r) => r.reviewed) ?? approval.reviewers[0])?.id ?? "") : ""));
   const reviewer = approval.reviewers.find((r) => r.id === reviewerId);
   const approvedNow = approval.current?.current && approval.current.sha === approval.head;
+  // Approved without a review there: it can be approved again, after one.
+  const unreviewed = !!approvedNow && approval.reviewNeeded && !approval.current?.reviewerId;
   return (
     <div className={styles.pushRow}>
-      <span className={styles.hint}>{approvalLine(approval)}</span>
-      {approval.head && !approvedNow && (
+      <span className={styles.hint}>
+        {approvalLine(approval)}
+        {unreviewed && " This tab's steps move on only after an approval that follows a review: approve it again."}
+      </span>
+      {approval.head && (!approvedNow || unreviewed) && (
         <>
           {approval.reviewers.length > 0 && (
             <select aria-label="Reviewed by" value={reviewerId} onChange={(e) => setReviewerId(e.target.value)}>
-              <option value="">No review needed</option>
+              {!approval.reviewNeeded && <option value="">No review needed</option>}
               {approval.reviewers.map((r) => (
                 <option key={r.id} value={r.id}>
                   After {r.name}&apos;s review{r.reviewed ? " (done)" : " (not yet)"}
@@ -103,7 +110,7 @@ function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Ap
               ))}
             </select>
           )}
-          <button disabled={!!reviewer && !reviewer.reviewed} onClick={() => void run({ action: "approve", agentId, sha: approval.head!, reviewerId: reviewerId || null })}>
+          <button disabled={(!!reviewer && !reviewer.reviewed) || (approval.reviewNeeded && !reviewer)} onClick={() => void run({ action: "approve", agentId, sha: approval.head!, reviewerId: reviewerId || null })}>
             Approve {approval.head.slice(0, 7)}
           </button>
         </>
@@ -181,7 +188,9 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
               {changes.push?.state === "done" && <span className={styles.hint}>{changes.push.message}</span>}
             </div>
           )}
-          {changes.approval.editing && <ApproveGate agentId={agentId} approval={changes.approval} run={run} />}
+          {changes.approval.editing && (
+            <ApproveGate key={`${changes.approval.head}/${changes.approval.current?.reviewerId ?? ""}`} agentId={agentId} approval={changes.approval} run={run} />
+          )}
           <h3 className={styles.subhead}>All changes{changes.baseBranch && changes.source === "github" ? ` against ${changes.baseBranch}` : ""}</h3>
           {changes.diff && <StatFiles files={changes.diff.files ?? []} onOpenFile={onOpenFile} />}
           {changes.diff?.stat ? (

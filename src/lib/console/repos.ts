@@ -8,6 +8,8 @@ import {
   commentOnPullRequest,
   findPullRequest,
   openPullRequest,
+  readChecks,
+  readJobLog,
   readPullRequest,
   readReviewThreadComments,
   replyToReviewThread,
@@ -15,7 +17,7 @@ import {
   type GitHubApi,
 } from "./github-api.ts";
 import { CONSOLE_FILES_IN_BRANCH, Mirror } from "./mirror.ts";
-import { CODEX_REVIEW, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
+import { CODEX_REVIEW, JOB_LOG_BYTES, checksText, jobLogText, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { agentModel } from "./agents.ts";
 import type { Launcher } from "./launcher.ts";
 import { credentialValues, keyFor } from "./keys.ts";
@@ -471,6 +473,25 @@ export class Repos {
     }
     const head = await this.clone(agent).head().catch(() => null);
     return this.o.redactor.text(pullRequestReviewText(review, head, undefined, focus));
+  }
+  /** team_checks: the GitHub Actions jobs of the agent's pull request's
+   * latest commit, or the end of one of those jobs' logs, read with the
+   * owner's token in the worker and redacted. Nothing is written, and no
+   * other commit's jobs are read. */
+  async readAgentChecks(agent: ConsoleAgent, project: ConsoleProject, jobId?: number): Promise<string> {
+    const { pr, token } = await this.agentPullRequest(agent, project);
+    const gh = this.github(token);
+    const { headSha } = await readPullRequest(project.repo!, pr.number, gh);
+    const redact = (text: string) => this.o.redactor.text(text);
+    const read = await readChecks(project.repo!, headSha, gh);
+    // Names are masked whole here, before anything shortens them: a
+    // credential cut by a length limit would no longer be recognised.
+    const jobs = read.jobs.map((j) => ({ ...j, run: redact(j.run), name: redact(j.name) }));
+    if (jobId === undefined) return redact(checksText(jobs, headSha, await this.clone(agent).head().catch(() => null), read.incomplete));
+    const job = jobs.find((j) => j.id === jobId);
+    if (!job) throw new GitError(`Job ${jobId} is not one of your pull request's checks for ${headSha.slice(0, 8)} (team_checks lists them).`);
+    const log = await readJobLog(project.repo!, job.id, JOB_LOG_BYTES, gh);
+    return redact(jobLogText(job, log, redact));
   }
   /** team_pr_reply, before the owner is asked: the agent's pull request
    * has every commit its folder has (a reply describes what is on GitHub),

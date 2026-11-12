@@ -2,7 +2,7 @@ import type { Run } from "../../components/console/api.ts";
 import type { Modal } from "../../components/console/ConsoleModals.tsx";
 import type { MenuItem } from "../../components/console/Menu.tsx";
 import { SPEND_PAUSE, type ConsoleProject } from "./types.ts";
-import { money, projectPlace } from "./ui.ts";
+import { money, projectPlace, turnLimitsHint } from "./ui.ts";
 import type { ProjectView, templatesView } from "./views.ts";
 
 // The page's menus: a tab's, the project's and Add, each item once. Built
@@ -27,6 +27,7 @@ export function tabMenu(t: ProjectView["tabs"][number], { view, open, run, renam
   return [
     { label: "Rename", hint: "Or double-click the tab", onSelect: () => renameTab(t.id) },
     { label: "Spend limit…", hint: t.spend.limitUsd === null ? `${money(t.spend.usd)} spent on API keys, no limit` : `${money(t.spend.usd)} of ${money(t.spend.limitUsd)} spent on API keys`, onSelect: () => open({ kind: "spend", tabId: t.id }) },
+    { label: "Turn limits…", hint: turnLimitsHint(t), onSelect: () => open({ kind: "turns", tabId: t.id }) },
     ...(t.steps ? [{ label: "Steps…", hint: `Step ${t.steps.index + 1} of ${t.steps.steps.length}`, onSelect: () => open({ kind: "steps", tabId: t.id }) }] : []),
     t.paused
       ? t.pauseReason?.startsWith(SPEND_PAUSE)

@@ -1,7 +1,7 @@
 import { agentModel } from "../agents.ts";
 import { chargeTurn, consoleSpendPauseReason, pricedAt, spendPauseReason, usd, type BilledModel, type Charge, type RunningUsage } from "../spend.ts";
 import { USAGE_PAUSE, type TurnRow } from "../store.ts";
-import type { ConsoleAgent, TurnUsage } from "../types.ts";
+import { turnLimits, type ConsoleAgent, type TurnUsage } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 
 // Spend and pauses: a paid turn's charge, and a tab paused at its spend
@@ -100,9 +100,14 @@ export const holds = {
   /** An instruction that began at `startedAt` and ran past its wall time
    * pauses its tab. */
   instructionOverdue(this: ConsoleWorker, tabId: string, startedAt: number): boolean {
-    if (this.now() - startedAt <= this.limits.instructionMs) return false;
-    this.pause(tabId, `Limit reached: one instruction has run for more than ${Math.round(this.limits.instructionMs / 60_000)} minutes. Resume to let the team continue.`);
+    const { ms } = this.turnLimits(tabId);
+    if (this.now() - startedAt <= ms) return false;
+    this.pause(tabId, `Limit reached: one instruction has run for more than ${Math.round(ms / 60_000)} minutes. Resume to let the team continue.`);
     return true;
+  },
+  /** A tab's turn limits in force: its own, else the worker's. */
+  turnLimits(this: ConsoleWorker, tabId: string): { turns: number; ms: number } {
+    return turnLimits(this.store.tab(tabId) ?? { turnLimit: null, timeLimitMin: null }, this.limits);
   },
 
   /** A stalled ask: every agent in a tab idle while an ask is still open
@@ -134,6 +139,20 @@ export const holds = {
           ? `${HOLD_STALL}${held[0].name} is on hold by ${hold.holderName} (${hold.reason}). Resume (or Lift) ends it.`
           : "Waiting on an answer that is not coming: every agent is idle while an ask is still open.",
       );
+    }
+  },
+
+  /** A proposed tab that has come to rest sends its result to the agent
+   * that proposed it, once: nothing open, queued or being
+   * committed in it, and no mail waiting. A paused tab waits for the owner. */
+  linkResults(this: ConsoleWorker, open: TurnRow[]): void {
+    for (const tab of this.store.resultsOwed()) {
+      if (this.store.pausedFor({ projectId: tab.projectId, tabId: tab.id })) continue;
+      const agents = this.store.agents(tab.projectId).filter((a) => a.tabId === tab.id && a.state !== "closed");
+      const busy = (a: ConsoleAgent) =>
+        a.state === "creating" || open.some((t) => t.agentId === a.id) || !!this.runtimes.get(a.id)?.turn || !!this.runtimes.get(a.id)?.busy || this.store.queuedMessages(a.id).length > 0;
+      if (agents.some(busy)) continue;
+      this.safe(() => this.store.sendResult(this.epoch!, tab.id));
     }
   },
 
