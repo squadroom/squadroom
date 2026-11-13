@@ -1,7 +1,22 @@
-import { isOpen, type ConsoleAgent } from "../types.ts";
+import { isOpen, type ConsoleAgent, type ConsoleTab } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { claimsOverlap, holdCycle } from "../claims.ts";
-import { HoldCycleError, REPORTS_PER_TURN, TeamError, type ToolCall } from "../team.ts";
+import { HoldCycleError, REPORT_MAX, REPORTS_PER_TURN, SHARE_MAX, TeamError, type ToolCall } from "../team.ts";
+import type { Proposal } from "../team-setup.ts";
+import { safeCut, tab } from "./rows.ts";
+
+/** A Needs you item an agent or the Console made: a note, a team_report,
+ * or a proposed tab with its team. */
+export interface Notice {
+  id: number;
+  agentId: string;
+  agentName: string;
+  projectId: string;
+  kind: "note" | "report" | "proposal";
+  text: string;
+  proposal: Proposal | null;
+  createdAt: number;
+}
 
 type Call = { turnId: number; agentId: string; key: string; tool: string; summary: string };
 
@@ -200,7 +215,95 @@ export const team = {
       return "Put in the owner's Needs you. This does not wait for an answer: the owner answers, if at all, with a message in your window. Carry on, or end your turn if you cannot go on without the answer.";
     });
   },
-  notices(this: ConsoleStore): { id: number; agentId: string; agentName: string; projectId: string; kind: "note" | "report"; text: string; createdAt: number }[] {
+  // ── Proposed tabs ──────────────────────────────────────────
+  /** team_propose_tab: the call's record and its Needs you item, with the
+   * team as the setup screen takes it, in one transaction. */
+  proposeTab(this: ConsoleStore, epoch: number, r: { turnId: number; agentId: string; key: string; summary: string; text: string; proposal: Proposal }): string {
+    return this.callOnce(epoch, { turnId: r.turnId, agentId: r.agentId, key: r.key, tool: "team_propose_tab", summary: r.summary }, () => {
+      const data = JSON.stringify(r.proposal);
+      this.run("INSERT INTO console_notices (agent_id, text, kind, data, created_at) VALUES (?, ?, 'proposal', ?, ?)", r.agentId, r.text, data, this.now());
+      this.chargePayload(r.turnId, Buffer.byteLength(data, "utf8"));
+      return `Proposed the tab "${r.proposal.name}" to the owner (their Needs you). This does not wait: you are told when they create or decline it. Carry on with what does not depend on it, or end your turn.`;
+    });
+  },
+  /** The owner's answer to a proposal, once: its Needs you item goes, a
+   * tab made from it is linked to the proposing agent, and that agent is
+   * told (a message of the owner's, in its window) unless it is closed.
+   * `owed`: the tab has a goal, whose result goes back (`sendResult`). */
+  settleProposal(this: ConsoleStore, noticeId: number, made: { tabId: string; leadId: string; owed: boolean } | null, note: string) {
+    this.transaction(() => {
+      const n = this.get("SELECT agent_id FROM console_notices WHERE id = ? AND kind = 'proposal' AND dismissed = 0", noticeId);
+      if (!n) throw new Error("That proposal has already been answered.");
+      this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", noticeId);
+      const agentId = n.agent_id as string;
+      if (made) this.run("UPDATE console_tabs SET parent_agent = ?, lead_agent = ?, result_sent = ? WHERE id = ?", agentId, made.leadId, made.owed ? 0 : 1, made.tabId);
+      if (isOpen(this.agent(agentId))) this.queueTurn(agentId, note);
+    });
+  },
+  /** The agents of other tabs an agent is linked to: the lead
+   * of each tab it proposed, and the agent that proposed its own tab when it
+   * is that tab's lead. Open agents of open tabs only, at both ends: none
+   * for an agent that is closed or failed itself, or whose tab is closed
+   * (read afresh, so every caller gets the same answer). */
+  linkedAgents(this: ConsoleStore, agent: ConsoleAgent): ConsoleAgent[] {
+    if (!isOpen(this.agent(agent.id)) || this.tab(agent.tabId)?.archivedAt !== null) return [];
+    const ids = this.all(
+      "SELECT lead_agent AS id FROM console_tabs WHERE parent_agent = ? AND archived_at IS NULL UNION SELECT parent_agent FROM console_tabs WHERE lead_agent = ? AND archived_at IS NULL",
+      agent.id, agent.id,
+    ).map((r) => r.id as string | null);
+    return ids
+      .map((id) => (id ? this.agent(id) : undefined))
+      .filter((a): a is ConsoleAgent => !!a && a.id !== agent.id && a.tabId !== agent.tabId && a.state !== "closed" && this.tab(a.tabId)?.archivedAt === null);
+  },
+  /** Proposed tabs whose result has not gone back to the proposing agent. */
+  resultsOwed(this: ConsoleStore): ConsoleTab[] {
+    return this.all("SELECT * FROM console_tabs WHERE parent_agent IS NOT NULL AND lead_agent IS NOT NULL AND result_sent = 0 AND archived_at IS NULL").map(tab);
+  },
+  /** A proposed tab has come to rest: its lead's final message goes to the
+   * agent that proposed it, once, as a route's would (shortened past
+   * SHARE_MAX, the rest by team_read). Nothing is sent while the lead's
+   * latest turn did not finish (the owner settles that first), or wrote to
+   * that agent itself. With the
+   * proposing agent closed, it goes to Needs you instead. */
+  sendResult(this: ConsoleStore, epoch: number, tabId: string) {
+    this.transaction(() => {
+      const t = this.get("SELECT * FROM console_tabs WHERE id = ? AND result_sent = 0", tabId);
+      if (!t?.parent_agent || !t.lead_agent) return;
+      // A lead the owner closed has no result to send: the link is gone.
+      const leadState = this.agent(t.lead_agent as string)?.state;
+      if (leadState === "closed" || leadState === "error") {
+        this.run("UPDATE console_tabs SET result_sent = 1 WHERE id = ?", tabId);
+        return;
+      }
+      // Never a summary turn: that is the agent's own handoff.
+      const last = this.get(
+        "SELECT id, status, final_text, instruction_id FROM console_turns WHERE agent_id = ? AND status <> 'withdrawn' AND summary = 0 ORDER BY id DESC LIMIT 1",
+        t.lead_agent as string,
+      );
+      const text = ((last?.final_text as string | null) ?? "").trim();
+      if (!last || last.status !== "done" || !text) return;
+      // That turn wrote to the proposing agent itself (a message, an ask, an
+      // answer, its final message as one): it has what the turn had to say,
+      // and the result is still to come.
+      if (this.get("SELECT 1 AS x FROM console_messages WHERE to_agent = ? AND from_turn = ? LIMIT 1", t.parent_agent as string, last.id as number)) return;
+      this.run("UPDATE console_tabs SET result_sent = 1 WHERE id = ?", tabId);
+      const parent = this.agent(t.parent_agent as string);
+      const now = this.now();
+      if (!parent || !isOpen(parent) || this.tab(parent.tabId)?.archivedAt !== null) {
+        this.run(
+          "INSERT INTO console_notices (agent_id, text, created_at) VALUES (?, ?, ?)",
+          t.lead_agent as string, `The result of the tab "${t.name as string}", whose proposing agent is closed:\n\n${text.slice(0, safeCut(text, REPORT_MAX))}`, now,
+        );
+        return;
+      }
+      const id = this.insert(
+        "INSERT INTO console_messages (tab_id, from_agent, to_agent, kind, correlation_id, body, state, from_turn, instruction_id, created_at) VALUES (?, ?, ?, 'route', NULL, ?, 'queued', ?, ?, ?)",
+        tabId, t.lead_agent as string, parent.id, text.slice(0, safeCut(text, SHARE_MAX)), last.id as number, (last.instruction_id as number | null) ?? null, now,
+      );
+      this.passOn(last.id as number, id, text);
+    }, epoch);
+  },
+  notices(this: ConsoleStore): Notice[] {
     return this.all(
       "SELECT n.*, a.name AS agent_name, a.project_id FROM console_notices n JOIN console_agents a ON a.id = n.agent_id JOIN console_tabs tb ON tb.id = a.tab_id JOIN console_projects p ON p.id = a.project_id WHERE n.dismissed = 0 AND tb.archived_at IS NULL AND p.archived_at IS NULL ORDER BY n.id",
     ).map((r) => ({
@@ -208,12 +311,14 @@ export const team = {
       agentId: r.agent_id as string,
       agentName: r.agent_name as string,
       projectId: r.project_id as string,
-      kind: r.kind === "report" ? ("report" as const) : ("note" as const),
+      kind: r.kind === "report" || r.kind === "proposal" ? r.kind : "note",
       text: r.text as string,
+      proposal: r.kind === "proposal" ? (JSON.parse(r.data as string) as Proposal) : null,
       createdAt: r.created_at as number,
     }));
   },
   dismissNotice(this: ConsoleStore, id: number): boolean {
-    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0", id) === 1;
+    // A proposal is answered (Create or Decline), so its agent is told.
+    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0 AND kind <> 'proposal'", id) === 1;
   },
 };

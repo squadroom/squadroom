@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { projectView, templatesView } from "../src/lib/console/views.ts";
+import { changesView, projectView, templatesView } from "../src/lib/console/views.ts";
 import { claudeSettings, decide } from "../src/lib/console/permissions.ts";
 import { decideAcp } from "../src/lib/console/acp-session.ts";
 import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, stepNote } from "../src/lib/console/templates.ts";
@@ -68,6 +68,8 @@ test("each turn opens with the step and what may change", () => {
   const s = { steps: DOCUMENT_REVIEW.steps, index: 1 };
   assert.match(stepNote(s, true), /^Step 2 of 6: Design Principles\. You may change only these files: design-principles\.md, parking-lot\.md\./);
   assert.match(stepNote(s, false), /^Step 2 of 6: Design Principles\. The files of this step/);
+  // Both are told how a step moves on, so neither sends the owner to GitHub for it.
+  for (const editing of [true, false]) assert.match(stepNote(s, editing), /Only the owner moves the tab to the next step: .*Changes.*Steps\. Pushing, a pull request or a merge does not move it\.\n\n$/);
 });
 
 test("a Document review tab: its lead and reviewer, routes both ways, and steps that move forward only past an approval after review", () => {
@@ -91,7 +93,11 @@ test("a Document review tab: its lead and reviewer, routes both ways, and steps 
   assert.throws(next, /Approve Lead's current commit, after the reviewer's review,/);
   // Approved without a review: not enough while the tab has a reviewer.
   runCommand(store, { action: "approve", agentId: leadAgent.id, sha });
-  assert.throws(next, /after the reviewer's review/);
+  assert.throws(next, /^Error: Lead: the current commit is approved, but not after a review\..*approve it again, after the reviewer's review\.$/);
+  // Changes offers only an approval after the review there.
+  const gate = changesView(store, leadAgent.id)!.approval;
+  assert.equal(gate.reviewNeeded, true);
+  assert.deepEqual(gate.reviewers.map((r) => [r.name, r.reviewed]), [["Reviewer", false]]);
   // The reviewer receives the commit and finishes a turn: approved after review.
   store.queueRefresh(epoch, leadAgent.id, sha);
   store.refreshApplied(epoch, store.pendingRefreshes()[0].id, reviewer.id, { id: leadAgent.id, name: "Lead" }, sha, true);

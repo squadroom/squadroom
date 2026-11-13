@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { agentFilePath, checkUpload, fileKind, resolveAgentPath, resolveFromDocument, toolPaths, uploadsNote, UPLOADS_DIR } from "../src/lib/console/files.ts";
+import { agentFilePath, checkUpload, fileKind, listedFiles, resolveAgentPath, resolveFromDocument, toolPaths, uploadsNote, UPLOADS_DIR } from "../src/lib/console/files.ts";
 import { transcript } from "../src/lib/console/transcript.ts";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { Redactor } from "../src/lib/console/redact.ts";
@@ -71,6 +71,18 @@ test("the file panel reads as the agent, inside its folder only: markdown, image
   };
   const notes = await read(`${folder}/notes.md`);
   assert.equal(notes.kind, "markdown");
+  // The folder's files, to open from the panel: as it is now,
+  // committed or not, documents first; nothing Git ignores.
+  writeFileSync(join(folder, "draft.md"), "# Draft\n");
+  writeFileSync(join(folder, "a.txt"), "a\n");
+  writeFileSync(join(folder, ".gitignore"), "ignored.md\n");
+  writeFileSync(join(folder, "ignored.md"), "x\n");
+  const { readId: listId } = runCommand(h.store, { action: "listFiles", agentId: lead.id }) as { readId: number };
+  await h.until(() => h.store.fileRead(listId)?.state === "done", "list");
+  const list = h.store.fileRead(listId)!.result as { kind: string; path: string; files: string[]; truncated: boolean };
+  assert.deepEqual([list.kind, list.path, list.truncated], ["folder", ".", false]);
+  assert.deepEqual(list.files.slice(0, 2), ["draft.md", "notes.md"]);
+  assert.ok(list.files.includes("a.txt") && !list.files.includes("ignored.md"));
   assert.match(notes.text!, /^written by claude/);
   writeFileSync(join(folder, "pic.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]));
   const pic = await read("pic.png");
@@ -296,4 +308,13 @@ test("uploads never follow a linked uploads folder; files the repository tracks 
   const { readId } = runCommand(h.store, { action: "readFile", agentId: lead.id, path: `${UPLOADS_DIR}/new.md` }) as { readId: number };
   await h.until(() => h.store.fileRead(readId)?.state === "done", "read");
   assert.equal((h.store.fileRead(readId)!.result as { text?: string }).text, "hi");
+});
+
+test("a folder's listing: documents first, each by path, no duplicates; never a file's path", () => {
+  assert.deepEqual(listedFiles("src/b.ts\0README.md\0adrs/001.md\0a.txt\0README.md\0"), ["adrs/001.md", "README.md", "a.txt", "src/b.ts"]);
+  assert.deepEqual(listedFiles(""), []);
+  // Output cut at the limit: the unfinished last path is not a path.
+  assert.deepEqual(listedFiles("a.md\0b/SECRET_TOK"), ["a.md"]);
+  assert.deepEqual(listedFiles("SECRET_TOK"), []);
+  assert.equal(agentFilePath("/work/a", "."), null);
 });

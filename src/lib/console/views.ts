@@ -6,9 +6,9 @@ import { connectionPanels, type ConnectionPanel } from "./connections.ts";
 import { keysView, type KeysView } from "./keys-page.ts";
 import { roleLibrary, type RoleDef } from "./roles.ts";
 import { LEASE_TTL_MS, NEEDS_MAIL, PAUSE_ALL, type ConsoleStore, type TurnRow } from "./store.ts";
-import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, templateNames, type TabTemplate } from "./templates.ts";
+import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, isOrchestrator, templateNames, type TabTemplate } from "./templates.ts";
 import { buildTree, type TreeProject, type TreeStatus } from "./tree.ts";
-import { CODEX_DISABLED, agentStatus, type AgentStatus, type ConsoleAgent, type ConsoleProject, type ConsoleTab, type ConsoleTurn } from "./types.ts";
+import { CODEX_DISABLED, agentStatus, isOpen, type AgentStatus, type ConsoleAgent, type ConsoleProject, type ConsoleTab, type ConsoleTurn } from "./types.ts";
 
 /** An agent's current turn: working beats queued, since a later message may
  * wait behind a running turn. */
@@ -340,6 +340,10 @@ export function searchView(store: ConsoleStore, text: string) {
   };
 }
 
+/** An agent whose review a step waits for: any open Code analysis agent
+ * but the Orchestrator, which plans. */
+export const stepReviewer = (a: ConsoleAgent) => a.permission === "look" && isOpen(a) && !isOrchestrator(a);
+
 function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType<ConsoleStore["diff"]>) {
   // The head is the shown diff's, so Approve names the commit whose
   // changes the owner sees (read once, not again).
@@ -351,9 +355,14 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
     editing: agent.permission === "edit",
     head,
     current: approval && { ...approval, reviewerName: name(approval.reviewerId) },
+    /** In a tab with steps and a reviewer, a step moves on only after an
+     * approval that follows a review (`setStep`): the gate
+     * offers no other kind there. */
+    reviewNeeded: !!store.tabSteps(agent.tabId) && store.agents(agent.projectId).some((a) => a.tabId === agent.tabId && stepReviewer(a)),
     reviewers: store
       .agents(agent.projectId)
-      .filter((a) => a.tabId === agent.tabId && a.permission === "look" && a.state !== "closed")
+      // Where a step waits for a review, only the agents whose review counts.
+      .filter((a) => a.tabId === agent.tabId && a.permission === "look" && a.state !== "closed" && (!store.tabSteps(agent.tabId) || stepReviewer(a)))
       .map((a) => ({ id: a.id, name: a.name, reviewed: !!head && store.reviewedAt(a.id, agent.id, head) !== null })),
   };
 }

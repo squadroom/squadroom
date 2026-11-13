@@ -566,14 +566,14 @@ test("a store with every column but no version is stamped and opens", (t) => {
   fresh.close();
   const version = (db: DatabaseSync) => db.prepare("PRAGMA user_version").get()!.user_version;
   const raw = new DatabaseSync(path);
-  assert.equal(version(raw), 3);
+  assert.equal(version(raw), 4);
   raw.exec("PRAGMA user_version = 0");
   raw.close();
   const store = new ConsoleStore(path);
   assert.equal(store.projects().length, 1);
   store.close();
   const stamped = new DatabaseSync(path);
-  assert.equal(version(stamped), 3);
+  assert.equal(version(stamped), 4);
   stamped.close();
 });
 
@@ -632,7 +632,7 @@ test("a store a newer build stamped is refused, and left as it was", (t) => {
   const raw = new DatabaseSync(path);
   raw.exec("PRAGMA user_version = 99");
   raw.close();
-  assert.throws(() => new ConsoleStore(path), /The Console store is version 99, newer than this build reads \(3\)\. Update Squadroom/);
+  assert.throws(() => new ConsoleStore(path), /The Console store is version 99, newer than this build reads \(4\)\. Update Squadroom/);
   const after = new DatabaseSync(path);
   assert.equal(after.prepare("PRAGMA user_version").get()!.user_version, 99);
   after.close();

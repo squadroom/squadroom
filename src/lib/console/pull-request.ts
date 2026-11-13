@@ -257,3 +257,98 @@ export function pullRequestReviewText(
     "Answer a thread with team_pr_reply(thread, message, resolve). Push fixes with team_push: it also replaces the pull request's title and description with the ones you give (review: true asks Codex again, when Codex reviews are on).",
   ].join("\n");
 }
+
+// ── Checks ───────────────────────────────────────────────────────────────
+
+/** How much of a job's log one team_checks answer carries, and is read
+ * (with room in front for a credential across the cut, dropped again). */
+export const JOB_LOG_CHARS = 24_000;
+export const JOB_LOG_BYTES = 256 * 1024;
+const JOB_LOG_OVERLAP = 4096;
+/** One log line's length, and one job name's, as shown. */
+const JOB_LINE_CHARS = 2_000;
+const JOB_NAME_CHARS = 120;
+/** How much of the list of jobs one answer carries. */
+export const CHECKS_CHARS = 10_000;
+
+type Job = { id: number; run: string; name: string; status: string; conclusion: string | null };
+/** passed; failed (a log worth reading); other (ended without a result:
+ * cancelled, needs an action, …); running. Skipped and neutral jobs pass. */
+const outcome = (j: Job): "passed" | "failed" | "other" | "running" =>
+  j.status !== "completed"
+    ? "running"
+    : j.conclusion === "success" || j.conclusion === "skipped" || j.conclusion === "neutral"
+      ? "passed"
+      : j.conclusion === "failure" || j.conclusion === "timed_out" || j.conclusion === "startup_failure"
+        ? "failed"
+        : "other";
+const stateText = (j: Job) => {
+  const o = outcome(j);
+  if (o === "running") return j.status === "in_progress" ? "running" : (j.status || "waiting").replace(/_/g, " ");
+  if (o === "passed") return j.conclusion === "success" ? "passed" : (j.conclusion ?? "passed");
+  return o === "failed" && j.conclusion === "failure" ? "FAILED" : `${o === "failed" ? "FAILED: " : ""}${(j.conclusion ?? "ended without a result").replace(/_/g, " ")}`;
+};
+const short = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+
+/** A commit's GitHub Actions jobs, for the agent that pushed it (names
+ * already redacted by the caller: they are shortened here): what did
+ * not pass first, within CHECKS_CHARS (the rest counted). "Every check
+ * passed" only when every job is listed and passed. The caller redacts. */
+export function checksText(jobs: Job[], headSha: string, branchHead: string | null, incomplete = false): string {
+  const ahead = branchHead && branchHead !== headSha ? ` Your folder is at ${branchHead.slice(0, 8)}: its newer commits are not pushed, so not checked.` : "";
+  const where = `Checks for ${headSha.slice(0, 8)}, the latest commit on your pull request.${ahead}`;
+  if (!jobs.length) return `${where}\nNo check has started for it (yet, or this repository has none).`;
+  const order = { failed: 0, other: 1, running: 2, passed: 3 };
+  const sorted = jobs.map((j, i) => ({ j, i })).sort((a, b) => order[outcome(a.j)] - order[outcome(b.j)] || a.i - b.i);
+  const lines: string[] = [];
+  let chars = 0;
+  for (const { j } of sorted) {
+    const line = `- ${j.run ? `${short(j.run, JOB_NAME_CHARS)} / ` : ""}${short(j.name, JOB_NAME_CHARS)}: ${stateText(j)} (job ${j.id})`;
+    if (chars + line.length + 1 > CHECKS_CHARS) break;
+    lines.push(line);
+    chars += line.length + 1;
+  }
+  const hidden = sorted.slice(lines.length).map((x) => outcome(x.j));
+  const count = (o: string) => hidden.filter((h) => h === o).length;
+  const failed = sorted.filter((x) => outcome(x.j) === "failed");
+  const some = (o: "other" | "running") => jobs.some((j) => outcome(j) === o);
+  return [
+    where,
+    ...lines,
+    ...(hidden.length
+      ? [`${hidden.length} more job(s) not shown for space: ${["failed", "other", "running", "passed"].filter(count).map((o) => `${count(o)} ${o === "other" ? "without a result" : o}`).join(", ")}.`]
+      : []),
+    ...(incomplete ? ["GitHub has more jobs for this commit than are read here, so this list is not all of them."] : []),
+    failed.length
+      ? `Read the end of a failed job's log with team_checks(job: ${failed[0].j.id}).`
+      : some("running")
+        ? "Still running: nothing tells you when they end, so look again in a later turn."
+        : some("other")
+          ? "Not every check ran to a result (cancelled, or waiting on someone): do not take this as passed."
+          : incomplete
+            ? "Every job listed passed."
+            : "Every check passed.",
+  ].join("\n");
+}
+
+/** The end of a job's log: whole lines, without GitHub's timestamps, each
+ * at most JOB_LINE_CHARS, at most JOB_LOG_CHARS in all. `redact` masks the
+ * whole text before any of it is chosen, so a credential over several
+ * lines is never shown in part; a log read only from somewhere inside
+ * loses its first JOB_LOG_OVERLAP characters too, where a credential the
+ * read cut in two would be. */
+export function jobLogText(job: { id: number; run: string; name: string }, log: { text: string; cut: boolean }, redact: (text: string) => string): string {
+  const stamped = log.text.replace(/\r/g, "").replace(/^\uFEFF?\d{4}-\d\d-\d\dT[\d:.]+Z /gm, "");
+  const masked = redact(stamped);
+  const from = log.cut ? Math.min(masked.length, JOB_LOG_OVERLAP) : 0;
+  // After the cut, from the next whole line.
+  const body = log.cut ? masked.slice(from).replace(/^[^\n]*\n?/, "") : masked;
+  const lines = body.split("\n").map((l) => (l.length > JOB_LINE_CHARS ? `${l.slice(0, JOB_LINE_CHARS)} […line cut]` : l));
+  const kept: string[] = [];
+  let chars = 0;
+  for (let i = lines.length - 1; i >= 0 && chars + lines[i].length + 1 <= JOB_LOG_CHARS; i--) {
+    kept.unshift(lines[i]);
+    chars += lines[i].length + 1;
+  }
+  return `The end of the log of ${job.run ? `${short(job.run, JOB_NAME_CHARS)} / ` : ""}${short(job.name, JOB_NAME_CHARS)} (job ${job.id}):\n\n${kept.join("\n").trim() || "(The log is empty.)"}`;
+}

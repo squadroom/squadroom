@@ -1,7 +1,7 @@
 import { isOpen, type ConsoleAgent, type TurnStatus } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { circlePair, continuation, READ_PAGE, SHARE_MAX, TeamError, type TeamMessage } from "../team.ts";
-import { MESSAGES, newId, safeCut, teamMessage, type Row } from "./rows.ts";
+import { MESSAGE_NAMES, MESSAGES, newId, safeCut, teamMessage, type Row } from "./rows.ts";
 
 type Named = TeamMessage & { fromName: string; toName: string };
 type Route = { id: number; from: string; fromName: string; to: string; toName: string; phrase: string };
@@ -23,6 +23,7 @@ export const mailbox = {
       if (!t) throw new TeamError("This turn has ended.");
       // Read again here: the owner may have closed it meanwhile.
       if (!isOpen(this.agent(m.to.id))) throw new TeamError(`${m.to.name} can no longer take messages.`);
+      this.stillLinked(m.from.id, m.to.id, m.to.name);
       const correlationId = m.kind === "ask" ? newId("c") : null;
       this.run(
         "INSERT INTO console_messages (tab_id, from_agent, to_agent, kind, correlation_id, body, state, from_turn, instruction_id, created_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
@@ -34,6 +35,14 @@ export const mailbox = {
         : `Sent to ${m.to.name}.`;
     });
   },
+  /** Between two tabs the link must still stand as a message or
+   * an answer is stored: both agents open (a turn may outlive its agent's
+   * closing) and neither tab closed. Inside a tab there is nothing to check. */
+  stillLinked(this: ConsoleStore, fromId: string, toId: string, toName: string) {
+    const from = this.agent(fromId);
+    if (!from || from.tabId === this.agent(toId)?.tabId) return;
+    if (!this.linkedAgents(from).some((a) => a.id === toId)) throw new TeamError(`${toName} is no longer linked to you.`);
+  },
   /** team_reply: answers one ask delivered to this agent in this turn,
    * exactly once. */
   replyTeamMessage(this: ConsoleStore, epoch: number, r: { turnId: number; from: ConsoleAgent; correlationId: string; body: string; key: string; summary: string }): string {
@@ -42,6 +51,7 @@ export const mailbox = {
       if (!ask || ask.to_agent !== r.from.id) throw new TeamError("No ask with that correlation id was given to you.");
       if (ask.state === "answered") throw new TeamError("That ask is already answered.");
       if (ask.state !== "in_turn" || ask.turn_id !== r.turnId) throw new TeamError("That ask is not part of this turn.");
+      this.stillLinked(r.from.id, ask.from_agent as string, (ask.from_name as string | null) ?? "The asker");
       this.answer(ask, r.body, this.now(), false);
       this.chargePayload(r.turnId, Buffer.byteLength(r.body, "utf8"));
       return `Answered ${(ask.from_name as string | null) ?? "the asker"}.`;
@@ -51,9 +61,17 @@ export const mailbox = {
    * body is the turn's final message, carried in part. */
   answer(this: ConsoleStore, ask: Row, body: string, now: number, shared: boolean) {
     this.run("UPDATE console_messages SET state = 'answered', ended_at = ? WHERE id = ?", now, ask.id as number);
+    // An ask from a linked tab whose link has gone is settled
+    // without an answer: nothing is queued for an agent that cannot read
+    // it, and the finishing turn is kept. `sendResult` then finds nothing
+    // of this turn's sent, so a result still goes (to Needs you).
+    const replier = this.agent(ask.to_agent as string);
+    const asker = this.agent(ask.from_agent as string);
+    if (replier && asker && replier.tabId !== asker.tabId && !this.linkedAgents(replier).some((a) => a.id === asker.id)) return;
     const id = this.insert(
       "INSERT INTO console_messages (tab_id, from_agent, to_agent, kind, correlation_id, body, state, from_turn, instruction_id, created_at) VALUES (?, ?, ?, 'reply', ?, ?, 'queued', ?, ?, ?)",
-      ask.tab_id as string, ask.to_agent as string, ask.from_agent as string, ask.correlation_id as string,
+      // Its sender's tab, as every message (an ask from a linked tab).
+      this.agent(ask.to_agent as string)?.tabId ?? (ask.tab_id as string), ask.to_agent as string, ask.from_agent as string, ask.correlation_id as string,
       shared ? body.slice(0, safeCut(body, SHARE_MAX)) : body, ask.turn_id as number, ask.instruction_id as number | null, now,
     );
     if (shared) this.passOn(ask.turn_id as number, id, body);
@@ -132,17 +150,38 @@ export const mailbox = {
       return id;
     }, epoch);
   },
+  /** Where a tab's messages are (as `m`): those its agents sent (a message
+   * carries its sender's tab), and those the agent of a linked tab sent to
+   * one of them. Only a tab with a link pays for the second. */
+  tabMessages(this: ConsoleStore, tabId: string): { where: string; args: string[] } {
+    const pairs = this.all(
+      "SELECT lead_agent AS mine, parent_agent AS other FROM console_tabs WHERE id = ? AND parent_agent IS NOT NULL AND lead_agent IS NOT NULL UNION ALL SELECT c.parent_agent, c.lead_agent FROM console_tabs c JOIN console_agents a ON a.id = c.parent_agent WHERE a.tab_id = ? AND c.lead_agent IS NOT NULL",
+      tabId, tabId,
+    );
+    return {
+      where: `(m.tab_id = ?${pairs.map(() => " OR (m.to_agent = ? AND m.from_agent = ?)").join("")})`,
+      args: [tabId, ...pairs.flatMap((p) => [p.mine as string, p.other as string])],
+    };
+  },
   /** The tab's newest messages, oldest first (the team timeline), each body
    * read only up to `bodyMax` characters. */
   timeline(this: ConsoleStore, tabId: string, limit = 200, bodyMax = Number.MAX_SAFE_INTEGER): Named[] {
+    const { where, args } = this.tabMessages(tabId);
     return this.all(
-      "SELECT * FROM (SELECT m.id, m.tab_id, m.from_agent, m.to_agent, m.kind, m.correlation_id, substr(m.body, 1, ?) AS body, m.state, m.turn_id, m.from_turn, m.instruction_id, m.resend_after, m.created_at, f.name AS from_name, t.name AS to_name FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent LEFT JOIN console_agents t ON t.id = m.to_agent WHERE m.tab_id = ? ORDER BY m.id DESC LIMIT ?) ORDER BY id",
-      bodyMax, tabId, limit,
+      `SELECT * FROM (SELECT m.id, m.tab_id, m.from_agent, m.to_agent, m.kind, m.correlation_id, substr(m.body, 1, ?) AS body, m.state, m.turn_id, m.from_turn, m.instruction_id, m.resend_after, m.created_at, ${MESSAGE_NAMES} WHERE ${where} ORDER BY m.id DESC LIMIT ?) ORDER BY id`,
+      bodyMax, ...args, limit,
     ).map(teamMessage);
   },
-  /** Asks in a tab still waiting for an answer. */
+  /** Asks to a tab's agents still waiting for an answer (an ask to a linked
+   * tab's agent waits in that tab). */
   openAsks(this: ConsoleStore, tabId: string): number {
-    return Number(this.get("SELECT COUNT(*) AS n FROM console_messages WHERE tab_id = ? AND kind = 'ask' AND state IN ('queued', 'in_turn')", tabId)!.n);
+    const { where, args } = this.tabMessages(tabId);
+    return Number(
+      this.get(
+        `SELECT COUNT(*) AS n FROM console_messages m WHERE ${where} AND m.kind = 'ask' AND m.state IN ('queued', 'in_turn') AND m.to_agent IN (SELECT id FROM console_agents WHERE tab_id = ?)`,
+        ...args, tabId,
+      )!.n,
+    );
   },
   /** Interrupted messages (Needs you), oldest first. */
   interruptedMessages(this: ConsoleStore): (Named & { projectId: string })[] {
@@ -258,9 +297,10 @@ export const mailbox = {
     );
     // Only messages from turns checked for progress: a turn not checked yet
     // (running, or its check failed and waits for a restart) may be progress.
+    const { where, args } = this.tabMessages(tabId);
     const rows = this.all(
-      "SELECT m.from_agent, m.to_agent, m.from_turn FROM console_messages m JOIN console_turns ft ON ft.id = m.from_turn WHERE m.tab_id = ? AND m.from_agent IS NOT NULL AND m.from_turn > ? AND ft.progressed <> 0",
-      tabId, since,
+      `SELECT m.from_agent, m.to_agent, m.from_turn FROM console_messages m JOIN console_turns ft ON ft.id = m.from_turn WHERE ${where} AND m.from_agent IS NOT NULL AND m.from_turn > ? AND ft.progressed <> 0`,
+      ...args, since,
     );
     const pair = circlePair(
       rows.map((r) => ({ from: r.from_agent as string, to: r.to_agent as string, fromTurn: r.from_turn as number })).filter((m) => !unsettled(m.from, m.fromTurn)),

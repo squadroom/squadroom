@@ -8,7 +8,7 @@ import { mapTaskText, type TaskOp } from "../tasks.ts";
 import type { ConsoleAgent, TurnStatus } from "../types.ts";
 import type { TurnRow } from "../store.ts";
 import type { ConsoleWorker } from "../worker.ts";
-import { sessionOutdated, SYSTEM, type ActiveTurn, type Runtime } from "./shared.ts";
+import { aiOf, sessionOutdated, SYSTEM, type ActiveTurn, type Runtime } from "./shared.ts";
 import { currentStepFiles } from "../templates.ts";
 
 // Agents' folders and their client sessions: GitHub projects prepared,
@@ -204,6 +204,7 @@ export const sessions = {
     rt.session = me;
     rt.sessionLogin = rt.login;
     rt.sessionCredential = credential.print;
+    rt.sessionAi = aiOf(rt.model.id, agent.effort);
     return me;
   },
 

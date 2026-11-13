@@ -44,7 +44,7 @@ export interface TurnRow extends ConsoleTurn {
 /** Raised whenever the schema below changes: a store stamped with an
  * earlier one is upgraded by MIGRATIONS where it can be, and otherwise
  * checked against it on open. */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /** Columns a store stamped with an earlier version gains: each is added
  * only where it is missing, so a store an older build opened since (and
@@ -55,6 +55,16 @@ const MIGRATIONS: { table: string; column: string; type: string }[] = [
   // client has reported while it runs.
   { table: "console_turns", column: "billing", type: "TEXT" },
   { table: "console_turns", column: "running", type: "TEXT" },
+  // Version 4: a tab's own turn limits (NULL keeps the default), and a tab
+  // an agent proposed: the agent that proposed it, the agent of the tab it
+  // is linked to, and whether its result has gone back; a proposal's setup,
+  // kept with its Needs you item.
+  { table: "console_tabs", column: "turn_limit", type: "INTEGER" },
+  { table: "console_tabs", column: "time_limit_min", type: "INTEGER" },
+  { table: "console_tabs", column: "parent_agent", type: "TEXT" },
+  { table: "console_tabs", column: "lead_agent", type: "TEXT" },
+  { table: "console_tabs", column: "result_sent", type: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "console_notices", column: "data", type: "TEXT" },
 ];
 
 function migrate(db: DatabaseSync) {
@@ -67,7 +77,7 @@ function migrate(db: DatabaseSync) {
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS console_lease (id INTEGER PRIMARY KEY CHECK (id = 1), epoch INTEGER NOT NULL, holder TEXT NOT NULL, renewed_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS console_projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, base_branch TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, repo TEXT, state TEXT NOT NULL DEFAULT 'ready', error TEXT, pause_reason TEXT, archived_at INTEGER, acp_network INTEGER NOT NULL DEFAULT 0, acp_network_wanted INTEGER, acp_network_now INTEGER NOT NULL DEFAULT 0, image_tools INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS console_tabs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, pause_reason TEXT, count_from INTEGER NOT NULL DEFAULT 0, resumed_at INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, circle_from INTEGER NOT NULL DEFAULT 0, usage_hold TEXT, spend_limit_usd REAL, spend_reset_seq INTEGER NOT NULL DEFAULT 0, steps TEXT, step INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS console_tabs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, pause_reason TEXT, count_from INTEGER NOT NULL DEFAULT 0, resumed_at INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, circle_from INTEGER NOT NULL DEFAULT 0, usage_hold TEXT, spend_limit_usd REAL, spend_reset_seq INTEGER NOT NULL DEFAULT 0, steps TEXT, step INTEGER NOT NULL DEFAULT 0, turn_limit INTEGER, time_limit_min INTEGER, parent_agent TEXT, lead_agent TEXT, result_sent INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS console_tabs_project ON console_tabs (project_id);
 CREATE TABLE IF NOT EXISTS console_agents (id TEXT PRIMARY KEY, tab_id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, permission TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', branch TEXT, state TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, base_commit TEXT, merging TEXT, start_after TEXT, ask_first INTEGER NOT NULL DEFAULT 0, carry_summary TEXT, settling INTEGER);
 CREATE INDEX IF NOT EXISTS console_agents_project ON console_agents (project_id);
@@ -99,7 +109,7 @@ CREATE TABLE IF NOT EXISTS console_cleanups (id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS console_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, state TEXT NOT NULL, result TEXT, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS console_claims (id INTEGER PRIMARY KEY AUTOINCREMENT, tab_id TEXT NOT NULL, agent_id TEXT NOT NULL, pattern TEXT NOT NULL, note TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, released_at INTEGER);
 CREATE TABLE IF NOT EXISTS console_holds (id INTEGER PRIMARY KEY AUTOINCREMENT, tab_id TEXT NOT NULL, holder TEXT NOT NULL, held TEXT NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, released_at INTEGER);
-CREATE TABLE IF NOT EXISTS console_notices (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'note');
+CREATE TABLE IF NOT EXISTS console_notices (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL, dismissed INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'note', data TEXT);
 CREATE TABLE IF NOT EXISTS console_shown (agent_id TEXT NOT NULL, author_id TEXT NOT NULL, author_name TEXT NOT NULL, sha TEXT NOT NULL, current INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (agent_id, author_id));
 CREATE TABLE IF NOT EXISTS console_refreshes (id INTEGER PRIMARY KEY AUTOINCREMENT, reviewer_id TEXT NOT NULL, author_id TEXT NOT NULL, sha TEXT NOT NULL, seq INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, applied_at INTEGER, applied_seq INTEGER, UNIQUE (reviewer_id, author_id));
 CREATE TABLE IF NOT EXISTS console_roles (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, access TEXT NOT NULL, ai TEXT NOT NULL, prompt TEXT NOT NULL, built_in INTEGER NOT NULL, updated_at INTEGER NOT NULL);

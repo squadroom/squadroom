@@ -4,7 +4,7 @@ import type { CleanupItem } from "./cleanup.ts";
 import type { ArchiveImpact, TimelineEntry } from "./views.ts";
 import type { NeedsLike } from "./notify.ts";
 import type { Overview } from "./overview.ts";
-import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, turnLimits, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
 
 // The Console page's decisions, pure and browser-safe (no DOM, no
 // React), so they are tested without a browser.
@@ -29,6 +29,12 @@ export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n ==
 
 /** Dollars: cents, or four places for a fraction of a cent. */
 export const money = (n: number) => (n >= 0.01 || n === 0 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
+
+/** A tab's turn limits in force, for its menu: "40 turns, 2 h per message". */
+export function turnLimitsHint(tab: Pick<ConsoleTab, "turnLimit" | "timeLimitMin">): string {
+  const { turns, ms } = turnLimits(tab);
+  return `${plural(turns, "turn")}, ${Math.round((ms / 3_600_000) * 100) / 100} h per message`;
+}
 
 /** "12s", "3m", "1h" since a time (a helpers row label). */
 export function elapsed(since: number, until = Date.now()): string {
@@ -87,6 +93,14 @@ export function cleanupSelection(items: CleanupItem[] | null, chosen: ReadonlySe
   return { keys: [...chosen], kb: picked.reduce((n, i) => n + (i.sizeKb ?? 0), 0), lost: picked.filter((i) => i.warning).length };
 }
 
+/** The Turn limits dialog's fields as the command takes them:
+ * blank is the default (null), the time is typed in hours; undefined when
+ * a field is not a number. The command checks the ranges. */
+export function turnLimitsForm(turns: string, hours: string): { turns: number | null; minutes: number | null } | undefined {
+  const blank = (v: string) => !v.trim();
+  if ((!blank(turns) && !/^\s*\d+\s*$/.test(turns)) || (!blank(hours) && !/^\s*\d+(\.\d+)?\s*$/.test(hours))) return undefined;
+  return { turns: blank(turns) ? null : Number(turns), minutes: blank(hours) ? null : Math.round(Number(hours) * 60) };
+}
 /** A typed dollar amount to the cent, or NaN. */
 export const parseDollars = (value: string) => (/^\s*\d+(\.\d+)?\s*$/.test(value) ? Math.round(Number(value) * 100) / 100 : NaN);
 

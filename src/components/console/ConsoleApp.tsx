@@ -495,7 +495,12 @@ export default function ConsoleApp() {
               <p className={view.project.state === "error" ? styles.errorBanner : styles.repoLine}>
                 {view.project.repo} · base {view.project.baseBranch}
                 {view.project.state === "preparing" && " · checking the repository and its base branch…"}
-                {view.project.state === "error" && ` · ${view.project.error}`}
+                {view.project.state === "error" && ` · ${view.project.error} `}
+                {view.project.state === "error" && (
+                  <button className={styles.linkButton} onClick={() => void runAndList({ action: "recheckProject", id: view.project.id })}>
+                    Check again
+                  </button>
+                )}
               </p>
             )}
             <TabStrip
@@ -580,6 +585,7 @@ export default function ConsoleApp() {
                     maximized={maximized === a.id}
                     onMaximize={() => setMaximized(maximized === a.id ? null : a.id)}
                     onChanges={() => setChangesFor(a.id)}
+                    onModel={() => setModal({ kind: "ai", agentId: a.id })}
                     onOpenFile={openFile}
                     onOpenHelper={(helperId, name) => openHelper(a.id, helperId, name)}
                     run={run}
@@ -601,6 +607,7 @@ export default function ConsoleApp() {
             // Beside the windows it stays open; the phone has room for one.
             if (openAgent(agentId) && matchMedia("(max-width: 760px)").matches) setNeedsOpen(false);
           }}
+          onEditProposal={(noticeId, proposal) => setModal({ kind: "proposal", noticeId, proposal })}
           run={runAndList}
         />
       )}

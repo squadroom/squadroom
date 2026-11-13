@@ -1,7 +1,8 @@
 import { rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { agentKind } from "../agents.ts";
-import { placeUpload, readAgentFile } from "../agent-files.ts";
+import { listAgentFiles, placeUpload, readAgentFile } from "../agent-files.ts";
+import { FOLDER_LISTING } from "../files.ts";
 import { runCleanup, scanCleanup, type CleanupOptions } from "../cleanup.ts";
 import { probeConnection } from "../connections.ts";
 import { loadCredentials } from "../redact.ts";
@@ -176,7 +177,9 @@ export const jobs = {
       void (read.helperId !== null
         ? this.readHelper(read.agentId, read.helperId)
         : agent?.folder
-          ? readAgentFile(this.launcher, agent.folder, read.path, this.redactor)
+          ? read.path === FOLDER_LISTING
+            ? listAgentFiles(this.launcher, agent.folder, this.redactor)
+            : readAgentFile(this.launcher, agent.folder, read.path, this.redactor)
           : Promise.resolve({ path: read.path, kind: "error", message: "That agent has no folder." }))
         .catch((error: unknown) => ({ path: read.path, kind: "error", message: this.redactor.text(message(error)) }))
         .then((view) => this.safe(() => this.store.finishRead(epoch, read.id, view as unknown as Record<string, unknown>)))

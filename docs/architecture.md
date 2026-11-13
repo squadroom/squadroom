@@ -171,11 +171,28 @@ The worker runs a loopback MCP server; each agent session gets a bearer
 token for it, revoked when the session ends. Through it, agents in one tab
 call the team tools (`team_send`, `team_ask`, `team_reply`, `team_read`,
 `team_pull`, `team_diff`, `team_claim`, `team_hold`, `team_push`,
-`team_pr`, `team_report`, …). Messages are queued in the store and
-delivered together as one prompt when the recipient is free; nobody waits
-inside a tool call. Routes forward a finished turn's reply automatically.
-The circle detector and per-instruction limits pause a tab whose agents
-keep each other busy without progress.
+`team_pr`, `team_checks`, `team_report`, `team_propose_tab`, …). Messages
+are queued in the store and delivered together as one prompt when the
+recipient is free; nobody waits inside a tool call. Routes forward a
+finished turn's reply automatically. The circle detector and
+per-instruction limits pause a tab whose agents keep each other busy
+without progress. The per-instruction limits (40 turns, two hours) are
+the defaults: a tab can have its own (`console_tabs.turn_limit`,
+`time_limit_min`), and the worker reads the tab's limits both when mail
+becomes a turn and again when a queued team turn is about to start, so a
+limit lowered meanwhile still holds it.
+
+`team_propose_tab` makes nothing by itself. It checks the proposed team as
+the setup screen would and stores it with a Needs you item. When the owner
+creates the tab, the tab records the agent that proposed it and its own
+lead (`parent_agent`, `lead_agent`). Those two agents are linked:
+`team_list` shows each to the other, and `team_send`, `team_ask` and
+`team_reply` work between them, checked again as each message is stored,
+so a link ends when either agent or either tab is closed. The other team
+tools stay inside a tab. Once the new tab has come to rest (no open or
+queued turn, no mail waiting, not paused), the worker sends its lead's
+final message to the proposing agent, once; if that agent is closed by
+then, the result goes to Needs you instead.
 
 ## GitHub
 
@@ -222,6 +239,15 @@ title and description that will be posted from your account (the first
 1,200 characters; Show all has the rest), and **Open pull request** asks
 for that approval too. Once you choose **Always** for an agent's pushes,
 its later pushes are posted without asking.
+
+`team_checks` reads, with the same token, the GitHub Actions jobs of the
+latest commit on the agent's own pull request, and with a job's number the
+end of that job's log. It writes nothing and reads no other commit's jobs.
+The list is bounded (up to 20 runs, 300 jobs a run, 10,000 characters) and
+says so when GitHub has more. Of a log, only the last 256 KB are held and
+the last 24,000 characters shown, redacted as a whole before any line is
+chosen. The token needs **Actions: Read-only** for this; without it the
+tool says so.
 
 ## Sign-in
 
@@ -294,5 +320,5 @@ What Squadroom protects against, and the limits it accepts, are in
 | `src/lib/signin/` | The sign-in |
 | `src/lib/shared/`, `src/lib/security/` | Mail, MCP server, Krea client, SQLite helpers, CSP |
 | `src/config/` | Settings parsing and the model price catalogs |
-| `scripts/` | The web server and worker entry points, LaunchAgent installers, the update script, the agent user's setup and the launcher |
+| `scripts/` | The web server and worker entry points, LaunchAgent installers, the update script, the agent user's setup and the launcher, and `console-prepare-repo.ts` (creates a repository's base branch and ruleset with your own `gh` sign-in) |
 | `tests/` | `node --test` suites with fake clients and a fake launcher |

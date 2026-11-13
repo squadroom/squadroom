@@ -7,7 +7,7 @@ export interface NeedsLike {
   interrupted: { id: number; agentName: string; prompt: string; reason: string | null }[];
   messages?: { id: number; from: string; to: string; text: string }[];
   paused?: { scope: string; id: string | null; name: string; reason: string }[];
-  notices?: { id: number; agentName: string; kind?: "note" | "report"; text: string }[];
+  notices?: { id: number; agentName: string; kind?: "note" | "report" | "proposal"; text: string }[];
 }
 export interface Notice {
   /** Stable per item: a notification is shown once, and replaces its own. */
@@ -34,7 +34,7 @@ export function needNotices(needs: NeedsLike): Notice[] {
     ...needs.interrupted.map((t) => ({ key: `interrupted:${t.id}`, title: `${t.agentName}'s message was interrupted`, body: short(t.prompt) })),
     ...(needs.messages ?? []).map((m) => ({ key: `message:${m.id}`, title: `A message from ${m.from} to ${m.to} did not finish`, body: short(m.text) })),
     ...(needs.paused ?? []).map((p) => ({ key: `paused:${p.scope}:${p.id ?? ""}`, title: `${p.name} paused`, body: short(p.reason) })),
-    ...(needs.notices ?? []).map((n) => ({ key: `notice:${n.id}`, title: n.kind === "report" ? `${n.agentName} reports` : n.agentName, body: short(n.text) })),
+    ...(needs.notices ?? []).map((n) => ({ key: `notice:${n.id}`, title: n.kind === "report" ? `${n.agentName} reports` : n.kind === "proposal" ? `${n.agentName} proposes a tab` : n.agentName, body: short(n.text) })),
   ];
 }
 

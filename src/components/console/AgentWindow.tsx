@@ -2,7 +2,7 @@ import type { ConsoleCommand } from "@/lib/console/commands";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { agentModel } from "@/lib/console/agents";
 import type { AgentView } from "@/lib/console/views";
-import { resolveAgentPath } from "@/lib/console/files";
+import { FOLDER_LISTING, resolveAgentPath } from "@/lib/console/files";
 import { gaugeLine } from "@/lib/console/gauge";
 import { taskLine } from "@/lib/console/tasks";
 import { transcript } from "@/lib/console/transcript";
@@ -31,6 +31,7 @@ export default function AgentWindow({
   maximized,
   onMaximize,
   onChanges,
+  onModel,
   onOpenFile,
   onOpenHelper,
   run,
@@ -41,6 +42,8 @@ export default function AgentWindow({
   maximized: boolean;
   onMaximize: () => void;
   onChanges: () => void;
+  /** Change its model and thinking level. */
+  onModel: () => void;
   onOpenFile: (agentId: string, path: string) => void;
   onOpenHelper: (helperId: number, name: string) => void;
   run: Run;
@@ -64,6 +67,8 @@ export default function AgentWindow({
   const turning = agent.status === "working" || agent.status === "needs_you";
   const menu: MenuItem[] = [
     { label: "Changes", hint: "Its commits and changed files", onSelect: onChanges },
+    { label: "Files", hint: "Read its documents and other files", disabled: !agent.folder, onSelect: () => onOpenFile(agent.id, FOLDER_LISTING) },
+    { label: "Model…", hint: `${model?.label ?? agent.model}${agent.effort ? `, thinking ${agent.effort}` : ""}`, onSelect: onModel },
     { label: "Rename", hint: "Or double-click its name", onSelect: () => setRenaming(true) },
     { label: "Stop", hint: "Ends its turn", disabled: !busy, onSelect: () => void run({ action: "stop", agentId: agent.id }) },
     {

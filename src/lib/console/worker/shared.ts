@@ -1,4 +1,4 @@
-import type { AgentModel } from "../agents.ts";
+import { agentModel, type AgentModel } from "../agents.ts";
 import type { TurnEvents } from "../events.ts";
 import type { AgentSession } from "../session.ts";
 import { TEAM_NOTE } from "../team-tools.ts";
@@ -74,6 +74,9 @@ export interface Runtime {
   sessionLogin?: string;
   /** The fingerprint of the credential that session was handed. */
   sessionCredential?: string;
+  /** The model and thinking level that session was started with: one the
+   * owner changed since is replaced before its next turn. */
+  sessionAi?: string;
 }
 /** One read of an agent's credential: what crosses, its fingerprint, and
  * the login it counts against. */
@@ -84,11 +87,19 @@ export interface Credential {
   /** Which entry of the key file it came from (none for an account login). */
   scope?: "project" | "global";
 }
+/** A session's model and thinking level as one value (`Runtime.sessionAi`). */
+export const aiOf = (modelId: string, effort: string | null) => `${modelId}/${effort ?? ""}`;
 /** The runtime's session was started with settings that no longer match:
- * the agent's (Ask me first, the folders it denies) or another credential.
- * It is replaced before its next turn. */
-export const sessionOutdated = (rt: Runtime, agent: ConsoleAgent, credential: Credential) =>
-  !!rt.session && (rt.session.stale(agent) || rt.sessionLogin !== credential.login || rt.sessionCredential !== credential.print);
+ * the agent's (Ask me first, the folders it denies), another credential, or
+ * a model or thinking level the owner changed since. It is replaced before
+ * its next turn, and the new process resumes the conversation. */
+export const sessionOutdated = (rt: Runtime, agent: ConsoleAgent, credential: Credential) => {
+  const model = agentModel(agent.kind, agent.model);
+  return (
+    !!rt.session &&
+    (rt.session.stale(agent) || rt.sessionLogin !== credential.login || rt.sessionCredential !== credential.print || (!!model && rt.sessionAi !== aiOf(model.id, agent.effort)))
+  );
+};
 export interface OwnerAnswer {
   allow: boolean;
   always: boolean;

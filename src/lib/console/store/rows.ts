@@ -49,8 +49,12 @@ export const json = (v: unknown) => (v ? JSON.parse(v as string) : null);
 export const OPEN = OPEN_TURN.map((s) => `'${s}'`).join(", ");
 /** A project-wide rule is kept under this pseudo agent id. */
 export const projectRule = (projectId: string) => `project:${projectId}`;
-export const MESSAGES =
-  "SELECT m.*, f.name AS from_name, t.name AS to_name FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent LEFT JOIN console_agents t ON t.id = m.to_agent";
+/** A message's agents' names and where they are read from; one between two
+ * tabs names each agent with its tab. */
+export const MESSAGE_NAMES = `${["f", "t"]
+  .map((a) => `CASE WHEN f.tab_id <> t.tab_id THEN ${a}.name || ' (tab "' || ${a}t.name || '")' ELSE ${a}.name END AS ${a === "f" ? "from" : "to"}_name`)
+  .join(", ")} FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent LEFT JOIN console_agents t ON t.id = m.to_agent LEFT JOIN console_tabs ft ON ft.id = f.tab_id LEFT JOIN console_tabs tt ON tt.id = t.tab_id`;
+export const MESSAGES = `SELECT m.*, ${MESSAGE_NAMES}`;
 
 export const project = (r: Row): ConsoleProject => ({
   id: r.id as string,
@@ -76,6 +80,10 @@ export const tab = (r: Row): ConsoleTab => ({
   pauseReason: r.paused ? ((r.pause_reason as string | null) ?? null) : null,
   archivedAt: (r.archived_at as number | null) ?? null,
   spendLimitUsd: (r.spend_limit_usd as number | null) ?? null,
+  turnLimit: (r.turn_limit as number | null) ?? null,
+  timeLimitMin: (r.time_limit_min as number | null) ?? null,
+  parentAgent: (r.parent_agent as string | null) ?? null,
+  leadAgent: (r.lead_agent as string | null) ?? null,
   createdAt: r.created_at as number,
 });
 export const agent = (r: Row): ConsoleAgent => ({

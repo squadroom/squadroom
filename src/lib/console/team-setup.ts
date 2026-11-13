@@ -1,6 +1,6 @@
-import { agentKind, agentModel, type AgentKind, type ConsoleEffort } from "./agents.ts";
+import { AGENT_KINDS, agentKind, agentModel, type AgentKind, type ConsoleEffort } from "./agents.ts";
 import { BUILT_IN_ROLES, ROLE_PROMPT_MAX, roleText, type RoleDef } from "./roles.ts";
-import { LIMITS, NAME_MAX } from "./types.ts";
+import { LIMITS, NAME_MAX, PERMISSION_LABELS } from "./types.ts";
 
 // The coding team's setup screen: the owner chooses the Orchestrator's AI
 // and the members; the Orchestrator then divides a goal among them by
@@ -192,4 +192,72 @@ export function checkTeamSetup(
   for (let n = 2; taken.has(lead.toLowerCase()) || out.some((a) => a.name.toLowerCase() === lead.toLowerCase()); n++) lead = `Orchestrator ${n}`;
   const agents: TeamAgentInput[] = [{ name: lead, role: roleText(leadRole, leadPrompt), ...orchestrator, permission: "look" }, ...out];
   return { ok: true, agents, goal, goalTo: 0, warnings: warn(agents) };
+}
+
+// ── A tab an agent proposes ──────────────────────────────────
+
+/** A proposed tab: its name and its team, as the setup screen takes it. */
+export interface Proposal {
+  name: string;
+  setup: TeamSetup;
+}
+
+/** How much of a proposal's goal its Needs you item shows (Edit shows all). */
+const PROPOSAL_GOAL_SHOWN = 1_000;
+
+/** What an agent may choose in team_propose_tab, said when it chose wrongly. */
+export function proposalOptions(ctx: { codexOff: boolean; roles: RoleDef[] }): string {
+  const kinds = AGENT_KINDS.filter((k) => k.offered && !(k.kind === "codex" && ctx.codexOff));
+  return [
+    `AIs and their models (kind: model, …): ${kinds.map((k) => `${k.kind}: ${k.models.map((m) => m.id).join(", ")}`).join("; ")}.`,
+    `Roles: ${ctx.roles.filter((r) => r.id !== "orchestrator").map((r) => r.id).join(", ")}.`,
+    'access is "edit" or "look". Leave kind, model, effort or role out for the usual one.',
+  ].join("\n");
+}
+
+/** team_propose_tab's arguments (untrusted) as the setup screen's team, with
+ * the usual AI, role and prompt wherever the agent named none, checked as
+ * the screen checks it. */
+export function proposalSetup(
+  raw: Record<string, unknown>,
+  ctx: { codexOff: boolean; roles: RoleDef[] },
+): { ok: true; name: string; setup: TeamSetup } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const record = (v: unknown) => (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  if (!name || name.length > NAME_MAX) errors.push(`name: the new tab's name, at most ${NAME_MAX} characters.`);
+  const goal = typeof raw.goal === "string" ? raw.goal.trim() : "";
+  if (!goal) errors.push("goal: say what the new team should do; it becomes its first message.");
+  const pair = raw.pair === true;
+  const ai = (v: Record<string, unknown>) => {
+    const kind = (typeof v.kind === "string" ? v.kind : "claude-code") as AgentKind;
+    // The usual model: the default team's, else the kind's first.
+    const usual = kind === "claude-code" || kind === "codex" ? defaultModel(kind) : (agentKind(kind)?.models[0].id ?? "");
+    return { kind, model: typeof v.model === "string" ? v.model : usual, effort: typeof v.effort === "string" ? v.effort : "default" };
+  };
+  const prompt = (id: string) => (ctx.roles.find((r) => r.id === id) ?? BUILT_IN_ROLES.find((r) => r.id === id))?.prompt ?? "";
+  const members = (Array.isArray(raw.members) ? raw.members : []).map((m, i): TeamMemberSetup => {
+    const o = record(m);
+    const roleId = typeof o.role === "string" && o.role.trim() ? o.role.trim() : pair && i === 0 ? "pair-lead" : o.access === "look" ? "reviewer" : "lead";
+    return {
+      name: typeof o.name === "string" ? o.name : "",
+      ...ai(o),
+      permission: o.access as "edit" | "look",
+      roleId,
+      prompt: prompt(roleId),
+      note: typeof o.note === "string" ? o.note : "",
+    };
+  });
+  const setup: TeamSetup = { orchestrated: !pair, orchestrator: { ...ai(record(raw.orchestrator)), prompt: prompt("orchestrator") }, members, goal };
+  const checked = checkTeamSetup(setup, { takenNames: [], ...ctx });
+  if (!checked.ok) errors.push(...checked.errors);
+  return errors.length ? { ok: false, errors } : { ok: true, name, setup };
+}
+
+/** A proposal as its Needs you item says it. */
+export function proposalText(name: string, setup: TeamSetup): string {
+  const ai = (a: { kind: AgentKind; model: string }) => `${agentKind(a.kind)?.label ?? a.kind} ${agentModel(a.kind, a.model)?.label ?? a.model}`;
+  const members = setup.members.map((m) => `${m.name} (${ai(m)}, ${PERMISSION_LABELS[m.permission]})`).join(", ");
+  const goal = setup.goal.length > PROPOSAL_GOAL_SHOWN ? `${setup.goal.slice(0, PROPOSAL_GOAL_SHOWN - 1)}…` : setup.goal;
+  return `A new tab "${name}": ${setup.orchestrated === false ? "a pair" : `an Orchestrator (${ai(setup.orchestrator)})`} with ${members}.${goal ? `\n\nGoal: ${goal}` : ""}`;
 }

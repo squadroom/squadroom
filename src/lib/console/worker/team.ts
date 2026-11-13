@@ -3,7 +3,9 @@ import { agentKind, agentModel } from "../agents.ts";
 import { claimPattern, holdCycle } from "../claims.ts";
 import { callSummary, findTeammate, HoldCycleError, MESSAGE_MAX, REPORT_MAX, TeamError, teamPrompt } from "../team.ts";
 import { TEAM_DIFF_CHARS, teamDiffMissing, teamDiffText } from "../team-diff.ts";
-import { agentStatus, PERMISSION_LABELS, type ConsoleAgent } from "../types.ts";
+import { proposalOptions, proposalSetup, proposalText } from "../team-setup.ts";
+import { agentStatus, CODEX_DISABLED, PERMISSION_LABELS, type ConsoleAgent } from "../types.ts";
+import { rolesView } from "../views.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import type { ActiveTurn, Runtime } from "./shared.ts";
 
@@ -69,11 +71,19 @@ export const teamTools = {
               claims.length ? `; editing ${claims.map((c) => `${c.pattern}${c.note ? ` (${c.note})` : ""}`).join(", ")}` : ""
             }${hold ? `; on hold by ${hold.holderName}: ${hold.reason}` : ""}`;
           })
-          .join("\n");
+          .join("\n")
+          .concat(
+            // The agents of linked tabs, by the id to give.
+            this.store
+              .linkedAgents(me)
+              .map((a) => `\n- ${a.name} (id ${a.id}), in the tab "${this.store.tab(a.tabId)?.name ?? ""}", linked to you: team_send and team_ask reach it; give its id.`)
+              .join(""),
+          );
       }
       case "team_send":
       case "team_ask": {
-        const to = this.teammate(team, me, args.to);
+        // A teammate, or the agent of a linked tab.
+        const to = this.teammate([...team, ...this.store.linkedAgents(me)], me, args.to);
         if (to.state === "error") throw new TeamError(`${to.name} could not be set up, so it cannot take messages.`);
         const text = body(this, args);
         return write(this, () =>
@@ -110,6 +120,27 @@ export const teamTools = {
         const text = this.redactor.text(args.message.trim());
         if (text.length > REPORT_MAX) throw new TeamError(`A report is at most ${REPORT_MAX} characters: keep it short, and put the details in your final message.`);
         return write(this, () => this.store.reportToOwner(epoch, { turnId: t.id, agentId: me.id, key, summary: this.redactor.text(callSummary(name, args)), text }));
+      }
+      case "team_propose_tab": {
+        // A tab with a team of its own: nothing is made until
+        // the owner answers it in Needs you.
+        if (this.store.project(me.projectId)?.source === "none") throw new TeamError("A team needs a project with files; this project has none.");
+        const ctx = { codexOff: this.store.flag(CODEX_DISABLED) !== null, roles: rolesView(this.store) };
+        // Every text in it is stored (and later sent as a goal and roles).
+        const clean = (v: unknown): unknown =>
+          typeof v === "string"
+            ? this.redactor.text(v)
+            : Array.isArray(v)
+              ? v.map(clean)
+              : v && typeof v === "object"
+                ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clean(x)]))
+                : v;
+        const checked = proposalSetup(clean(args) as Record<string, unknown>, ctx);
+        if (!checked.ok) throw new TeamError(`${checked.errors.join(" ")}\n${proposalOptions(ctx)}`);
+        const proposal = { name: checked.name, setup: checked.setup };
+        return write(this, () =>
+          this.store.proposeTab(epoch, { turnId: t.id, agentId: me.id, key, summary: this.redactor.text(callSummary(name, args)), text: proposalText(proposal.name, proposal.setup), proposal }),
+        );
       }
       case "team_claim": {
         if (me.permission !== "edit") throw new TeamError("Only an agent that edits its folder can claim paths.");
@@ -209,6 +240,8 @@ export const teamTools = {
         return this.teamPr(call);
       case "team_pr_reply":
         return this.teamPrReply(call);
+      case "team_checks":
+        return this.teamChecks(call);
       case "team_push":
         return this.teamPush(call);
     }
@@ -259,8 +292,9 @@ export const teamTools = {
       const instruction = Math.max(...batch.map((m) => m.instructionId ?? 0));
       if (instruction) {
         const use = this.store.instructionUse(instruction, agent.tabId);
-        if (use.turns >= this.limits.turnsPerInstruction) {
-          this.pause(agent.tabId, `Limit reached: one instruction caused ${use.turns} agent turns (the limit is ${this.limits.turnsPerInstruction}). Resume to let the team continue.`);
+        const limit = this.turnLimits(agent.tabId).turns;
+        if (use.turns >= limit) {
+          this.pause(agent.tabId, `Limit reached: one instruction caused ${use.turns} agent turns (the limit is ${limit}). Resume to let the team continue.`);
           continue;
         }
         if (this.instructionOverdue(agent.tabId, use.startedAt)) continue;

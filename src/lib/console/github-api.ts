@@ -312,3 +312,113 @@ export async function commentOnPullRequest(repo: string, number: number, text: s
   const r = await pullRequestCall(gh, "POST", `/repos/${repo}/issues/${number}/comments`, { body: text });
   if (r.status !== 201) throw new GitError(`GitHub answered ${r.status} to the comment.`);
 }
+
+// ── Checks ────────────────────────────────────────────────────
+
+const NEEDS_ACTIONS_READ =
+  "The GitHub token cannot read this repository's checks. Ask the owner to give it Actions: Read-only for this repository (Settings → Developer settings → Fine-grained tokens).";
+
+/** One job of a GitHub Actions run for a commit. */
+export interface CheckJob {
+  id: number;
+  run: string;
+  name: string;
+  /** queued, in_progress, completed, … as GitHub says it. */
+  status: string;
+  /** success, failure, cancelled, skipped, … once completed. */
+  conclusion: string | null;
+}
+/** The most runs of one commit read, and pages of 100 jobs of one run. */
+const CHECK_RUNS_MAX = 20;
+const CHECK_JOB_PAGES = 3;
+
+/** The GitHub Actions jobs that ran for a commit (read only): each run's
+ * latest attempt. `incomplete` when GitHub has more runs or jobs than are
+ * read here, so nobody takes the list for all of them. Needs Actions:
+ * Read-only on the token. */
+export async function readChecks(
+  repo: string,
+  sha: string,
+  gh: GitHubApi,
+): Promise<{ jobs: CheckJob[]; incomplete: boolean }> {
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new GitError("That is not a commit.");
+  const get = async (path: string, what: string) => {
+    const r = await githubCall(gh, "GET", `/repos/${repo}/actions/${path}`);
+    if (r.status === 401 || r.status === 403 || r.status === 404) throw new GitError(NEEDS_ACTIONS_READ);
+    if (r.status !== 200) throw new GitError(`GitHub answered ${r.status} when reading ${what}.`);
+    return (r.json ?? {}) as { total_count?: unknown; workflow_runs?: unknown; jobs?: unknown };
+  };
+  const total = (v: unknown, seen: number) => (typeof v === "number" ? v : seen);
+  const runs = await get(`runs?head_sha=${sha}&per_page=${CHECK_RUNS_MAX}`, "the checks");
+  const list = (Array.isArray(runs.workflow_runs) ? runs.workflow_runs : []) as { id?: unknown; name?: unknown }[];
+  let incomplete = total(runs.total_count, list.length) > list.length;
+  const jobs: CheckJob[] = [];
+  for (const run of list) {
+    if (typeof run.id !== "number") continue;
+    let seen = 0;
+    for (let page = 1; ; page++) {
+      const got = await get(`runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`, "a check's jobs");
+      const rows = (Array.isArray(got.jobs) ? got.jobs : []) as Record<string, unknown>[];
+      seen += rows.length;
+      for (const j of rows) {
+        if (typeof j.id !== "number") continue;
+        jobs.push({
+          id: j.id,
+          run: typeof run.name === "string" ? run.name : "",
+          name: typeof j.name === "string" ? j.name : "",
+          status: typeof j.status === "string" ? j.status : "",
+          conclusion: typeof j.conclusion === "string" ? j.conclusion : null,
+        });
+      }
+      const more = total(got.total_count, seen) > seen && rows.length > 0;
+      if (!more) break;
+      if (page === CHECK_JOB_PAGES) {
+        incomplete = true;
+        break;
+      }
+    }
+  }
+  return { jobs, incomplete };
+}
+
+/** The end of one job's log: at most `maxBytes` of it are ever held (the
+ * rest is read and dropped as it streams, when the log's host does not
+ * honour the range asked for). GitHub answers with a redirect to the log
+ * itself, which fetch follows without the token. */
+export async function readJobLog(
+  repo: string,
+  jobId: number,
+  maxBytes: number,
+  gh: GitHubApi,
+): Promise<{ text: string; cut: boolean }> {
+  let response: Response;
+  try {
+    response = await (gh.fetch ?? fetch)(`${gh.url ?? GITHUB_API}/repos/${repo}/actions/jobs/${jobId}/logs`, {
+      headers: { accept: "application/vnd.github+json", authorization: `Bearer ${gh.token}`, "x-github-api-version": "2022-11-28", range: `bytes=-${maxBytes}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch {
+    throw new GitError("GitHub could not be reached.");
+  }
+  if (response.status === 401 || response.status === 403) throw new GitError(NEEDS_ACTIONS_READ);
+  if (response.status === 404 || response.status === 410) throw new GitError("That job's log is not there (not started yet, or expired).");
+  if (response.status !== 200 && response.status !== 206) throw new GitError(`GitHub answered ${response.status} when reading the job's log.`);
+  // A range answer says how long the whole log is ("bytes 0-9/100").
+  const whole = Number(/\/(\d+)$/.exec(response.headers.get("content-range") ?? "")?.[1]);
+  const tail: Buffer[] = [];
+  let held = 0;
+  let read = 0;
+  try {
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      tail.push(Buffer.from(chunk));
+      held += chunk.length;
+      read += chunk.length;
+      // Whole chunks past the limit go; the last one kept is trimmed below.
+      while (tail.length > 1 && held - tail[0].length >= maxBytes) held -= tail.shift()!.length;
+    }
+  } catch {
+    throw new GitError("The job's log could not be read to its end (too long, or the connection dropped).");
+  }
+  const bytes = Buffer.concat(tail);
+  return { text: bytes.subarray(Math.max(0, bytes.length - maxBytes)).toString("utf8"), cut: read > maxBytes || (response.status === 206 && whole > read) };
+}

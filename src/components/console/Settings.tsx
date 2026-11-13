@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { AGENT_KINDS } from "@/lib/console/agents";
 import type { ArchiveImpact, ProjectView, TabSpend } from "@/lib/console/views";
-import type { ConsoleProject } from "@/lib/console/types";
-import { archiveReady, money, parseDollars, plural } from "@/lib/console/ui";
+import { LIMITS, TIME_LIMIT_MAX_MIN, TIME_LIMIT_MIN_MIN, TURN_LIMIT_MAX, type ConsoleProject } from "@/lib/console/types";
+import { archiveReady, money, parseDollars, plural, turnLimitsForm } from "@/lib/console/ui";
 import { DOCUMENT_REVIEW, PARKING_LOT, STEPS_MAX, TEMPLATE_NAME_MAX, checkSteps, rowsToSteps, stepRows, type StepRow, type TemplateStep } from "@/lib/console/templates";
 import { api, type Run } from "./api";
 import Dialog from "./Dialog";
@@ -407,6 +408,127 @@ export function ArchiveDialog({ scope, id, onClose, onConfirm }: { scope: "proje
           }}
         >
           {verb}
+        </button>
+      </div>
+    </Dialog>
+  );
+}
+
+/** A tab's own turn limits, from the tab's menu: how many agent
+ * turns, and how long, one message from the owner may keep its team going.
+ * A blank field is the default. Raising either asks for a fresh code;
+ * setting them never lifts a pause. */
+export function TurnLimitsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][number]; run: Run; onClose: () => void }) {
+  const hoursOf = (minutes: number | null) => (minutes === null ? "" : String(Math.round((minutes / 60) * 100) / 100));
+  const [turns, setTurns] = useState(tab.turnLimit === null ? "" : String(tab.turnLimit));
+  const [hours, setHours] = useState(hoursOf(tab.timeLimitMin));
+  const form = turnLimitsForm(turns, hours);
+  const inRange =
+    !!form &&
+    (form.turns === null || (form.turns >= 1 && form.turns <= TURN_LIMIT_MAX)) &&
+    (form.minutes === null || (form.minutes >= TIME_LIMIT_MIN_MIN && form.minutes <= TIME_LIMIT_MAX_MIN));
+  const changed = !!form && (form.turns !== tab.turnLimit || form.minutes !== tab.timeLimitMin);
+  const defaultHours = LIMITS.instructionMs / 3_600_000;
+  return (
+    <Dialog title={`Turn limits: ${tab.name}`} onClose={onClose}>
+      <div className={styles.spendLimit}>
+        <p className={styles.hint}>
+          After one message from you, this tab&apos;s agents may take this many turns between them, for this long, before the tab pauses. Resume lets them
+          continue.
+        </p>
+        <label className={styles.inlineField}>
+          <span>Turns</span>
+          <input inputMode="numeric" aria-label="Turns per message" placeholder={String(LIMITS.turnsPerInstruction)} value={turns} onChange={(e) => setTurns(e.target.value)} />
+        </label>
+        <label className={styles.inlineField}>
+          <span>Hours</span>
+          <input inputMode="decimal" aria-label="Hours per message" placeholder={String(defaultHours)} value={hours} onChange={(e) => setHours(e.target.value)} />
+        </label>
+        <div className={styles.inlineField}>
+          <button
+            disabled={!changed || !inRange}
+            title="Raising a limit needs a fresh code"
+            onClick={() => form && void run({ action: "setTurnLimits", tabId: tab.id, turns: form.turns, minutes: form.minutes })}
+          >
+            Save
+          </button>
+          {(tab.turnLimit !== null || tab.timeLimitMin !== null) && (
+            <button
+              title="Back to the defaults"
+              onClick={() => {
+                setTurns("");
+                setHours("");
+                void run({ action: "setTurnLimits", tabId: tab.id, turns: null, minutes: null });
+              }}
+            >
+              Defaults
+            </button>
+          )}
+        </div>
+      </div>
+      <p className={styles.hint}>
+        Leave a field empty for the default: {LIMITS.turnsPerInstruction} turns and {plural(defaultHours, "hour")}. The most is {TURN_LIMIT_MAX} turns and{" "}
+        {TIME_LIMIT_MAX_MIN / 60} hours.
+      </p>
+    </Dialog>
+  );
+}
+
+/** An agent's model and thinking level, from its window's menu:
+ * its kind stays, and it keeps its conversation. A turn already running
+ * finishes on what it started with. */
+export function AgentAiDialog({ agent, run, onClose }: { agent: ProjectView["agents"][number]; run: Run; onClose: () => void }) {
+  const kind = AGENT_KINDS.find((k) => k.kind === agent.kind);
+  const [model, setModel] = useState(agent.model);
+  const [effort, setEffort] = useState(agent.effort ?? "default");
+  const efforts = kind?.models.find((m) => m.id === model)?.efforts ?? [];
+  const changed = model !== agent.model || effort !== (agent.effort ?? "default");
+  return (
+    <Dialog title={`Model: ${agent.name}`} onClose={onClose}>
+      <div className={styles.spendLimit}>
+        <label className={styles.inlineField}>
+          <span>Model</span>
+          <select
+            aria-label="Model"
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value);
+              setEffort("default");
+            }}
+          >
+            {(kind?.models ?? []).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.inlineField}>
+          <span>Thinking</span>
+          <select aria-label="Thinking" value={effort} disabled={!efforts.length} onChange={(e) => setEffort(e.target.value)}>
+            <option value="default">Default</option>
+            {efforts.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className={styles.hint}>
+        {kind?.label ?? agent.kind} stays its AI. The change starts with its next turn, in the same conversation; a turn running now finishes as it began. A model
+        on an API key is billed per call.
+      </p>
+      <div className={styles.dialogButtons}>
+        <button onClick={onClose}>Cancel</button>
+        <button
+          className={styles.primary}
+          disabled={!changed}
+          onClick={async () => {
+            if (await run({ action: "setAi", agentId: agent.id, model, effort })) onClose();
+          }}
+        >
+          Save
         </button>
       </div>
     </Dialog>

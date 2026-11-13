@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { templatesView as allTemplatesView } from "../src/lib/console/views.ts";
+import { changesView, templatesView as allTemplatesView } from "../src/lib/console/views.ts";
 
 // The owner's saved templates (the built-in Document review is).
 const templatesView = (store: ConsoleStore) => allTemplatesView(store).filter((t) => !t.builtIn).map((t) => ({ id: t.id, name: t.name, agents: t.agents, steps: t.steps }));
@@ -300,17 +300,28 @@ test("a step tab with two editing agents: each needs its commit approved after a
   runCommand(store, { action: "close", agentId: d });
   const critic = (runCommand(store, { action: "createAgent", tabId, name: "Critic", kind: "claude-code", model: "haiku", permission: "look" }).agent as { id: string }).id;
   store.setAgentFolder(epoch, critic, "/work/Critic");
-  assert.throws(next, /^Error: Approve the current commits of A and B, each after a reviewer's review, first/);
+  assert.throws(next, /^Error: A and B: the current commit is approved, but not after a review\./);
   for (const x of [a, b]) {
     store.queueRefresh(epoch, x.id, sha[x.id]);
     const pending = store.pendingRefreshes().find((r) => r.reviewerId === critic && r.authorId === x.id)!;
     store.refreshApplied(epoch, pending.id, critic, { id: x.id, name: x.name }, sha[x.id], true);
   }
+  // The Orchestrator's review does not count there: Changes
+  // does not offer it, and an approval after it does not move the step.
+  const boss = created.agents[0].id;
+  const seen = store.pendingRefreshes().find((r) => r.reviewerId === boss && r.authorId === a.id)!;
+  store.refreshApplied(epoch, seen.id, boss, { id: a.id, name: a.name }, sha[a.id], true);
+  const plan = store.queueTurn(boss, "look");
+  store.startTurn(epoch, plan.id);
+  store.finishTurn(epoch, plan.id, "done", null, null, "seen");
+  assert.deepEqual(changesView(store, a.id)!.approval.reviewers.map((r) => r.name), ["Critic"]);
+  runCommand(store, { action: "approve", agentId: a.id, sha: sha[a.id], reviewerId: boss });
+  assert.throws(next, /^Error: A and B: the current commit is approved, but not after a review\./);
   const t = store.queueTurn(critic, "review");
   store.startTurn(epoch, t.id);
   store.finishTurn(epoch, t.id, "done", null, null, "READY FOR APPROVAL");
   runCommand(store, { action: "approve", agentId: a.id, sha: sha[a.id], reviewerId: critic });
-  assert.throws(next, /^Error: Approve B's current commit, after the reviewer's review, first/);
+  assert.throws(next, /^Error: B: the current commit is approved, but not after a review\./);
   runCommand(store, { action: "approve", agentId: b.id, sha: sha[b.id], reviewerId: critic });
   next();
   assert.equal(store.tabSteps(tabId)!.index, 1);

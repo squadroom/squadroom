@@ -4,8 +4,9 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { cleanComment, codexState, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
-import { git, harness } from "./helpers/console-harness.ts";
+import { CHECKS_CHARS, JOB_LOG_CHARS, checksText, cleanComment, codexState, jobLogText, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
+import { readChecks, readJobLog } from "../src/lib/console/github-api.ts";
+import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 import { resendNote } from "../src/lib/console/team.ts";
 
 // an agent reads its own pull request (Codex's
@@ -47,7 +48,9 @@ function github() {
   const threads: { id: string; pr: number; resolved: boolean; path: string; line: number; comments: { author: string; body: string }[] }[] = [];
   const comments: { pr: number; author: string; body: string }[] = [];
   /** The pull request's head on "GitHub"; a resolve that fails once. */
-  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null };
+  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null, actions: true };
+  /** GitHub Actions: jobs by the commit they ran for, and their logs. */
+  const jobs: { id: number; sha: string; name: string; status: string; conclusion: string | null; log: string }[] = [];
   const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input));
     const json = (v: unknown, status = 200) => Response.json(v, { status });
@@ -65,6 +68,14 @@ function github() {
       const pr = { number: 100 + pulls.length, ...b };
       pulls.push(pr);
       return json({ number: pr.number, html_url: `https://github.com/owner/repo/pull/${pr.number}` }, 201);
+    }
+    if (path.startsWith("/repos/owner/repo/actions/")) {
+      if (!state.actions) return json({ message: "Resource not accessible by personal access token" }, 403);
+      if (path.endsWith("/actions/runs")) return json({ workflow_runs: jobs.some((j) => j.sha === url.searchParams.get("head_sha")) ? [{ id: 9, name: "CI" }] : [] });
+      if (path.endsWith("/actions/runs/9/jobs")) return json({ jobs: jobs.filter((j) => j.sha === state.head) });
+      const log = /\/actions\/jobs\/(\d+)\/logs$/.exec(path);
+      const job = log && jobs.find((j) => j.id === Number(log[1]));
+      return job ? new Response(job.log) : json({}, 404);
     }
     const issue = /^\/repos\/owner\/repo\/issues\/(\d+)\/comments$/.exec(path);
     if (issue) {
@@ -159,7 +170,7 @@ function github() {
     }
     return json({}, 404);
   }) as typeof fetch;
-  return { fetcher, pulls, threads, comments, state };
+  return { fetcher, pulls, threads, comments, state, jobs };
 }
 
 test("the pull request as text: Codex's state, open findings in full, the rest summarised", () => {
@@ -321,6 +332,37 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   await h.ended(h.send(look.id, call("team_pr")));
   assert.match(h.said(look.id).at(-1)!, /error: A Code analysis agent has no branch/);
 
+  // team_checks: the checks GitHub ran on the pull request's
+  // latest commit, and the end of a failed job's log.
+  const checks = async (args: Record<string, unknown> = {}, who = lead.id) => {
+    await h.ended(h.send(who, call("team_checks", args)));
+    return h.said(who).at(-1)!;
+  };
+  assert.match(await checks(), /^team_checks: Checks for [0-9a-f]{8}, the latest commit on your pull request\.\nNo check has started for it/);
+  gh.jobs.push(
+    { id: 41, sha: gh.state.head, name: "chromium", status: "completed", conclusion: "success", log: "" },
+    { id: 42, sha: gh.state.head, name: "webkit", status: "completed", conclusion: "failure", log: `2026-11-12T10:00:00.0000000Z Running 3 tests\n2026-11-12T10:00:09.0000000Z   1) layout.spec.ts:12 marks overlap ${TOKEN}\n2026-11-12T10:00:10.0000000Z 1 failed\n` },
+    { id: 43, sha: gh.state.head, name: "firefox", status: "in_progress", conclusion: null, log: "" },
+    // A name with a credential across the name's length limit: masked whole, never cut into.
+    { id: 44, sha: gh.state.head, name: `${"n".repeat(110)}${TOKEN}`, status: "completed", conclusion: "success", log: "" },
+    { id: 77, sha: "f".repeat(40), name: "someone else's", status: "completed", conclusion: "failure", log: "not yours" },
+  );
+  const listed = await checks();
+  assert.match(listed, new RegExp(`^team_checks: Checks for ${gh.state.head.slice(0, 8)}, the latest commit on your pull request\\.\\n- CI / webkit: FAILED \\(job 42\\)\\n- CI / firefox: running \\(job 43\\)\\n- CI / chromium: passed \\(job 41\\)\\n- CI / n{110}\\[redact`));
+  assert.match(listed, /\nRead the end of a failed job's log with team_checks\(job: 42\)\.$/);
+  assert.ok(!listed.includes(TOKEN.slice(0, 8)));
+  // The log's end, without GitHub's timestamps, and redacted.
+  const log = await checks({ job: 42 });
+  assert.match(log, /^team_checks: The end of the log of CI \/ webkit \(job 42\):\n\nRunning 3 tests\n  1\) layout\.spec\.ts:12 marks overlap \[redacted[^\]]*\]\n1 failed$/);
+  // Only its own pull request's jobs; a number, never anything else.
+  assert.match(await checks({ job: 77 }), /error: Job 77 is not one of your pull request's checks/);
+  assert.match(await checks({ job: "42" }), /error: job must be a job's number/);
+  assert.match(await checks({}, look.id), /error: A Code analysis agent has no branch/);
+  // A token without Actions: Read-only says what is missing.
+  gh.state.actions = false;
+  assert.match(await checks(), /error: The GitHub token cannot read this repository's checks\. Ask the owner to give it Actions: Read-only/);
+  gh.state.actions = true;
+
   // A reply waits for the owner, then is posted and the thread resolved.
   const reply = h.send(lead.id, call("team_pr_reply", { thread: "PRRT_one", message: "Fixed in abc1234: force is carried into the resume.", resolve: true }));
   await h.until(() => h.store.openRequests().length === 1, "approval asked");
@@ -372,4 +414,88 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   release();
   assert.equal(h.store.turn(cut)!.status, "interrupted");
   assert.match(resendNote(h.store.toolCalls(cut)), /A reply to thread PRRT_one may have been posted; check team_pr before replying again/);
+});
+
+test("checks: only a list that is whole and all passed says so; what did not pass comes first, within a bound", () => {
+  const sha = "a".repeat(40);
+  const job = (id: number, conclusion: string | null, status = "completed", name = `job ${id}`) => ({ id, run: "CI", name, status, conclusion });
+  const last = (text: string) => text.split("\n").at(-1)!;
+  assert.equal(last(checksText([job(1, "success"), job(2, "skipped"), job(3, "neutral")], sha, sha)), "Every check passed.");
+  // Ended without a result: never "passed".
+  for (const c of ["cancelled", "action_required", "stale"]) assert.match(last(checksText([job(1, "success"), job(2, c)], sha, sha)), /^Not every check ran to a result/);
+  const timedOut = checksText([job(1, "success"), job(2, "timed_out")], sha, sha);
+  assert.match(timedOut, /- CI \/ job 2: FAILED: timed out \(job 2\)\n- CI \/ job 1: passed/);
+  assert.match(last(timedOut), /team_checks\(job: 2\)/);
+  assert.match(last(checksText([job(1, "success"), job(2, null, "queued")], sha, sha)), /^Still running/);
+  // More on GitHub than was read: said, and never "every check".
+  const partial = checksText([job(1, "success")], sha, sha, true);
+  assert.match(partial, /GitHub has more jobs for this commit than are read here/);
+  assert.equal(last(partial), "Every job listed passed.");
+  // Many long-named jobs: bounded, the failed one shown, the rest counted.
+  const many = [...Array.from({ length: 400 }, (_, i) => job(i + 1, "success", "completed", "x".repeat(300))), job(999, "failure")];
+  const text = checksText(many, sha, "b".repeat(40));
+  assert.ok(text.length < CHECKS_CHARS + 600, String(text.length));
+  assert.match(text, /its newer commits are not pushed/);
+  assert.match(text, /\n- CI \/ job 999: FAILED \(job 999\)\n/);
+  assert.match(text, /\d+ more job\(s\) not shown for space: \d+ passed\./);
+});
+
+test("a job's log: masked before any of it is chosen, long lines cut, never empty when there is text", () => {
+  const job = { id: 7, run: "CI", name: "webkit" };
+  const secret = "LINE-ONE-OF-SECRET\nLINE-TWO-OF-SECRET";
+  const redact = (t: string) => t.split(secret).join("[redacted]");
+  // A credential over two lines, with enough after it that only its second line would fit.
+  const tail = Array.from({ length: 400 }, (_, i) => `line ${i} ${"y".repeat(50)}`).join("\n");
+  const out = jobLogText(job, { text: `start\n${secret}\n${tail}`, cut: false }, redact);
+  assert.ok(out.length <= JOB_LOG_CHARS + 100);
+  assert.doesNotMatch(out, /SECRET/);
+  // Read from inside the log: what a cut credential could have left at the start is dropped.
+  const inside = jobLogText(job, { text: `WO-OF-SECRET\n${"z".repeat(5000)}\nlast line`, cut: true }, redact);
+  assert.doesNotMatch(inside, /SECRET/);
+  assert.match(inside, /last line$/);
+  // One very long last line does not hide the lines before it.
+  const long = jobLogText(job, { text: `2026-11-12T10:00:00.0000000Z test assertion failed\n${"q".repeat(30_000)}\n`, cut: false }, redact);
+  assert.match(long, /\n\ntest assertion failed\nq{2000} \[…line cut\]$/);
+  assert.match(jobLogText(job, { text: "", cut: false }, redact), /\(The log is empty\.\)$/);
+});
+
+test("reading checks from GitHub: every page of jobs within a bound; a log's end without holding the whole of it", async () => {
+  const sha = "c".repeat(40);
+  const page = (n: number, from: number, total: number) => ({ total_count: total, jobs: Array.from({ length: n }, (_, i) => ({ id: from + i, name: `j${from + i}`, status: "completed", conclusion: "success" })) });
+  const api = (pages: Record<string, unknown>, runs = { total_count: 1, workflow_runs: [{ id: 9, name: "CI" }] }) =>
+    (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/actions/runs")) return Response.json(runs);
+      return Response.json(pages[url.searchParams.get("page") ?? "1"] ?? { total_count: 0, jobs: [] });
+    }) as typeof fetch;
+  const two = await readChecks("owner/repo", sha, { token: "t", fetch: api({ "1": page(100, 1, 130), "2": page(30, 101, 130) }) });
+  assert.deepEqual([two.jobs.length, two.incomplete, two.jobs.at(-1)!.id], [130, false, 130]);
+  const huge = await readChecks("owner/repo", sha, { token: "t", fetch: api({ "1": page(100, 1, 900), "2": page(100, 101, 900), "3": page(100, 201, 900) }) });
+  assert.deepEqual([huge.jobs.length, huge.incomplete], [300, true]);
+  const manyRuns = await readChecks("owner/repo", sha, { token: "t", fetch: api({ "1": page(1, 1, 1) }, { total_count: 45, workflow_runs: [{ id: 9, name: "CI" }] }) });
+  assert.equal(manyRuns.incomplete, true);
+  await assert.rejects(readChecks("owner/repo", "main", { token: "t", fetch: api({}) }), /not a commit/);
+
+  // A 2 MB log streamed in pieces: only its end is kept, and it is asked for by range.
+  let asked = "";
+  const body = () =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < 32; i++) c.enqueue(new Uint8Array(64 * 1024).fill(97 + (i % 26)));
+        c.enqueue(new TextEncoder().encode("THE END"));
+        c.close();
+      },
+    });
+  const logs = (async (_input: string | URL | Request, init: RequestInit = {}) => {
+    asked = new Headers(init.headers).get("range") ?? "";
+    return new Response(body());
+  }) as typeof fetch;
+  const log = await readJobLog("owner/repo", 7, 1024, { token: "t", fetch: logs });
+  assert.equal(asked, "bytes=-1024");
+  assert.deepEqual([log.text.length, log.cut, log.text.endsWith("THE END")], [1024, true, true]);
+  // A host that honours the range says how long the whole log is.
+  const ranged = (async () => new Response("tail", { status: 206, headers: { "content-range": "bytes 96-99/100" } })) as typeof fetch;
+  assert.deepEqual(await readJobLog("owner/repo", 7, 1024, { token: "t", fetch: ranged }), { text: "tail", cut: true });
+  const small = (async () => new Response("all of it")) as typeof fetch;
+  assert.deepEqual(await readJobLog("owner/repo", 7, 1024, { token: "t", fetch: small }), { text: "all of it", cut: false });
 });

@@ -1,7 +1,7 @@
 import { chmodSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { BLOB_MAX_BYTES, TEXT_MAX_BYTES, UPLOADS_DIR, agentFilePath, fileKind, formatSize } from "./files.ts";
+import { BLOB_MAX_BYTES, FOLDER_LISTING, LIST_MAX, TEXT_MAX_BYTES, UPLOADS_DIR, agentFilePath, fileKind, formatSize, listedFiles } from "./files.ts";
 import { DESIGN_DIR } from "./image-tools.ts";
 import type { Launcher } from "./launcher.ts";
 import { inside } from "./permissions.ts";
@@ -14,7 +14,9 @@ import type { Redactor } from "./redact.ts";
 
 export interface FileView {
   path: string;
-  kind: "markdown" | "text" | "image" | "other" | "error";
+  kind: "markdown" | "text" | "image" | "other" | "folder" | "error";
+  /** A folder's files (the listing), by path. */
+  files?: string[];
   size?: number;
   language?: string | null;
   mime?: string | null;
@@ -100,6 +102,16 @@ export async function readAgentFile(launcher: Launcher, folder: string, path: st
     return refuse(rel, "This file holds a credential the Console handed to an agent, so it is not shown.");
   if (text) return refuse(rel, "This file holds binary content, so it is not shown.");
   return { path: rel, kind, size, mime: mime ?? "application/octet-stream", base64: bytes.toString("base64") };
+}
+
+/** The files in an agent's folder, for the panel to open: what Git tracks
+ * there and what is new and not ignored, as the folder is now (committed or
+ * not), read as the agent. A path that holds a credential is left out. */
+export async function listAgentFiles(launcher: Launcher, folder: string, redactor: Redactor): Promise<FileView> {
+  const r = await launcher.git(folder, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], 4 * 1024 * 1024);
+  if (r.code !== 0) return refuse(FOLDER_LISTING, "This folder's files could not be listed.");
+  const files = listedFiles(r.stdout).filter((p) => !redactor.holdsSecret(p) && redactor.text(p) === p);
+  return { path: FOLDER_LISTING, kind: "folder", files: files.slice(0, LIST_MAX), truncated: r.truncated || files.length > LIST_MAX };
 }
 
 interface UploadPlacement {

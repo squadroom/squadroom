@@ -244,6 +244,14 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
   assert.equal((await limit(fresh.post, null)).status, 200);
   assert.equal(cs.tab(tabId)!.spendLimitUsd, null);
   assert.equal((await post(stale.post, { action: "setSpendLimit", tabId: "t000000000000", limitUsd: 1 })).status, 403);
+  // A tab's turn limits, the same way.
+  const turns = async (headers: Record<string, string>, n: number | null) => post(headers, { action: "setTurnLimits", tabId, turns: n, minutes: null });
+  assert.equal((await turns(stale.post, 10)).status, 200);
+  assert.equal((await turns(stale.post, 11)).status, 403);
+  assert.equal((await turns(stale.post, null)).status, 403);
+  assert.equal(cs.tab(tabId)!.turnLimit, 10);
+  assert.equal((await turns(fresh.post, 80)).status, 200);
+  assert.equal(cs.tab(tabId)!.turnLimit, 80);
   // The Console-wide limit: none until set; a stale session may set or
   // lower it, never raise, remove or reset it.
   const consoleLimit = (headers: Record<string, string>, limitUsd: number | null) => post(headers, { action: "setConsoleSpendLimit", limitUsd });

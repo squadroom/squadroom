@@ -1,7 +1,7 @@
 import { agentKind, agentModel, type ConsoleEffort } from "./agents.ts";
 import { Redactor } from "./redact.ts";
 import { parseRepo, validBranch } from "./git.ts";
-import { agentFilePath } from "./files.ts";
+import { FOLDER_LISTING, agentFilePath } from "./files.ts";
 import { checkTeamSetup, defaultTeamSetup } from "./team-setup.ts";
 import { TEMPLATE_NAME_MAX, checkRoutes, checkSteps, isOrchestrator, templateFromTab, templateNames, type TabTemplate, type TemplateStep } from "./templates.ts";
 import { BUILT_IN_ROLES, checkRole, customRoleId, type RoleDef } from "./roles.ts";
@@ -9,8 +9,8 @@ import { KeyCommandError, runKeyCommand } from "./keys-page.ts";
 import { ROUTE_PHRASE_MAX } from "./team.ts";
 import { ASK_FIRST_CLAUDE_ONLY, NEEDS_MAIL, type ConsoleStore } from "./store.ts";
 import { usd } from "./spend.ts";
-import { CODEX_DISABLED, NAME_MAX, PROMPT_MAX, ROLE_MAX, isOpen, type ConsoleTab, type Permission } from "./types.ts";
-import { allTemplates, rolesView, templatesView } from "./views.ts";
+import { CODEX_DISABLED, NAME_MAX, PROMPT_MAX, ROLE_MAX, TIME_LIMIT_MAX_MIN, TIME_LIMIT_MIN_MIN, TURN_LIMIT_MAX, isOpen, turnLimits, type ConsoleTab, type Permission } from "./types.ts";
+import { allTemplates, rolesView, stepReviewer, templatesView } from "./views.ts";
 
 // The owner's commands, validated here so the route stays glue; the
 // page's reads are in views.ts. The web process never starts an agent: a
@@ -86,12 +86,14 @@ export type ConsoleCommand =
   | { action: "releaseHold"; holdId: number }
   | { action: "dismissNotice"; noticeId: number }
   | { action: "createTeam"; tabId: string; setup?: unknown }
+  | { action: "decideProposal"; noticeId: number; decision: "create" | "decline"; setup?: unknown }
   | { action: "saveRole"; role: Partial<RoleDef> }
   | { action: "deleteRole" | "resetRole"; id: string }
   | { action: "cleanupDelete"; keys: string[] }
   | { action: "push"; agentId: string }
   | { action: "openPullRequest"; agentId: string }
   | { action: "readFile"; agentId: string; path: string }
+  | { action: "listFiles"; agentId: string }
   | { action: "readHelper"; agentId: string; helperId: number }
   | { action: "rename"; target: "project" | "tab" | "agent"; id: string; name: string }
   | { action: "createTab"; projectId: string; name: string; templateId?: string }
@@ -102,8 +104,10 @@ export type ConsoleCommand =
   | { action: "revokeApproval"; agentId: string }
   | { action: "setStep"; tabId: string; step: number }
   | { action: "archive" | "restore"; scope: "project" | "tab"; id: string }
+  | { action: "recheckProject"; id: string }
   | { action: "createAgent"; tabId: string; name: string; role?: string; kind: string; model: string; effort?: string | null; permission: string; askFirst?: boolean }
   | { action: "setAskFirst"; agentId: string; on: boolean }
+  | { action: "setAi"; agentId: string; model: string; effort?: string | null }
   | { action: "addRoute"; tabId: string; from: string; to: string; phrase?: string }
   | { action: "removeRoute"; routeId: number }
   | { action: "send"; agentId: string; text: string; uploadIds?: number[] }
@@ -120,6 +124,7 @@ export type ConsoleCommand =
   | { action: "setImageTools"; projectId: string; on: boolean }
   | { action: "setNeedsMail"; on: boolean }
   | { action: "setSpendLimit"; tabId: string; limitUsd: number | string | null }
+  | { action: "setTurnLimits"; tabId: string; turns: number | null; minutes: number | null }
   | { action: "resetSpend"; tabId: string }
   | { action: "setConsoleSpendLimit"; limitUsd: number | string | null }
   | { action: "resetConsoleSpend" }
@@ -141,6 +146,8 @@ interface FreshCodeContext {
   /** The tab's spend limit now, or null when it has none; undefined when
    * the tab is unknown, which needs a code. */
   spendLimit?: number | null;
+  /** The tab's turn limits in force (`setTurnLimits`); missing: no such tab. */
+  turnLimits?: { turns: number; ms: number };
   /** The Console-wide spend limit now, or null when none is set. */
   consoleSpendLimit?: number | null;
   /** The project an agent, team or template tab is made in has an agent,
@@ -154,9 +161,9 @@ interface FreshCodeContext {
  * deleting folders, switching Ask me first off (or making agents without
  * it in a project that uses it), the ACP network switch, switching image
  * tools on, raising a spend limit (a tab's or the Console's) or
- * resetting spend, and every Keys write. Each needs a code entered in the
- * last CONSOLE_CODE_MS, so a stolen session cookie alone (good for 30 days)
- * cannot do them. Pushes and their approvals, archiving and closing, and
+ * resetting spend, raising a tab's turn limits, and every Keys write. Each
+ * needs a code entered in the last CONSOLE_CODE_MS, so a stolen session
+ * cookie alone (good for 30 days) cannot do them. Pushes and their approvals, archiving and closing, and
  * roles do not need one. Pure: decided from the request and `context`.
  */
 export function needsFreshCode(input: Record<string, unknown>, context: FreshCodeContext = {}): boolean {
@@ -168,6 +175,15 @@ export function needsFreshCode(input: Record<string, unknown>, context: FreshCod
       const next = spendLimitInput(input.limitUsd);
       if (next === undefined) return false;
       return context.spendLimit === undefined || (next ?? Infinity) > (context.spendLimit ?? Infinity);
+    }
+    // Raising a tab's turn limits, the same way; null (the default) is a
+    // raise when the tab's own limit is under it.
+    case "setTurnLimits": {
+      const next = turnLimitsInput(input.turns, input.minutes);
+      if (!next) return false;
+      const now = context.turnLimits;
+      const after = turnLimits({ turnLimit: next.turns, timeLimitMin: next.minutes });
+      return !now || after.turns > now.turns || after.ms > now.ms;
     }
     // The Console-wide limit, the same way (removing it, null, is the
     // highest raise): a cookie alone cannot spend past it by making new
@@ -187,6 +203,9 @@ export function needsFreshCode(input: Record<string, unknown>, context: FreshCod
       return context.askFirstInUse === true && input.askFirst !== true;
     case "createTeam":
       return context.askFirstInUse === true;
+    // Creating a tab an agent proposed makes a team, the same way.
+    case "decideProposal":
+      return input.decision === "create" && context.askFirstInUse === true;
     case "createTab":
       return context.askFirstInUse === true && !!input.templateId;
     case "decide":
@@ -227,6 +246,15 @@ export function spendLimitInput(value: unknown, max = SPEND_LIMIT_MAX): number |
   return cents >= 0.01 && cents <= max ? cents : undefined;
 }
 
+/** A tab's turn limits as sent: whole turns from 1 to
+ * TURN_LIMIT_MAX and whole minutes from TIME_LIMIT_MIN_MIN to
+ * TIME_LIMIT_MAX_MIN, each null for the default; undefined when not valid. */
+export function turnLimitsInput(turns: unknown, minutes: unknown): { turns: number | null; minutes: number | null } | undefined {
+  const whole = (v: unknown, min: number, max: number) => v === null || (typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= max);
+  if (!whole(turns, 1, TURN_LIMIT_MAX) || !whole(minutes, TIME_LIMIT_MIN_MIN, TIME_LIMIT_MAX_MIN)) return undefined;
+  return { turns: turns as number | null, minutes: minutes as number | null };
+}
+
 /** What the route checked before a command: `freshCode` when it found a
  * fresh code where `needsFreshCode` asked for one. The commands it
  * measured against the store check again here, so a change made meanwhile
@@ -240,6 +268,10 @@ export function freshCodeContext(store: ConsoleStore, input: Record<string, unkn
   switch (input.action as CommandAction) {
     case "setSpendLimit":
       return { spendLimit: currentSpendLimit(store, input.tabId) };
+    case "setTurnLimits": {
+      const tab = typeof input.tabId === "string" ? store.tab(input.tabId) : undefined;
+      return { turnLimits: tab && turnLimits(tab) };
+    }
     case "setConsoleSpendLimit":
       return { consoleSpendLimit: store.consoleSpend().limitUsd };
     case "createAgent":
@@ -249,6 +281,10 @@ export function freshCodeContext(store: ConsoleStore, input: Record<string, unkn
     }
     case "createTab":
       return { askFirstInUse: typeof input.projectId === "string" && askFirstInRepo(store, input.projectId) };
+    case "decideProposal": {
+      const p = openProposal(store, input.noticeId);
+      return { askFirstInUse: !!p && askFirstInRepo(store, p.projectId) };
+    }
     default:
       return {};
   }
@@ -275,7 +311,7 @@ const TEAM_NEEDS_FILES = "A coding team needs a project with files.";
 /** Create a team in a tab (the setup screen, or a template): its agents,
  * then routes by name, in one transaction. The first agent's turns wait
  * until every other member is set up; a goal is its first message. */
-function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes: TabTemplate["routes"] = [], exactPrompts = false) {
+function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes: TabTemplate["routes"] = [], exactPrompts = false, goalNote = "") {
   return store.transaction(() => {
     if (store.project(tab.projectId)?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
     const codexOff = store.flag(CODEX_DISABLED) !== null;
@@ -290,11 +326,18 @@ function createTeam(store: ConsoleStore, tab: ConsoleTab, setup: unknown, routes
     // turn of it starts until every other member is set up.
     const first = agents[checked.goalTo];
     store.setWaitFor(first.id, agents.filter((a) => a.id !== first.id).map((a) => a.id));
-    if (checked.goal) store.queueTurn(first.id, new Redactor().text(checked.goal));
+    // `goalNote`: the Console's own words before it (a proposed tab's
+    // link), outside the goal's limit.
+    if (checked.goal) store.queueTurn(first.id, goalNote + new Redactor().text(checked.goal));
     const named = (name: string) => agents.find((a) => a.name.toLowerCase() === name.toLowerCase())!;
     for (const r of routes) store.addRoute({ tabId: tab.id, from: named(r.from).id, to: named(r.to).id, phrase: r.phrase });
     return { agents, warnings: checked.warnings };
   });
+}
+
+/** An open proposal in Needs you, by its item's id. */
+function openProposal(store: ConsoleStore, noticeId: unknown) {
+  return store.notices().find((n) => n.id === Number(noticeId) && n.proposal);
 }
 
 /** A template is created only if the setup screen's checks accept it now
@@ -434,6 +477,40 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     codeStillNeeded(store, input, options);
     return createTeam(store, tab, input.setup);
   },
+  decideProposal(store, input, options) {
+    // A tab an agent proposed: the owner creates it, as proposed or with
+    // their own changes to its team, or declines it. Either way the
+    // proposing agent is told, in its window.
+    const p = openProposal(store, input.noticeId);
+    const agent = p && store.agent(p.agentId);
+    if (!p?.proposal || !agent) throw new CommandError("That proposal has already been answered.");
+    const { name } = p.proposal;
+    if (input.decision === "decline") {
+      store.settleProposal(p.id, null, `[Console] The owner declined the tab "${name}" you proposed with team_propose_tab. It was not created: do not wait for it.`);
+      return { done: true };
+    }
+    if (input.decision !== "create") throw new CommandError("Choose Create or Decline.");
+    if (store.project(p.projectId)?.source === "none") throw new CommandError(TEAM_NEEDS_FILES);
+    const setup = input.setup === undefined ? p.proposal.setup : input.setup;
+    // Checked before the tab is made, as a template is.
+    const checked = checkTeamSetup(setup, { takenNames: [], codexOff: store.flag(CODEX_DISABLED) !== null, roles: rolesView(store) });
+    if (!checked.ok) throw new CommandError(checked.errors.join(" "));
+    codeStillNeeded(store, input, options);
+    // The tab, its team and the answer to the proposal together, or none of them.
+    return store.transaction(() => {
+      const tab = store.createTab(p.projectId, name);
+      // Its lead learns of the link with the goal: the first thing it reads.
+      const note = `[Console] This tab was proposed by ${agent.name} (id ${agent.id}), an agent in the tab "${store.tab(agent.tabId)?.name ?? ""}". It is linked to you: team_list shows it, and team_send and team_ask reach it by that id. Send it your result with team_send when the goal below is done; otherwise your final message is passed on to it once every agent of this tab has finished.\n\n`;
+      const team = createTeam(store, tab, setup, [], false, note);
+      const lead = team.agents[checked.goalTo];
+      store.settleProposal(
+        p.id,
+        { tabId: tab.id, leadId: lead.id, owed: !!checked.goal },
+        `[Console] The owner created the tab "${name}" you proposed${input.setup === undefined ? "" : ", with their own changes to its team"}: ${team.agents.map((a) => a.name).join(", ")}. ${lead.name} (id ${lead.id}) is linked to you: team_send and team_ask reach it by that id, and it sends you its result. Carry on meanwhile.`,
+      );
+      return { tab, ...team };
+    });
+  },
   saveTemplate(store, input) {
     // Templates: the tab's open agents and routes, as a team setup the
     // setup screen's checks accept, with optional steps (none sent: the
@@ -478,18 +555,28 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
       if (busy) throw new CommandError(`${busy} Move on once it is done.`);
       // A reviewer is any Code analysis agent but the Orchestrator, which
       // plans; an editor still at its starting commit has nothing to approve.
-      const reviewed = open.some((a) => a.permission === "look" && !isOrchestrator(a));
+      const reviewed = open.some(stepReviewer);
       const unapproved = editors.filter((a) => {
         const diff = store.diff(a.id);
         // No diff yet: the agent has not run, so nothing of it to approve
         // unless a commit of its own is recorded.
         if (diff ? diff.head === diff.base : !store.commits(a.id).length) return false;
         const approval = store.approval(a.id);
-        return !approval?.current || (reviewed && !approval.reviewerId);
+        // After a review by an agent whose review counts: never the
+        // Orchestrator's, which Changes does not offer there either.
+        const reviewer = approval?.reviewerId ? store.agent(approval.reviewerId) : undefined;
+        return !approval?.current || (reviewed && (!reviewer || isOrchestrator(reviewer)));
       });
       const names = unapproved.map((a) => a.name);
+      // Approved, but not after a review: said so, since "approve it
+      // first" reads as if the approval had not registered.
+      const unreviewed = unapproved.filter((a) => store.approval(a.id)?.current).map((a) => a.name);
+      if (unreviewed.length)
+        throw new CommandError(
+          `${unreviewed.join(" and ")}: the current commit is approved, but not after a review. With a reviewer in the tab, a step moves on only after an approval that follows the review: open Changes from that agent's window menu and approve it again, after the reviewer's review.`,
+        );
       if (names.length === 1)
-        throw new CommandError(`Approve ${names[0]}'s current commit${reviewed ? ", after the reviewer's review," : ""} first (in Changes).`);
+        throw new CommandError(`Approve ${names[0]}'s current commit${reviewed ? ", after the reviewer's review," : ""} first (in Changes, from its window's menu).`);
       if (names.length)
         throw new CommandError(
           `Approve the current commits of ${names.slice(0, -1).join(", ")} and ${names.at(-1)}${reviewed ? ", each after a reviewer's review," : ""} first (in Changes).`,
@@ -575,6 +662,13 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     if (!path) throw new CommandError("That is not a file in this agent's folder.");
     return { readId: store.queueRead(agent.id, path) };
   },
+  listFiles(store, input) {
+    // The folder's files, for the panel to open; read by the worker as the
+    // agent, as a file is.
+    const agent = store.agent(id(input.agentId, "Agent"));
+    if (!agent?.folder) throw new CommandError("That agent has no folder yet.");
+    return { readId: store.queueRead(agent.id, FOLDER_LISTING) };
+  },
   push(store, input) {
     const agent = store.agent(id(input.agentId, "Agent"));
     if (!agent || agent.state !== "ready") throw new CommandError("That agent is not ready.");
@@ -595,6 +689,11 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   },
   archive: archiveOrRestore,
   restore: archiveOrRestore,
+  recheckProject(store, input) {
+    // After the repository was fixed on GitHub: the worker checks it again.
+    store.recheckProject(id(input.id, "Project"));
+    return { rechecking: true };
+  },
   createTab(store, input, options) {
     // From a template: checked before the tab is made.
     const template = input.templateId ? allTemplates(store).find((t) => t.id === input.templateId) : undefined;
@@ -684,6 +783,15 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     store.setSpendLimit(id(input.tabId, "Tab"), limit, options.freshCode === true);
     return { tab: store.tab(String(input.tabId)) };
   },
+  setTurnLimits(store, input, options) {
+    const limits = turnLimitsInput(input.turns, input.minutes);
+    if (!limits)
+      throw new CommandError(
+        `Give the turns from 1 to ${TURN_LIMIT_MAX} and the time from ${TIME_LIMIT_MIN_MIN} minutes to ${TIME_LIMIT_MAX_MIN / 60} hours, or leave either at its default.`,
+      );
+    store.setTurnLimits(id(input.tabId, "Tab"), limits.turns, limits.minutes, options.freshCode === true);
+    return { tab: store.tab(String(input.tabId)) };
+  },
   resetSpend(store, input) {
     store.resetSpend(id(input.tabId, "Tab"));
     return { reset: true };
@@ -697,6 +805,17 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   resetConsoleSpend(store) {
     store.resetConsoleSpend();
     return { spend: store.consoleSpend() };
+  },
+  setAi(store, input) {
+    // An agent's model and thinking level, checked as New agent checks
+    // them; the kind is not changed here.
+    const agent = store.agent(id(input.agentId, "Agent"));
+    if (!agent || agent.state === "closed") throw new CommandError("That agent is closed.");
+    const model = agentModel(agent.kind, input.model);
+    if (!model) throw new CommandError(`${agentKind(agent.kind)?.label ?? agent.kind} does not offer that model.`);
+    const effort = input.effort === undefined || input.effort === null || input.effort === "" || input.effort === "default" ? null : (input.effort as ConsoleEffort);
+    if (effort && !model.efforts.includes(effort)) throw new CommandError(`${model.label} does not offer that thinking level.`);
+    return { agent: store.setAgentAi(agent.id, model.id, effort) };
   },
   setAskFirst(store, input) {
     if (typeof input.on !== "boolean") throw new CommandError("Say on or off.");

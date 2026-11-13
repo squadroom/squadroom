@@ -1,4 +1,4 @@
-import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, USAGE_PAUSE, type ConsoleAgent } from "../types.ts";
+import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, USAGE_PAUSE, turnLimits, type ConsoleAgent } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { consoleSpendPauseReason, consoleSpendRaisedReason, spendPauseReason, spendRaisedReason } from "../spend.ts";
 
@@ -215,6 +215,21 @@ export const pause = {
       if (Number(paused.n))
         this.run("UPDATE console_tabs SET pause_reason = ? WHERE paused = 1 AND substr(pause_reason, 1, ?) = ?", consoleSpendRaisedReason(this.consoleSpend().usd, null), CONSOLE_SPEND_PAUSE.length, CONSOLE_SPEND_PAUSE);
     }, epoch);
+  },
+
+  /** A tab's own turn limits: null keeps the default. As with
+   * the spend limit, a raise without a fresh code is refused in the
+   * transaction that reads the limits, and setting them never lifts a
+   * pause: a tab paused at its old limit waits for Resume. */
+  setTurnLimits(this: ConsoleStore, tabId: string, turns: number | null, minutes: number | null, mayRaise: boolean) {
+    this.transaction(() => {
+      const tab = this.tab(tabId);
+      if (!tab) throw new Error("That tab does not exist.");
+      const before = turnLimits(tab);
+      const after = turnLimits({ turnLimit: turns, timeLimitMin: minutes });
+      if ((after.turns > before.turns || after.ms > before.ms) && !mayRaise) throw new Error("The limits changed meanwhile; set them again.");
+      this.run("UPDATE console_tabs SET turn_limit = ?, time_limit_min = ? WHERE id = ?", turns, minutes, tabId);
+    });
   },
 
   // ── The Console-wide spend limit ───────────────────────────────────────

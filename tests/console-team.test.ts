@@ -391,6 +391,43 @@ test("the stall check pauses a tab whose agents are all idle while an ask is ope
   );
 });
 
+test("a tab's own turn limit replaces the default", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  const reviewer = h.agent("Reviewer");
+  await h.ready(lead.id, reviewer.id);
+  runCommand(h.store, { action: "setTurnLimits", tabId: h.tab.id, turns: 2, minutes: null });
+  await h.ended(h.send(lead.id, "team_send Reviewer bounce"));
+  await h.until(() => h.store.pauseReason("tab", h.tab.id) !== null, "paused at the tab's limit");
+  assert.match(h.store.pauseReason("tab", h.tab.id)!, /^Limit reached: one instruction caused 2 agent turns \(the limit is 2\)/);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id, mode: "now" });
+});
+
+test("a turn limit lowered while a team turn waits for a slot holds that turn too", async (t) => {
+  const h = await harness(t, { runningTurns: 1 });
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  const reviewer = h.agent("Reviewer");
+  const busy = h.agent("Busy");
+  await h.ready(lead.id, reviewer.id, busy.id);
+  // Lead's message to Reviewer becomes a team turn behind Busy's, which holds the only slot.
+  const first = h.send(lead.id, "team_send Reviewer hello");
+  const hang = h.send(busy.id, "helperhang");
+  await h.ended(first);
+  await h.started(hang);
+  const waiting = () => h.store.openTurns().find((x) => x.agentId === reviewer.id);
+  await h.until(() => waiting()?.status === "queued", "Reviewer's team turn waits");
+  runCommand(h.store, { action: "setTurnLimits", tabId: h.tab.id, turns: 1, minutes: null });
+  runCommand(h.store, { action: "stop", agentId: busy.id });
+  await h.until(() => h.store.pauseReason("tab", h.tab.id) !== null, "paused at the lowered limit");
+  assert.match(h.store.pauseReason("tab", h.tab.id)!, /^Limit reached: one instruction caused 2 agent turns \(the limit is 1\)/);
+  assert.equal(waiting()?.status, "queued");
+  // Resume lets it run, as at any limit.
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.until(() => !waiting(), "it ran after Resume");
+});
+
 test("the turn limit per instruction pauses the tab; Resume lets the team continue", async (t) => {
   const h = await harness(t, { turnsPerInstruction: 3 });
   await h.worker.start();

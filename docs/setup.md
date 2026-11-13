@@ -285,9 +285,11 @@ mail must be configured.
 
 - **`CLAUDE_CODE_OAUTH_TOKEN`**: the token from step 4. No cap.
 - **`CONSOLE_GIT_TOKEN`** (for GitHub projects): a fine-grained token for
-  the chosen repositories with **Contents: read and write** and, to open
-  pull requests, **Pull requests: read and write**. The worker uses it only
-  in its own mirror; it never reaches an agent.
+  the chosen repositories with **Contents: read and write**, to open
+  pull requests **Pull requests: read and write**, and, so agents can read
+  a pull request's checks with `team_checks`, **Actions: Read-only**. The
+  worker uses it only in its own mirror and for these calls; it never
+  reaches an agent.
 - **Paid API keys** (`XAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`,
   `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `MOONSHOT_API_KEY`,
   `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `KREA_API_KEY`, …): each needs the
@@ -319,7 +321,15 @@ without any model request.
   force pushes and updates without a pull request. The ruleset's bypass
   list must not include the token's own user (GitHub must report
   `current_user_can_bypass: never`). Create the branch and the ruleset
-  first.
+  first, on GitHub or with
+  `npm run console:prepare-repo -- owner/name [base branch]`. That command
+  uses your own `gh` sign-in (`gh auth login`, as an admin of the
+  repository), not the Console's token. It creates the base branch if it
+  is missing (an empty repository first gets a README), adds a ruleset
+  named "Squadroom base" unless one already names the branch, and then
+  runs the worker's check. If a project's check failed, fix the repository
+  and press **Check again** beside the error (the command does that for
+  you for projects on that repository and branch).
 - **A new empty folder** for each agent (a local repository on the Mac
   stands in for GitHub, so agents share one history).
 - **No project files**: agents that only talk (Code analysis).
@@ -374,6 +384,29 @@ Things to know while using it:
   `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.
+- **Files** (a window's ⋯ menu) lists the files in the agent's folder as
+  they are now, committed or not, Markdown documents first, with a filter
+  by name. A file opens in the panel beside the conversation, and **Files**
+  in the panel goes back to the list. Ignored files are not listed, and at
+  most 2,000 are.
+- **Model…** (a window's ⋯ menu) changes an agent's model and thinking
+  level. Its AI (Claude Code, Codex, …) stays the same. A turn that is
+  running finishes as it began; the next one starts a new process with the
+  new model, in the same conversation.
+- **Checks.** In a GitHub project an editing agent can read the GitHub
+  Actions checks of its pull request's latest pushed commit with
+  `team_checks`, and the end of one job's log with `team_checks(job: n)`.
+  The token needs **Actions: Read-only** (step 8). Nothing tells an agent
+  when checks finish; it looks again in a later turn.
+- **Proposed tabs.** An agent can propose a new tab with its own team
+  (`team_propose_tab`). You find it in Needs you: **Create** makes the tab
+  and team as proposed, **Edit…** opens the team in the setup screen so
+  you can change it first, and **Decline** drops it. The agent is told
+  which you chose. The new tab's Orchestrator (or a pair's Lead) and the
+  agent that proposed it can then message each other, and the new tab's
+  result is sent back to that agent when its team has finished. There is
+  no limit on how many tabs agents may propose; none exists until you
+  create it.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
 - **Tabs with steps** (from a template such as **Document review**): each
@@ -402,7 +435,10 @@ Things to know while using it:
   Changes (an agent that changed nothing, or has not run yet, has nothing to
   approve), after a
   reviewer's review when the tab has a Code analysis agent other than the
-  Orchestrator.
+  Orchestrator. In such a tab Changes offers only an approval after a
+  review, and a commit approved without one can be approved again after
+  the review. Agents are told at the start of each turn that only you move
+  the tab to the next step, and that a push or a merge doesn't.
 - **Clean up** (or `npm run console:cleanup`) lists folders no open agent
   uses, with commits never pushed marked; nothing is removed until you
   confirm.
@@ -600,11 +636,13 @@ with until then.
 | Stored output per tool call | 64 KB | Cut, with a note |
 | Stored events per turn | 4 MB | The turn stops ("Output limit") |
 | One line of a client's output | 8 MB | The line is dropped and the turn stops ("Output limit"); a Codex server that prints one is ended, with every turn on it |
-| Agent turns caused by one message of yours (through team messages) | 40 | The tab pauses; Resume continues |
-| Time one message of yours keeps the team going | 2 h | The tab pauses; Resume continues |
+| Agent turns caused by one message of yours (through team messages); set per tab in its menu, **Turn limits…** | 40 unless you set another; 1 to 1,000 | The tab pauses; Resume continues |
+| Time one message of yours keeps the team going; set in the same dialog | 2 h unless you set another; 5 min to 24 h | The tab pauses; Resume continues |
 | Two agents messaging with no new commit or message from you | 12 messages | The tab pauses (the circle detector) |
 
-Time waiting for you (Needs you) does not count toward a turn's limits.
+Raising a tab's turn limits asks for a recent e-mailed code, as raising a
+spend limit does; lowering them doesn't, and changing them never lifts a
+pause. Time waiting for you (Needs you) does not count toward a turn's limits.
 The spend check runs after each turn, so a tab can overshoot by the turns
 already running; the provider's cap is the hard ceiling.
 
