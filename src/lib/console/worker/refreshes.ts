@@ -53,15 +53,16 @@ export const refreshes = {
   },
   /** Each commit from `from` (excluded) to `to`, once: a merge by what it
    * brought onto its first parent (its source's claims excepted), any other
-   * commit by what it changed. */
+   * commit by what it changed; a merge of the base branch by what differs
+   * from both sides (the agent's own edits while resolving it). */
   async checkRange(this: ConsoleWorker, agent: ConsoleAgent, from: string | null, to: string): Promise<void> {
     if (this.claimChecked.size > 10_000) this.claimChecked.clear();
-    const commits = await this.repos.commitsBetween(agent, from, to).catch(() => [] as { sha: string; parents: string[] }[]);
+    const commits = await this.repos.commitsBetween(agent, from, to).catch(() => [] as Awaited<ReturnType<typeof this.repos.commitsBetween>>);
     for (const c of commits) {
       if (this.claimChecked.has(c.sha)) continue;
       this.claimChecked.add(c.sha);
       if (!this.store.claims(agent.tabId).some((x) => x.agentId !== agent.id)) continue;
-      const files = await (c.parents.length > 1 ? this.repos.diffPaths(agent, c.parents[0], c.sha) : this.repos.changedPaths(agent, c.sha)).catch(() => [] as string[]);
+      const files = await (c.parents.length > 1 && !c.ofBase ? this.repos.diffPaths(agent, c.parents[0], c.sha) : this.repos.changedPaths(agent, c.sha)).catch(() => [] as string[]);
       this.claimNotices(agent, files, this.mergeSources.get(c.sha) ?? null);
     }
   },

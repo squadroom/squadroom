@@ -195,17 +195,18 @@ export class Repos {
     }
   }
   /** The commits a turn added to the agent's branch. The base branch's own
-   * history, and a merge of it, are GitHub's, not the agent's. */
-  async commitsBetween(agent: ConsoleAgent, from: string | null, to: string) {
+   * history is GitHub's, not the agent's; a merge of it (`ofBase`) is the
+   * agent's only in what it changed while resolving it. */
+  async commitsBetween(agent: ConsoleAgent, from: string | null, to: string): Promise<{ sha: string; parents: string[]; ofBase?: boolean }[]> {
     const clone = this.clone(agent);
     const base = this.o.store.agentBase(agent.id).baseCommit;
     const commits = await clone.commitsBetween(from, to, base);
     if (!base) return commits;
-    const own: typeof commits = [];
+    const own: { sha: string; parents: string[]; ofBase?: boolean }[] = [];
     for (const c of commits) {
       let ofBase = false;
       for (const p of c.parents.slice(1)) ofBase ||= await clone.contains(p, base);
-      if (!ofBase) own.push(c);
+      own.push(ofBase ? { ...c, ofBase } : c);
     }
     return own;
   }
@@ -416,6 +417,7 @@ export class Repos {
     const message = `Merge ${what} into ${me.name}'s branch\n\nAgent: ${me.name} (${me.id})\nConsole-Turn: ${turnId}`;
     if (!(await mine.merge(ref, message, me.name, me.id))) return { state: "conflicts", sha: null, files: await mine.unmerged(), committed, before, base };
     if (base) this.o.store.setAgentBase(epoch, me.id, this.o.store.agentBase(me.id).branch, base);
+    else await this.tookBase(me, epoch);
     const head = await mine.head();
     if (!head || head === before) {
       if (base) await this.refreshDiff(me, epoch);
@@ -423,6 +425,12 @@ export class Repos {
     }
     await this.record(me, turnId, head, epoch);
     return { state: "merged", sha: head, files: [], committed, before, base };
+  }
+  /** A teammate's work may hold the base branch's latest commit: the branch
+   * that took it in is compared with it from now, as after a pull of it. */
+  private async tookBase(agent: ConsoleAgent, epoch: number) {
+    const tip = this.o.store.baseMoved(agent);
+    if (tip && (await this.clone(agent).contains(tip))) this.o.store.setAgentBase(epoch, agent.id, this.o.store.agentBase(agent.id).branch, tip);
   }
   /** team_pull_abort: the branch goes back to how it was before the pull. */
   async abortPull(me: ConsoleAgent) {
@@ -486,6 +494,7 @@ export class Repos {
       // A merge of the base branch that the branch now holds: the branch is
       // compared with it from now.
       if (merged.base && (await clone.contains(merged.base))) this.o.store.setAgentBase(epoch, agent.id, this.o.store.agentBase(agent.id).branch, merged.base);
+      else if (!merged.base) await this.tookBase(agent, epoch);
       this.o.store.setMerging(epoch, agent.id, null);
     }
     if (!sha) return null;

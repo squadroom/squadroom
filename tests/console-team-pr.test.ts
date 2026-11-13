@@ -661,6 +661,55 @@ test("the Console notices that GitHub's base branch moved: the editing agent is 
   assert.equal(moved(late.id), null);
   assert.equal(moved(lead.id), "main");
   assert.equal(await echo("sixth"), `echo: ${note}sixth`);
+  // A teammate's branch that holds the new commits brings them too.
+  writeFileSync(join(h.store.agent(late.id)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  merge("third.md");
+  await h.worker.checkBases();
+  assert.equal(moved(late.id), "main");
+  await h.ended(h.send(late.id, "told"));
+  await h.ended(h.send(lead.id, "write fix.txt"));
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  await h.ended(h.send(late.id, call("team_pull", { from: "Lead" })));
+  assert.match(h.said(late.id).at(-1)!, /^team_pull: Merged Lead's work/);
+  assert.equal(moved(late.id), null);
+  assert.equal(h.store.agentBase(late.id).baseCommit, h.store.agentBase(lead.id).baseCommit);
+});
+
+// What the agent itself changes while it resolves a conflicted merge of the
+// base branch is its own edit, checked against its teammates' claims.
+test("a conflicted merge of the base branch: the files the agent changed in it are checked against claims, the base's own files are not", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  const peer = h.agent("Peer");
+  await h.ready(lead.id, peer.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  writeFileSync(join(folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  await h.ended(h.send(lead.id, "write design.md"));
+  await h.until(() => h.store.commits(lead.id).some((c) => c.files.includes("design.md")), "design.md committed");
+  await h.ended(h.send(peer.id, call("team_claim", { paths: ["*.md"], note: "Peer's" })));
+  const work = join(bare, "..", "work");
+  for (const file of ["design.md", "base-only.md"]) {
+    writeFileSync(join(work, file), "# From GitHub\n");
+    git(work, "add", file);
+    git(work, "-c", "user.name=Owner", "-c", "user.email=o@x", "commit", "--quiet", "-m", `merge ${file}`);
+  }
+  git(work, "push", "--quiet", bare, "main");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /has conflicts in: design\.md\./);
+  writeFileSync(join(folder, "design.md"), "# Both\n");
+  writeFileSync(join(folder, "extra.md"), "# Unrelated\n");
+  await h.ended(h.send(lead.id, "say resolved"));
+  await h.until(() => !h.store.merging(lead.id), "merge committed");
+  await h.until(() => needsView(h.store).notices.some((n) => n.text.startsWith("Lead changed design.md, extra.md, which Peer has claimed")), "the agent's edits in the merge flagged");
+  assert.ok(!needsView(h.store).notices.some((n) => n.text.includes("base-only.md")));
 });
 
 test("a proposed tab warns when the proposing agent's branch has work that is not on GitHub's base branch", async (t) => {
