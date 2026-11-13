@@ -417,10 +417,12 @@ export class Repos {
     const message = `Merge ${what} into ${me.name}'s branch\n\nAgent: ${me.name} (${me.id})\nConsole-Turn: ${turnId}`;
     if (!(await mine.merge(ref, message, me.name, me.id))) return { state: "conflicts", sha: null, files: await mine.unmerged(), committed, before, base };
     if (base) this.o.store.setAgentBase(epoch, me.id, this.o.store.agentBase(me.id).branch, base);
-    else await this.tookBase(me, epoch);
+    // Changes compares with the base commit: a new one shows a new diff,
+    // also when the pull itself brought nothing.
+    const rebased = !!base || (await this.tookBase(me, epoch));
     const head = await mine.head();
     if (!head || head === before) {
-      if (base) await this.refreshDiff(me, epoch);
+      if (rebased) await this.refreshDiff(me, epoch);
       return { state: "current", sha: head, files: [], committed, before, base };
     }
     await this.record(me, turnId, head, epoch);
@@ -430,7 +432,9 @@ export class Repos {
    * that took it in is compared with it from now, as after a pull of it. */
   private async tookBase(agent: ConsoleAgent, epoch: number) {
     const tip = this.o.store.baseMoved(agent);
-    if (tip && (await this.clone(agent).contains(tip))) this.o.store.setAgentBase(epoch, agent.id, this.o.store.agentBase(agent.id).branch, tip);
+    if (!tip || !(await this.clone(agent).contains(tip))) return false;
+    this.o.store.setAgentBase(epoch, agent.id, this.o.store.agentBase(agent.id).branch, tip);
+    return true;
   }
   /** team_pull_abort: the branch goes back to how it was before the pull. */
   async abortPull(me: ConsoleAgent) {
