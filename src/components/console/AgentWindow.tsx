@@ -15,7 +15,8 @@ import BlockView, { StepsView } from "./BlockView";
 import Icon from "@/components/shared/Icon";
 import InlineRename from "./InlineRename";
 import KindBadge from "./KindBadge";
-import { MenuButton, type MenuItem } from "./Menu";
+import { MenuButton } from "./Menu";
+import { agentMenu, modelMenu } from "@/lib/console/menus";
 import { useComposer } from "./useComposer";
 import styles from "./console.module.css";
 
@@ -31,8 +32,6 @@ export default function AgentWindow({
   maximized,
   onMaximize,
   onChanges,
-  onModel,
-  onNetwork,
   onOpenFile,
   onOpenHelper,
   run,
@@ -43,10 +42,7 @@ export default function AgentWindow({
   maximized: boolean;
   onMaximize: () => void;
   onChanges: () => void;
-  /** Change its model and thinking level. */
-  onModel: () => void;
   /** Its Network setting, Ask or Auto. */
-  onNetwork: () => void;
   onOpenFile: (agentId: string, path: string) => void;
   onOpenHelper: (helperId: number, name: string) => void;
   run: Run;
@@ -71,57 +67,17 @@ export default function AgentWindow({
   const [renaming, setRenaming] = useState(false);
   // The window's menu, shown by the same Menu component as a tab's menu and Add.
   const turning = agent.status === "working" || agent.status === "needs_you";
-  const menu: MenuItem[] = [
-    { label: "Changes", hint: "Its commits and changed files", onSelect: onChanges },
-    { label: "Files", hint: "Read its documents and other files", disabled: !agent.folder, onSelect: () => onOpenFile(agent.id, FOLDER_LISTING) },
-    { label: "Model…", hint: `${model?.label ?? agent.model}${agent.effort ? `, thinking ${agent.effort}` : ""}`, onSelect: onModel },
-    { label: "Rename", hint: "Or double-click its name", onSelect: () => setRenaming(true) },
-    { label: "Stop", hint: "Ends its turn", disabled: !busy, onSelect: () => void run({ action: "stop", agentId: agent.id }) },
-    {
-      label: "Force stop",
-      hint: otherCodexRunning > 0 ? `Also stops ${plural(otherCodexRunning, "other Codex window")}` : "Ends the turn at once",
-      danger: true,
-      disabled: !busy,
-      onSelect: confirmed(
-        `Force stop ${agent.name}?${
-          otherCodexRunning > 0
-            ? ` Codex windows share one server, so this also stops ${plural(otherCodexRunning, "other running Codex window")}; their messages go to Needs you for a Re-send.`
-            : ""
-        }`,
-        { action: "stop", agentId: agent.id, force: true },
-      ),
-    },
-    ...(agent.kind === "claude-code" || agent.askFirst
-      ? [
-          {
-            label: agent.askFirst ? "Turn Ask me first off" : "Turn Ask me first on",
-            hint: "Its file changes and commands wait for you in Needs you, as web access always does. Team tools (such as pulling teammates' work) and image tools don't wait.",
-            onSelect: () => void run({ action: "setAskFirst", agentId: agent.id, on: !agent.askFirst }),
-          },
-        ]
-      : []),
-    // Where the Console decides each network request.
-    ...(networkAutoKind(agent.kind) || agent.networkAuto
-      ? [{ label: "Network…", hint: agent.networkAuto ? "Auto: reaches any website without asking" : "Ask: each website waits for you", onSelect: onNetwork }]
-      : []),
-    {
-      label: "Forget its Always rules",
-      hint: "Requests you allowed with Always are asked again",
-      onSelect: confirmed(`Forget every "Always for this agent" rule of ${agent.name}? It will ask again.`, { action: "forgetRules", agentId: agent.id }),
-    },
-    {
-      label: "Start fresh",
-      hint: "A new conversation; folder and branch stay",
-      // A queued message may start fresh; a running turn may not.
-      disabled: turning,
-      onSelect: confirmed(`Start ${agent.name} fresh? Its next message begins a new conversation; its folder and branch stay as they are.`, {
-        action: "fresh",
-        agentId: agent.id,
-      }),
-    },
-    { label: "Fresh session with summary", hint: "Costs one turn: it summarises, then starts anew", disabled: turning || agent.summaryWaiting, onSelect: freshWithSummary },
-    { label: "Close", hint: "Its folder stays on the Mac", danger: true, onSelect: confirmed(`Close ${agent.name}? Its folder stays on the Mac.`, { action: "close", agentId: agent.id }) },
-  ];
+  const menu = agentMenu(agent, {
+    otherCodexRunning,
+    busy,
+    turning,
+    run,
+    confirmed,
+    freshWithSummary,
+    onChanges,
+    onFiles: () => onOpenFile(agent.id, FOLDER_LISTING),
+    onRename: () => setRenaming(true),
+  });
   // A window opens at its latest message and follows new output while the
   // reader stays at the end; scrolling up stops that until ↓ (or
   // scrolling back down). The end is held through anything that changes the
@@ -240,10 +196,18 @@ export default function AgentWindow({
             {agent.name}
           </strong>
         )}
-        <span className={styles.chip}>
+        {/* Its model and thinking level; the chip opens their menu. */}
+        <MenuButton
+          className={`${styles.chip} ${styles.modelChip}`}
+          label={`${agent.name}'s model`}
+          note="Applies from its next turn."
+          items={modelMenu(agent, run)}
+          start
+        >
           {model?.label ?? agent.model}
           {agent.effort ? ` · ${agent.effort}` : ""}
-        </span>
+          <Icon name="chevron" size={12} />
+        </MenuButton>
         <span className={styles.windowStatus}>
           <span className={`${styles.dot} ${styles[`dot_${agent.status}`] ?? ""}`} aria-hidden="true" />
           {STATUS_LABELS[agent.status]}
@@ -265,10 +229,28 @@ export default function AgentWindow({
           {PERMISSION_LABELS[agent.permission]}
           {agent.askFirst ? " · ask first" : ""}
         </span>
-        {agent.networkAuto && (
-          <button className={`${styles.chip} ${styles.networkAuto}`} title="Network auto: it reaches any website without asking. Click to change" onClick={onNetwork}>
-            Network auto
+        {/* Its Network setting, where the Console decides each network
+            request: one click switches it. */}
+        {(networkAutoKind(agent.kind) || agent.networkAuto) && (
+          <button
+            className={agent.networkAuto ? `${styles.chip} ${styles.networkAuto}` : styles.chip}
+            title={
+              agent.networkAuto
+                ? "Network auto: it reaches any website without asking. Click to go back to Ask"
+                : "Network ask: each website it wants to reach waits for you in Needs you. Click for Auto: it then reaches any website without asking, which also means it could send anything it can read to any site (needs a fresh code)"
+            }
+            onClick={() => void run({ action: "setNetwork", agentId: agent.id, auto: !agent.networkAuto })}
+          >
+            {agent.networkAuto ? "Network auto" : "Network ask"}
           </button>
+        )}
+        {agent.baseMoved && (
+          <span
+            className={`${styles.chip} ${styles.headerLine}`}
+            title={`${agent.baseMoved} on GitHub has commits this agent's branch does not have. It is told with its next message; team_pull(from: "${agent.baseMoved}") brings them in.`}
+          >
+            {agent.baseMoved} has new commits
+          </span>
         )}
         {/* One line however many claims: a chip per claim pushed the
             transcript and composer out of a short window. The Team panel

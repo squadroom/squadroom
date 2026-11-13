@@ -1,4 +1,5 @@
 import { agentKind, agentModel, type ConsoleEffort } from "./agents.ts";
+import { networkRequest } from "./permissions.ts";
 import { Redactor } from "./redact.ts";
 import { parseRepo, validBranch } from "./git.ts";
 import { FOLDER_LISTING, agentFilePath } from "./files.ts";
@@ -73,7 +74,7 @@ const ids = (value: unknown): number[] => {
 
 export type ConsoleCommand =
   | { action: "createProject"; name: string; source: "folder" | "none" | "github"; repo?: string; baseBranch?: string }
-  | { action: "decide"; requestId: number; decision: "allow" | "always" | "project" | "deny"; answer?: string }
+  | { action: "decide"; requestId: number; decision: "allow" | "always" | "project" | "auto" | "deny" | "again" | "dismiss"; answer?: string }
   | { action: "resend" | "dismiss"; turnId: number }
   | { action: "resendMessage" | "discardMessage"; messageId: number }
   | { action: "pause"; scope: "tab" | "project" | "all"; id?: string; mode?: "after" | "now" }
@@ -108,7 +109,7 @@ export type ConsoleCommand =
   | { action: "createAgent"; tabId: string; name: string; role?: string; kind: string; model: string; effort?: string | null; permission: string; askFirst?: boolean }
   | { action: "setAskFirst"; agentId: string; on: boolean }
   | { action: "setAi"; agentId: string; model: string; effort?: string | null }
-  | { action: "setNetwork"; agentId: string; auto: boolean }
+  | { action: "setNetwork"; agentId?: string; tabId?: string; auto: boolean }
   | { action: "addRoute"; tabId: string; from: string; to: string; phrase?: string }
   | { action: "removeRoute"; routeId: number }
   | { action: "send"; agentId: string; text: string; uploadIds?: number[] }
@@ -210,8 +211,9 @@ export function needsFreshCode(input: Record<string, unknown>, context: FreshCod
       return input.decision === "create" && context.askFirstInUse === true;
     case "createTab":
       return context.askFirstInUse === true && !!input.templateId;
+    // "auto" also switches the agent's Network to Auto.
     case "decide":
-      return input.decision === "always" || input.decision === "project";
+      return input.decision === "always" || input.decision === "project" || input.decision === "auto";
     case "cleanupDelete":
     // The project's network switch for ACP agents and a tab's Reset spend,
     // like raising a limit.
@@ -457,6 +459,23 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
       const answer = input.decision === "deny" ? null : text(input.answer, "Answer", PROMPT_MAX);
       if (!store.decideRequest(requestId, answer === null ? "deny" : "answer", answer === null ? null : new Redactor().text(answer)))
         throw new CommandError("That question was already answered or has closed.");
+      return { decided: true };
+    }
+    // One that closed unanswered: allowed for next time, sent back to be
+    // asked again, or dismissed.
+    if (request.state === "expired") {
+      const d = input.decision;
+      if (d !== "always" && d !== "project" && d !== "auto" && d !== "again" && d !== "dismiss")
+        throw new CommandError("That request got no answer in time. Allow it for next time, ask the agent to try again, or dismiss it.");
+      if (!store.settleExpired(requestId, d)) throw new CommandError("That request was already dealt with.");
+      return { decided: true };
+    }
+    // Allow it and switch its agent's Network to Auto, which allows every
+    // network request the agent has waiting, this one among them.
+    if (input.decision === "auto") {
+      if (request.state !== "open") throw new CommandError("That request was already decided or has closed.");
+      if (!networkRequest(request.tool, request.ruleKey)) throw new CommandError("Only network access is covered by the Network setting.");
+      store.setNetworkAuto(request.agentId, true);
       return { decided: true };
     }
     if (input.decision !== "allow" && input.decision !== "always" && input.decision !== "project" && input.decision !== "deny")
@@ -831,6 +850,12 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   },
   setNetwork(store, input) {
     if (typeof input.auto !== "boolean") throw new CommandError("Say Ask or Auto.");
+    // A tab: every agent of it that has the setting.
+    if (input.tabId !== undefined) {
+      const tab = store.tab(id(input.tabId, "Tab"));
+      if (!tab || tab.archivedAt !== null) throw new CommandError("That tab is closed.");
+      return { agents: store.setTabNetworkAuto(tab.id, input.auto) };
+    }
     return { agent: store.setNetworkAuto(id(input.agentId, "Agent"), input.auto) };
   },
   send(store, input) {

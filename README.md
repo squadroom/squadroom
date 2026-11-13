@@ -28,7 +28,8 @@ supported. There are no numbered releases yet: use the latest commit on
 A team is the group of agents on one piece of work. Each of them has team
 tools, and with them an agent can send a teammate a message (`team_send`),
 ask a question and get the answer back (`team_ask`, `team_reply`), merge in
-a teammate's work (`team_pull`), claim the files it's about to edit
+a teammate's work or, in a GitHub project, the latest base branch from
+GitHub (`team_pull`), claim the files it's about to edit
 (`team_claim`), ask a teammate to hold off (`team_hold`), ask you to push
 its branch and open a pull request (`team_push`), read the review on it
 (`team_pr`), and read the checks GitHub Actions ran on it, with the end of
@@ -57,13 +58,26 @@ In an agent's window, two or more tool rows in a row show as one line,
 such as "18 steps: 10 Edit, 5 Read, 2 Write, 1 Grep". Click it to see the
 rows. A run with a failed tool says so and starts open.
 
-Each website an agent wants to reach waits for you in Needs you. For a
-Claude Code or Codex agent you can change that in its menu, under
-**Network…**: on **Auto** the agent reaches any website without asking,
-each request is still noted in its window, and the window's header shows
-**Network auto** for as long as it is on. Turning Auto on needs a fresh
-e-mailed code. Read [the threat model](docs/threat-model.md) before you
-use it: an agent on Auto could send anything it can read to any site.
+Each website an agent wants to reach waits for you in Needs you. A Claude
+Code or Codex agent's window shows **Network ask** or **Network auto** in
+its header, and a click switches it. On **Auto** the agent reaches any
+website without asking, and each request is still noted in its window. A
+tab's menu has a **Network auto** switch for all its agents, and a network
+request in Needs you has **Allow, Network to Auto**. Turning Auto on needs
+a fresh e-mailed code. Read [the threat model](docs/threat-model.md)
+before you use it: an agent on Auto could send anything it can read to any
+site.
+
+A permission request closes when its turn ends, for example at a time
+limit while you were away. It then stays in Needs you, marked "got no
+answer". You can allow it for next time (the agent is told to try again),
+have the agent ask again, or dismiss it.
+
+In a GitHub project an agent's folder is filled once, when it is made.
+When the base branch gets new commits on GitHub afterwards, the agent's
+window says so ("main has new commits") and the agent is told with its
+next message. It brings them in with `team_pull(from: "main")`; nothing is
+merged by itself.
 
 An agent can also propose a new tab with a team of its own
 (`team_propose_tab`), for work that is better done apart. The proposal
@@ -112,8 +126,9 @@ with seven members.
   pair (a Lead and a Reviewer), or an Orchestrator with up to seven
   members, and you can add more agents by hand. Each agent has its own
   name, model and thinking level, and works at Code edit or Code analysis.
-  You can mix tools in one team. **Model…** in an agent's menu changes its
-  model and thinking level later; it keeps its conversation.
+  You can mix tools in one team. The model chip in an agent window's header
+  opens a list of models and thinking levels, to change them later; the
+  agent keeps its conversation.
 
 Up to six agent turns run at once across everything, and three per account
 or API key. Anything over that waits in a queue.

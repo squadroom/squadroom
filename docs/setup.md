@@ -360,7 +360,15 @@ Things to know while using it:
   in the tab's **Team** panel. You talk to the Orchestrator (or the pair's
   Lead), or to any agent in its window.
 - **Needs you** (top bar) collects every permission request, question, note
-  from an agent, interrupted turn and pause across projects. For `npm install` and the
+  from an agent, interrupted turn and pause across projects. A permission
+  request closes when its turn ends (a time limit, a Stop, a worker
+  restart); it then stays in Needs you marked "got no answer", with how
+  often it was asked. **Always for this agent**, **Always for this
+  project** and **Network to Auto** allow it for next time and tell the
+  agent to try again, **Ask again** has the agent ask it again now that
+  you are there, and **Dismiss** only removes it. Nothing can be allowed
+  once after the fact, and these rows send no notification of their own.
+  For `npm install` and the
   like, allow `registry.npmjs.org` with **Always for this project**. A
   command is shown whole, with its line breaks, and **Show all** shows
   everything the agent asked to do, exactly as **Allow once** would allow
@@ -368,7 +376,10 @@ Things to know while using it:
   folder by itself, and any request to write elsewhere is declined.
 - **Changes** (a window's ⋯ menu) shows each turn's commit; a commit's
   diff loads when you open it, and is always shown as text. Each commit's
-  message holds your whole request for that turn. In a GitHub project,
+  message holds your whole request for that turn. In a GitHub project the
+  commit's author is the agent's name with the GitHub no-reply address of
+  the account your token belongs to, so GitHub, and a service that deploys
+  from it, takes the commit as yours. In a GitHub project,
   **Push branch** pushes the agent's `console/…` branch, those messages
   included, through your mirror and opens or updates its pull request;
   **Open pull request** asks the agent to write the title and description
@@ -389,21 +400,38 @@ Things to know while using it:
   by name. A file opens in the panel beside the conversation, and **Files**
   in the panel goes back to the list. Ignored files are not listed, and at
   most 2,000 are.
-- **Model…** (a window's ⋯ menu) changes an agent's model and thinking
-  level. Its AI (Claude Code, Codex, …) stays the same. A turn that is
+- **The model chip** (a window's header) opens a list of the agent's
+  models and thinking levels. A choice is saved at once and closes the
+  list; a new model starts at its default thinking level. Its AI (Claude
+  Code, Codex, …) stays the same. A turn that is
   running finishes as it began; the next one starts a new process with the
   new model, in the same conversation.
-- **Network…** (a Claude Code or Codex window's ⋯ menu) sets how that
-  agent's network requests are handled. **Ask**, the default, puts each
-  website it wants to reach in Needs you. On **Auto** it reaches any
-  website without asking: its commands' network access, WebFetch and
-  WebSearch. Each request is still noted in its window, and the window's
-  header shows **Network auto** while it is on. Turning Auto on needs a
-  fresh e-mailed code, and allows the requests that agent has waiting.
+- **Network ask / Network auto** (a Claude Code or Codex window's header)
+  shows how that agent's network requests are handled, and a click
+  switches it. **Ask**, the default, puts each website it wants to reach
+  in Needs you. On **Auto** it reaches any website without asking: its
+  commands' network access, WebFetch and WebSearch. Each request is still
+  noted in its window. A tab's menu has a **Network auto** switch for
+  every agent of the tab that has the setting, and a network request in
+  Needs you has **Allow, Network to Auto**. Turning Auto on needs a fresh
+  e-mailed code wherever you do it, and allows the requests that agent has
+  waiting.
   Everything else is asked or refused as before. An agent on Auto could
   send anything it can read to any site, so keep it for agents whose
   folders hold nothing you would mind leaking. Other agents have no such
   setting; their network is the project's switch.
+- **The base branch on GitHub.** An agent's folder in a GitHub project is
+  filled once, when it is made, and has no Git remote. When the base
+  branch has commits the agent's branch does not have, its window shows
+  **main has new commits** (with your base branch's name) and its next
+  message starts with a line saying so. The agent brings them in with
+  `team_pull(from: "main")`; there is no button for it, and nothing is
+  merged by itself. The worker looks every ten minutes. This is not offered
+  in a tab with steps.
+- **Menus.** A menu row is one line: an icon, a name, and its current
+  value or a switch at the right. Hover over a row to read what it does.
+  **Ask me first** (an agent's menu), **Image tools** (the project's menu)
+  and **Network auto** (a tab's menu) are switches.
 - **Steer.** A message you send while an agent works waits in its queue.
   When the agent is Claude Code or Codex and its turn is running, your
   first queued message has a **Steer** button. Click it and the message
@@ -424,7 +452,10 @@ Things to know while using it:
   (`team_propose_tab`). You find it in Needs you: **Create** makes the tab
   and team as proposed, **Edit…** opens the team in the setup screen so
   you can change it first, and **Decline** drops it. The agent is told
-  which you chose. The new tab's Orchestrator (or a pair's Lead) and the
+  which you chose. In a GitHub project the proposal carries a warning when
+  the proposing agent's branch has changes of its own: the new tab's
+  folders are made from the base branch on GitHub, so its agents will not
+  have that work unless it has been merged there. The new tab's Orchestrator (or a pair's Lead) and the
   agent that proposed it can then message each other, and the new tab's
   result is sent back to that agent when its team has finished. There is
   no limit on how many tabs agents may propose; none exists until you

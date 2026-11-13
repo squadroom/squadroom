@@ -4,6 +4,9 @@
 
 export interface NeedsLike {
   requests: { id: number; agentName: string; kind: "permission" | "question"; tool: string; summary: string }[];
+  /** Requests that closed unanswered: counted in Needs you, but
+   * never a notification of their own (each had one while it was open). */
+  expired?: { id: number }[];
   interrupted: { id: number; agentName: string; prompt: string; reason: string | null }[];
   messages?: { id: number; from: string; to: string; text: string }[];
   paused?: { scope: string; id: string | null; name: string; reason: string }[];

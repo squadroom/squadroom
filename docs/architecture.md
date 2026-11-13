@@ -119,7 +119,12 @@ month it started too.
 - **One clone each.** Each agent works in
   `/Users/agent/work/<project>/<agent>`, a Git clone on its own
   `console/<id>-<name>` branch (a Code analysis agent sees the base branch). The
-  worker commits each turn as `agent` with hooks off. The commit message
+  worker commits each turn as `agent` with hooks off. In a GitHub project
+  the commit's author is the agent's name with the GitHub no-reply address
+  of the account the project's token belongs to (read once from `GET
+  /user` and kept; until GitHub has answered, an address of the agent's
+  own), so GitHub and services that deploy from it take the commit as
+  yours. The commit message
   holds your whole request for that turn (redacted), so **Push branch**
   publishes it on GitHub with the branch.
 - **Clients.** Claude Code (one process per window, `--setting-sources ""`
@@ -147,14 +152,24 @@ month it started too.
   with one test (`networkRequest` in `permissions.ts`), and each allow is
   stored with the request and shown in the transcript as "Network auto:".
   Switching to Auto also allows that agent's network requests already
-  waiting. Auto covers nothing else: writes, reads outside the folder,
+  waiting. `setNetwork` takes one agent or a tab (every agent of the tab
+  that has the setting), and the decision `auto` on a network request in
+  Needs you allows it and switches its agent to Auto. Auto covers nothing else: writes, reads outside the folder,
   unknown tools, Ask me first and pushes are decided as before. A
   path with a `..` part counts as outside it, and symbolic links are
   followed: one that leads out of the agent's folder counts as outside. An
   allow the Console cannot record is refused. Needs you shows a command
   whole, with its line breaks, marking any cut with …, and **Show all**
   shows the full stored input (up to 64 KB), which is exactly what Allow
-  once allows.
+  once allows. A permission request that closed unanswered (its turn
+  ended) stays in Needs you until the owner deals with it
+  (`expiredRequests`, `settleExpired`): one row for each agent and request,
+  with how often it was asked. It can be allowed for next time (Always for
+  the agent or the project, or Network to Auto), sent back to be asked
+  again, or dismissed; except for a dismissal the agent gets a message
+  saying so. Nothing is allowed once after the fact. A row also goes once
+  the same agent's later request for the same thing is answered or an
+  Always rule covers it.
   "Always" rules are the Console's own, never the client's, and a client
   tool's rule is kept under its own prefix (`client:<tool>`), apart from the
   Console's own decisions (`tool:team_push`, `tool:team_pr_reply`). Claude's
@@ -183,7 +198,16 @@ call the team tools (`team_send`, `team_ask`, `team_reply`, `team_read`,
 `team_pr`, `team_checks`, `team_report`, `team_propose_tab`, …). Messages
 are queued in the store and delivered together as one prompt when the
 recipient is free; nobody waits inside a tool call. Routes forward a
-finished turn's reply automatically. The circle detector and
+finished turn's reply automatically. In a GitHub project, `team_pull` with
+the base branch's name brings in the base branch as GitHub has it now: the
+worker checks the repository again, fetches into the owner's mirror and
+carries the branch to the agent's clone in the project's bundle, and the
+agent's changes are compared with the new base from then on. Every ten
+minutes the worker also asks GitHub where each project's base branch is
+(one `ls-remote`, nothing fetched, only for projects with an open editing
+agent). An editing agent whose branch does not have that commit shows a
+chip in its window and gets one line about it at the start of its next
+prompt, once for each new commit. The circle detector and
 per-instruction limits pause a tab whose agents keep each other busy
 without progress. The per-instruction limits (40 turns, two hours) are
 the defaults: a tab can have its own (`console_tabs.turn_limit`,

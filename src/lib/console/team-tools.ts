@@ -85,8 +85,8 @@ export const TEAM_TOOLS = [
   {
     name: "team_pull",
     description:
-      "Bring a teammate's latest committed work into your branch (their uncommitted edits never come along). Your own changes so far are committed first. A clean merge is committed for you; with conflicts, the files are listed: resolve the markers in your turn and the Console commits the merge when the turn ends, or call team_pull_abort.",
-    inputSchema: { type: "object", properties: { from: { type: "string", description: "The teammate's name or id." } }, required: ["from"] },
+      "Bring a teammate's latest committed work into your branch (their uncommitted edits never come along), or, in a GitHub project, the base branch as GitHub has it now: team_pull(from: \"main\"), with the base branch's own name. Your own changes so far are committed first. A clean merge is committed for you; with conflicts, the files are listed: resolve the markers in your turn and the Console commits the merge when the turn ends, or call team_pull_abort.",
+    inputSchema: { type: "object", properties: { from: { type: "string", description: "The teammate's name or id, or the base branch's name." } }, required: ["from"] },
   },
   {
     name: "team_pull_abort",
@@ -230,7 +230,7 @@ export const TEAM_NOTE = [
   "- team_diff(from, path?) to read a teammate's committed changes. You cannot open other agents' folders, so use this (or your own folder, if you are Code analysis) instead of asking anyone to paste a patch;",
   "- team_push(title, body) to ask the owner to push your branch and open its pull request, which may then get a Codex review (GitHub projects);",
   "- team_pr to read your pull request (Codex's findings, every comment in full; team_pr(comment: n) or team_pr(thread: id) for one long item), and team_pr_reply(thread, message, resolve) to answer a finding. team_push also replaces the pull request's title and description with the ones you give. team_checks shows the checks GitHub ran on your pull request's latest pushed commit, and team_checks(job: n) the end of a failed job's log: use them for what cannot run in your sandbox (other browsers, a local server). GitHub is reached only through these tools: there is no gh login or token in your sandbox, by design, so do not try gh, curl or the web for it;",
-  "- team_pull(from) to bring a teammate's committed work into your branch (team_pull_abort to give up a conflicted merge);",
+  "- team_pull(from) to bring a teammate's committed work into your branch (team_pull_abort to give up a conflicted merge). Your folder has no Git remote and never updates from GitHub by itself: in a GitHub project, team_pull with the base branch's name (usually main) brings in what was merged there since your folder was made. The owner has no button for that, so do not ask them to refresh your folder;",
   "- team_claim(paths, note) before editing shared areas, and team_release when done; respect teammates' claims;",
   "- team_hold(to, reason) to ask a teammate to hang on while you change something, and team_resume(to) afterwards;",
   "- team_propose_tab(name, goal, members) to propose a new tab with a team of its own for work better done apart. The owner creates, changes or declines it, and you are told which. An agent of another tab that team_list shows as linked to you takes team_send and team_ask like a teammate (give its id if its name is also a teammate's); the other team tools work only inside your tab.",

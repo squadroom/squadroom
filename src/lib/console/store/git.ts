@@ -1,4 +1,4 @@
-import type { ConsoleCommit, ConsoleJob } from "../types.ts";
+import type { ConsoleAgent, ConsoleCommit, ConsoleJob } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { job } from "./rows.ts";
 
@@ -7,7 +7,36 @@ const files = (v: unknown) => JSON.parse((v as string) || "[]") as string[];
 
 // The Git side (worker): turns' commits and progress, reviewer refreshes,
 // what a Code analysis folder was shown, diffs and push jobs.
+/** GitHub's base branch as the worker last saw it, by project, and the
+ * commit of it each agent was last told about: flags. */
+const BASE_TIP = "base-tip:";
+const BASE_TOLD = "base-told:";
+
 export const git = {
+  // ── The base branch on GitHub ───────────────────────────────
+  /** GitHub's base branch is at this commit: seen by the worker's check,
+   * or just fetched for an agent's folder or its team_pull. */
+  setBaseTip(this: ConsoleStore, epoch: number, projectId: string, sha: string) {
+    this.setFlag(BASE_TIP + projectId, sha, epoch);
+  },
+  /** The commit GitHub's base branch has moved to since this agent's branch
+   * last took it in, or null: for an editing agent of a GitHub project,
+   * whose changes are compared with an older commit of it. */
+  baseMoved(this: ConsoleStore, agent: ConsoleAgent): string | null {
+    if (agent.permission !== "edit" || this.project(agent.projectId)?.source !== "github") return null;
+    const tip = this.flag(BASE_TIP + agent.projectId);
+    const { branch, baseCommit } = this.agentBase(agent.id);
+    return tip && branch && baseCommit && tip !== baseCommit ? tip : null;
+  },
+  /** That commit, when the agent has not been told of it yet. */
+  baseNews(this: ConsoleStore, agent: ConsoleAgent): string | null {
+    const tip = this.baseMoved(agent);
+    return tip && this.flag(BASE_TOLD + agent.id) !== tip ? tip : null;
+  },
+  baseTold(this: ConsoleStore, epoch: number, agentId: string, sha: string) {
+    this.setFlag(BASE_TOLD + agentId, sha, epoch);
+  },
+
   setTurnCommit(this: ConsoleStore, epoch: number, turnId: number, which: "before" | "after", sha: string | null) {
     this.write(epoch, `UPDATE console_turns SET commit_${which} = ? WHERE id = ?`, sha, turnId);
   },

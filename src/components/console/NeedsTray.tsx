@@ -11,7 +11,10 @@ import styles from "./console.module.css";
 
 /** The Needs you tray's items, as the server sends them. */
 export type Needs = ReturnType<typeof needsView>;
-export const NO_NEEDS: Needs = { requests: [], interrupted: [], messages: [], paused: [], notices: [] };
+export const NO_NEEDS: Needs = { requests: [], expired: [], interrupted: [], messages: [], paused: [], notices: [] };
+
+const AUTO_TITLE = "Switch this agent's Network to Auto: it then reaches any website without asking, which also means it could send anything it can read to any site (needs a fresh code)";
+const PROJECT_TITLE = "Every agent in this project, now and later, may reach this host (a package registry, say)";
 
 /** Needs you: permission requests, questions and interrupted turns
  * across every project. A panel beside the windows, not a dialog:
@@ -75,7 +78,7 @@ export default function NeedsTray({
       </header>
       {needCount(needs) === 0 && <p className={styles.hint}>Nothing is waiting for you.</p>}
       {needs.requests.map((r) => {
-        const decide = (decision: "allow" | "always" | "project" | "deny", answer?: string): ConsoleCommand => ({ action: "decide", requestId: r.id, decision, answer });
+        const decide = (decision: "allow" | "always" | "project" | "auto" | "deny", answer?: string): ConsoleCommand => ({ action: "decide", requestId: r.id, decision, answer });
         return (
           <div key={r.id} className={styles.need}>
             <p>
@@ -102,11 +105,33 @@ export default function NeedsTray({
                 </button>
                 {act("Deny", decide("deny"))}
                 {r.canAlways && act("Always for this agent", decide("always"))}
-                {r.canProject &&
-                  act("Always for this project", decide("project"), false, "Every agent in this project, now and later, may reach this host (a package registry, say)")}
+                {r.canProject && act("Always for this project", decide("project"), false, PROJECT_TITLE)}
+                {r.canAuto && act("Allow, Network to Auto", decide("auto"), false, AUTO_TITLE)}
                 {act("Allow once", decide("allow"), true)}
               </div>
             )}
+          </div>
+        );
+      })}
+      {/* Requests that closed before the owner answered. */}
+      {needs.expired.map((r) => {
+        const decide = (decision: "always" | "project" | "auto" | "again" | "dismiss"): ConsoleCommand => ({ action: "decide", requestId: r.id, decision });
+        const told = "its next try passes without asking, and it is told to try again";
+        return (
+          <div key={`x${r.id}`} className={styles.need}>
+            <p>
+              <b>{r.agentName}</b> {project(r.projectId)} · got no answer{r.count > 1 ? `, asked ${r.count} times` : ""} ·{" "}
+              {new Date(r.expiredAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}
+            </p>
+            <p className={styles.needText}>{r.summary}</p>
+            <div className={styles.dialogButtons}>
+              {show(r.agentId, led)}
+              {act("Dismiss", decide("dismiss"), false, "Take it off this list; nothing is allowed and the agent is not told")}
+              {act("Ask again", decide("again"), false, "Tell the agent you are here now, so it asks again and you can answer")}
+              {r.canAlways && act("Always for this agent", decide("always"), false, `For this agent: ${told}`)}
+              {r.canProject && act("Always for this project", decide("project"), false, `${PROJECT_TITLE}: ${told}`)}
+              {r.canAuto && act("Network to Auto", decide("auto"), false, `${AUTO_TITLE}; it is told to try again`)}
+            </div>
           </div>
         );
       })}
@@ -116,6 +141,7 @@ export default function NeedsTray({
             <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : "note"}
           </p>
           <p className={styles.needText}>{n.text}</p>
+          {n.warning && <p className={styles.warning}>{n.warning}</p>}
           <div className={styles.dialogButtons}>
             {show(n.agentId, n.proposal ? led : undefined)}
             {n.proposal ? (

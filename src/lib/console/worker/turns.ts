@@ -118,7 +118,13 @@ export const turns = {
     // A tab with steps: the step, and the files it may change.
     const stepped = this.store.tabSteps(rt.agent.tabId);
     const step = stepped ? stepNote(stepped, rt.agent.permission === "edit") : "";
-    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${t.prompt}`;
+    // GitHub's base branch moved: said once for each new commit
+    // of it, where team_pull is offered (not in a tab with steps).
+    const baseNews = stepped || !project ? null : this.store.baseNews(rt.agent);
+    const baseNote = baseNews
+      ? `${project!.baseBranch} on GitHub has new commits that your branch does not have yet. team_pull(from: "${project!.baseBranch}") brings them in.\n\n`
+      : "";
+    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${baseNote}${t.prompt}`;
     // Recorded only once the client has accepted the turn (which an
     // unacknowledged start proves later, or never).
     let spent = false;
@@ -132,6 +138,7 @@ export const turns = {
       if (carried) this.safe(() => this.store.spendSummary(this.epoch!, rt.agent.id, carried));
       if (shown.length) this.safe(() => this.store.clearShown(this.epoch!, rt.agent.id, shown));
       if (uploads.length) this.safe(() => this.store.markDelivered(this.epoch!, uploads.map((u) => u.id), t.id));
+      if (baseNews) this.safe(() => this.store.baseTold(this.epoch!, rt.agent.id, baseNews));
     };
     const session = this.ensureSession(rt);
     // Before the paid request is handed over: the durable mark must succeed,

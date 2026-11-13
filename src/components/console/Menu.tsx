@@ -1,17 +1,28 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Icon, { type IconName } from "@/components/shared/Icon";
 import styles from "./console.module.css";
 
 // The Console's menus: the status control, the project's menu, Add, a tab's
-// menu and an agent window's ⋯. A short list over the page at a point
-// (under a button, or where a tab was right-clicked or long-pressed), worked
-// with the mouse, touch or the keyboard: arrows move, Enter chooses, Escape
-// closes. What each menu holds is built in `src/lib/console/menus.ts`.
+// menu, an agent window's ⋯ and its model chip. A short list over the page
+// at a point (under a button, or where a tab was right-clicked or
+// long-pressed), worked with the mouse, touch or the keyboard: arrows move,
+// Enter chooses, Escape closes. What each menu holds is built in
+// `src/lib/console/menus.ts`.
 
 export interface MenuItem {
   label: string;
-  /** One line under the label saying what it does. */
+  /** A small heading above it: the start of a named group. */
+  heading?: string;
+  /** Its current setting, at the right. */
+  value?: string;
+  /** A switch at the right, on or off; choosing it leaves the menu open. */
+  checked?: boolean;
+  /** One of a group of choices, ticked when it is the current one. */
+  selected?: boolean;
+  /** One line under the label, kept for what the label cannot say. */
   hint?: string;
+  /** What it does, shown on hover. */
+  title?: string;
   icon?: IconName;
   onSelect: () => void;
   disabled?: boolean;
@@ -73,6 +84,7 @@ export function Menu({
     else return;
     e.preventDefault();
   };
+  const indent = items.some((item) => item.icon || item.selected !== undefined);
   return (
     <div
       ref={box}
@@ -86,24 +98,38 @@ export function Menu({
       onContextMenu={(e) => e.preventDefault()}
     >
       {note && <p className={styles.popNote}>{note}</p>}
-      {items.map((item, i) => (
-        <button
-          key={`${i}:${item.label}`}
-          role="menuitem"
-          disabled={item.disabled}
-          className={`${item.danger ? styles.popDanger : ""} ${item.separated ? styles.popSeparated : ""}`}
-          onClick={() => {
-            onClose();
-            item.onSelect();
-          }}
-        >
-          {item.icon && <Icon name={item.icon} />}
-          <span>
-            {item.label}
-            {item.hint && <small>{item.hint}</small>}
-          </span>
-        </button>
-      ))}
+      {items.map((item, i) => {
+        // A switch leaves the menu open, to show it flip; a choice closes it,
+        // so the next one is made from what was saved.
+        const stays = item.checked !== undefined;
+        const icon = item.selected !== undefined ? (item.selected ? "check" : "blank") : item.icon;
+        return (
+          <Fragment key={`${i}:${item.label}`}>
+            {(item.separated || (item.heading && i > 0)) && <div role="separator" className={styles.popRule} />}
+            {item.heading && <p className={styles.popHeading}>{item.heading}</p>}
+            <button
+              role={item.checked !== undefined ? "menuitemcheckbox" : item.selected !== undefined ? "menuitemradio" : "menuitem"}
+              aria-checked={item.checked ?? item.selected}
+              disabled={item.disabled}
+              title={item.title}
+              className={item.danger ? styles.popDanger : undefined}
+              onClick={() => {
+                if (!stays) onClose();
+                item.onSelect();
+              }}
+            >
+              {/* Once one item has an icon, every label starts in the same column. */}
+              {(icon || indent) && <Icon name={icon ?? "blank"} />}
+              <span className={styles.popText}>
+                {item.label}
+                {item.hint && <small>{item.hint}</small>}
+              </span>
+              {item.value && <em>{item.value}</em>}
+              {item.checked !== undefined && <span className={styles.switch} data-on={item.checked} aria-hidden="true" />}
+            </button>
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

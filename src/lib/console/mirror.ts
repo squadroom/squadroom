@@ -126,6 +126,13 @@ export class Mirror {
     const r = await ownerGit(["fetch", "--prune", "--quiet", this.url, "+refs/heads/*:refs/heads/*"], token, this.dir);
     if (r.code !== 0) throw fail(`Fetching ${this.repo}`, r, token);
   }
+  /** The base branch's commit on GitHub now: one request, nothing fetched.
+   * Null when GitHub did not answer or has no such branch. */
+  async remoteTip(base: string, token: string): Promise<string | null> {
+    const r = await ownerGit(["ls-remote", this.url, `refs/heads/${base}`], token, undefined, 30_000);
+    const sha = r.code === 0 ? r.stdout.split(/\s/)[0] : "";
+    return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+  }
   /** The mirror's size, the most a new clone of it needs. */
   async size(): Promise<number> {
     const r = await ownerGit(["count-objects", "-v"], null, this.dir);

@@ -12,7 +12,7 @@ import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, turnLimits, type ConsoleEvent, type C
 
 /** Everything waiting in Needs you. */
 export const needCount = (n: NeedsLike) =>
-  n.requests.length + n.interrupted.length + (n.messages?.length ?? 0) + (n.paused?.length ?? 0) + (n.notices?.length ?? 0);
+  n.requests.length + (n.expired?.length ?? 0) + n.interrupted.length + (n.messages?.length ?? 0) + (n.paused?.length ?? 0) + (n.notices?.length ?? 0);
 
 /** A Needs you request's stored input, laid out to read: indented when it
  * is whole JSON (so text inside it keeps its `\n` marks), otherwise as

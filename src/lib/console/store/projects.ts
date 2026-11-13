@@ -14,17 +14,23 @@ export const ASK_FIRST_CLAUDE_ONLY =
 export const NETWORK_AUTO_KINDS_ONLY =
   "Network Auto is offered for Claude Code and Codex agents only: other agents cannot ask per website, so their network is the project's own switch (the project menu's Network…).";
 
-/** Allow an agent's network requests still open (inside a transaction). */
+/** Allow an agent's network requests still open, and take those that
+ * closed unanswered out of Needs you: Auto covers them from now on (inside
+ * a transaction). */
 function allowWaiting(store: ConsoleStore, agentId: string) {
-  for (const r of store.all("SELECT id, tool, rule_key FROM console_requests WHERE agent_id = ? AND state = 'open' AND kind = 'permission'", agentId))
-    if (networkRequest(r.tool as string, r.rule_key as string | null))
+  for (const r of store.all("SELECT id, tool, rule_key, state FROM console_requests WHERE agent_id = ? AND kind = 'permission' AND (state = 'open' OR (state = 'expired' AND decided_by IS NULL))", agentId)) {
+    if (!networkRequest(r.tool as string, r.rule_key as string | null)) continue;
+    if (r.state === "expired") store.run("UPDATE console_requests SET decided_by = 'owner' WHERE id = ?", r.id as number);
+    else
       store.run(
         "UPDATE console_requests SET state = 'allowed', decided_by = 'console', reason = ?, decided_at = ? WHERE id = ?",
         `${NETWORK_AUTO}: switched on while this waited.`, store.now(), r.id as number,
       );
+  }
 }
 
-type Merging = { from: string; fromName: string; files: string[] };
+/** `base`: a merge of the base branch, at this commit. */
+type Merging = { from: string; fromName: string; files: string[]; base?: string };
 type RoleRow = { id: string; name: string; description: string; access: string; ai: string; prompt: string; builtIn: boolean };
 
 // Projects, tabs, agents and roles: the owner's commands, the worker's
@@ -91,13 +97,23 @@ export const projects = {
    * transaction, so none is left to click; the worker tells each waiting
    * turn as it does for the owner's own answer. */
   setNetworkAuto(this: ConsoleStore, agentId: string, auto: boolean): ConsoleAgent {
+    return this.transaction(() => this.networkAuto(agentId, auto));
+  },
+  /** setNetworkAuto's work, in the caller's transaction. */
+  networkAuto(this: ConsoleStore, agentId: string, auto: boolean): ConsoleAgent {
+    const a = this.agent(agentId);
+    if (!a || a.state === "closed") throw new Error("That agent is closed.");
+    if (auto && !networkAutoKind(a.kind)) throw new Error(NETWORK_AUTO_KINDS_ONLY);
+    this.run("UPDATE console_agents SET network_auto = ? WHERE id = ?", auto ? 1 : 0, agentId);
+    if (auto) allowWaiting(this, agentId);
+    return this.agent(agentId)!;
+  },
+  /** The same for every open agent of a tab that has the setting; the others are left as they are. Returns how many it set. */
+  setTabNetworkAuto(this: ConsoleStore, tabId: string, auto: boolean): number {
     return this.transaction(() => {
-      const a = this.agent(agentId);
-      if (!a || a.state === "closed") throw new Error("That agent is closed.");
-      if (auto && !networkAutoKind(a.kind)) throw new Error(NETWORK_AUTO_KINDS_ONLY);
-      this.run("UPDATE console_agents SET network_auto = ? WHERE id = ?", auto ? 1 : 0, agentId);
-      if (auto) allowWaiting(this, agentId);
-      return this.agent(agentId)!;
+      const agents = this.all("SELECT id, kind FROM console_agents WHERE tab_id = ? AND state <> 'closed'", tabId).filter((a) => networkAutoKind(a.kind as string));
+      for (const a of agents) this.networkAuto(a.id as string, auto);
+      return agents.length;
     });
   },
   /** The worker's side of the same: a request it opened just as the owner
