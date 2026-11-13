@@ -136,8 +136,11 @@ test("after a restart, an open request is closed and its turn waits as interrupt
   await next.start();
   assert.equal(h.store.turn(turn)!.status, "interrupted");
   assert.equal(h.store.request(request.id)!.state, "expired");
+  // It is no longer open, so it cannot be allowed once; it stays listed as
+  // unanswered.
   assert.equal(needsView(h.store).requests.length, 0);
-  assert.throws(() => runCommand(h.store, { action: "decide", requestId: request.id, decision: "always" }), /already decided/);
+  assert.deepEqual(needsView(h.store).expired.map((r) => r.id), [request.id]);
+  assert.throws(() => runCommand(h.store, { action: "decide", requestId: request.id, decision: "allow" }), /got no answer in time/);
   assert.equal(h.store.hasRule(lead.id, "client:Skill"), false);
   await next.stop();
 });

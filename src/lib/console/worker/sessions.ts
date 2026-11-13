@@ -81,7 +81,7 @@ export const sessions = {
       }
       this.creating.add(agent.id);
       void this.repos
-        .createFolder(agent, project)
+        .createFolder(agent, project, this.epoch!)
         .then(({ folder, branch, base }) =>
           this.safe(() => {
             this.store.setAgentBase(this.epoch!, agent.id, branch, base);

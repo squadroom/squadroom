@@ -84,8 +84,10 @@ only restates one of them is not a new finding.
   to an agent, see above), and anything it fetches may try to mislead it.
   Squadroom does not check where the requests go or what they carry; it
   only notes each one in the agent's window and shows **Network auto** in
-  the window's header. Auto is off unless you switch it on, per agent,
-  with a fresh e-mailed code, and it changes nothing else: file writes,
+  the window's header. Auto is off unless you switch it on, with a fresh
+  e-mailed code each time: for one agent from its window or from a network
+  request in Needs you, or for a tab's agents from the tab's menu. It
+  changes nothing else: file writes,
   reads outside the folder, unknown tools, Ask me first and pushes are
   decided as before.
 - **Redaction gaps.** Only the values the Console handed out and common key

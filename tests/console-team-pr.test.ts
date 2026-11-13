@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
+import { needsView, projectView } from "../src/lib/console/views.ts";
 import { CHECKS_CHARS, JOB_LOG_CHARS, checksText, cleanComment, codexState, jobLogText, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
 import { readChecks, readJobLog } from "../src/lib/console/github-api.ts";
 import { git, harness, TOKEN } from "./helpers/console-harness.ts";
@@ -48,13 +49,14 @@ function github() {
   const threads: { id: string; pr: number; resolved: boolean; path: string; line: number; comments: { author: string; body: string }[] }[] = [];
   const comments: { pr: number; author: string; body: string }[] = [];
   /** The pull request's head on "GitHub"; a resolve that fails once. */
-  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null, actions: true };
+  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null, actions: true, user: null as { id: number; login: string } | null };
   /** GitHub Actions: jobs by the commit they ran for, and their logs. */
   const jobs: { id: number; sha: string; name: string; status: string; conclusion: string | null; log: string }[] = [];
   const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input));
     const json = (v: unknown, status = 200) => Response.json(v, { status });
     const path = url.pathname;
+    if (path === "/user") return state.user ? json(state.user) : json({ message: "Bad credentials" }, 401);
     if (path === "/repos/owner/repo") return json({ id: 1 });
     if (path === "/repos/owner/repo/branches/main") return json({ name: "main" });
     if (path === "/repos/owner/repo/rulesets") return json([{ id: 7 }]);
@@ -416,6 +418,107 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   assert.match(resendNote(h.store.toolCalls(cut)), /A reply to thread PRRT_one may have been posted; check team_pr before replying again/);
 });
 
+// A folder made before a merge on GitHub gets the merged base
+// branch with team_pull(from: "main"); its changes are then compared with it.
+test("team_pull with the base branch's name brings GitHub's latest base into the agent's branch, conflicts included", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  await h.until(() => h.store.agent(lead.id)!.state === "ready", "folder");
+  const folder = h.store.agent(lead.id)!.folder;
+  writeFileSync(join(folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  const started = h.store.agentBase(lead.id).baseCommit!;
+  // Until GitHub names the token's account, a commit carries the
+  // agent's own address; from then on, that account's no-reply address.
+  await h.ended(h.send(lead.id, "write fix.txt"));
+  const email = () => git(folder, "log", "-1", "--format=%an <%ae> / %cn <%ce>");
+  const committed = (file: string) => h.until(() => h.store.commits(lead.id).some((c) => c.files.includes(file)), `${file} committed`);
+  await committed("fix.txt");
+  assert.equal(email(), `Lead <${lead.id}@console.local> / Lead <${lead.id}@console.local>`);
+  gh.state.user = { id: 1234567, login: "octo-owner" };
+  h.worker.repos["emailAsked"].clear();
+  await h.ended(h.send(lead.id, "write fix-b.txt"));
+  await committed("fix-b.txt");
+  assert.equal(email(), "Lead <1234567+octo-owner@users.noreply.github.com> / Lead <1234567+octo-owner@users.noreply.github.com>");
+  // Nothing new on GitHub yet.
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /^team_pull: Your branch already has main as GitHub has it now\./);
+  assert.equal(h.store.agentBase(lead.id).baseCommit, started);
+  // A pull request merges on GitHub after the folder was made.
+  const work = join(bare, "..", "work");
+  const merge = (file: string, text: string) => {
+    writeFileSync(join(work, file), text);
+    git(work, "add", file);
+    git(work, "-c", "user.name=Owner", "-c", "user.email=o@x", "commit", "--quiet", "-m", `merge ${file}`);
+    git(work, "push", "--quiet", bare, "main");
+    return git(work, "rev-parse", "HEAD");
+  };
+  const merged = merge("design.md", "# Design\n");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "Main" })));
+  assert.match(h.said(lead.id).at(-1)!, new RegExp(`^team_pull: Merged main from GitHub into your branch \\(commit [0-9a-f]{8}\\)\\. main is now at ${merged.slice(0, 12)}`));
+  assert.equal(readFileSync(join(folder, "design.md"), "utf8"), "# Design\n");
+  assert.equal(git(folder, "rev-parse", "main"), merged);
+  // Its own changes only, against the new base.
+  assert.equal(h.store.agentBase(lead.id).baseCommit, merged);
+  assert.deepEqual(h.store.diff(lead.id)!.files, ["fix-b.txt", "fix.txt"]);
+  // The merge commit is the account's too.
+  assert.match(email(), /^Lead <1234567\+octo-owner@users\.noreply\.github\.com> /);
+  // A conflict: the base moves only once the merge is finished.
+  await h.ended(h.send(lead.id, "write design.md"));
+  const next = merge("design.md", "# Design, revised\n");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /^team_pull: The merge of main from GitHub has conflicts in: design\.md\./);
+  assert.equal(h.store.agentBase(lead.id).baseCommit, merged);
+  assert.equal(h.store.merging(lead.id)!.fromName, "main");
+  writeFileSync(join(folder, "design.md"), "# Design, both\n");
+  await h.ended(h.send(lead.id, "say resolved"));
+  await h.until(() => !h.store.merging(lead.id), "merge committed");
+  assert.equal(h.store.agentBase(lead.id).baseCommit, next);
+  assert.deepEqual(h.store.diff(lead.id)!.files.sort(), ["design.md", "fix-b.txt", "fix.txt"]);
+  // What the base branch brings into a teammate's claim is not this agent's
+  // edit; its own next change there is.
+  const peer = h.agent("Peer");
+  await h.until(() => h.store.agent(peer.id)!.state === "ready", "peer's folder");
+  await h.ended(h.send(peer.id, call("team_claim", { paths: ["shared.md", "mine.md"], note: "Peer's" })));
+  merge("shared.md", "# Shared\n");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /^team_pull: Merged main from GitHub/);
+  await h.ended(h.send(lead.id, "gitcommit mine.md"));
+  await h.until(() => needsView(h.store).notices.some((n) => n.text.startsWith("Lead changed mine.md, which Peer has claimed")), "own edit flagged");
+  assert.ok(!needsView(h.store).notices.some((n) => n.text.includes("shared.md")));
+  // A conflicted merge the agent commits itself, with git: the merge is
+  // settled and the base moves all the same.
+  await h.ended(h.send(lead.id, "write design.md"));
+  const third = merge("design.md", "# Design, third\n");
+  merge("shared.md", "# Shared, again\n");
+  const last = git(work, "rev-parse", "HEAD");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /has conflicts in: design\.md\./);
+  writeFileSync(join(folder, "design.md"), "# Design, all\n");
+  git(folder, "add", "design.md");
+  git(folder, "-c", "user.name=Agent", "-c", "user.email=a@x", "commit", "--quiet", "--no-edit");
+  await h.ended(h.send(lead.id, "say merged it myself"));
+  assert.equal(h.store.merging(lead.id), null);
+  assert.notEqual(third, last);
+  assert.equal(h.store.agentBase(lead.id).baseCommit, last);
+  await h.ended(h.send(lead.id, "gitcommit fix2.txt"));
+  await h.until(() => h.store.diff(lead.id)!.files.includes("fix2.txt"), "diff refreshed");
+  assert.ok(!h.store.diff(lead.id)!.files.includes("shared.md"));
+  assert.ok(!needsView(h.store).notices.some((n) => n.text.includes("shared.md")));
+  // A teammate called like the base branch is still a teammate.
+  const main = h.agent("main");
+  await h.until(() => h.store.agent(main.id)!.state === "ready", "second folder");
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.match(h.said(lead.id).at(-1)!, /^team_pull: (Your branch already has all of main's committed work|Merged main's work)/);
+});
+
 test("checks: only a list that is whole and all passed says so; what did not pass comes first, within a bound", () => {
   const sha = "a".repeat(40);
   const job = (id: number, conclusion: string | null, status = "completed", name = `job ${id}`) => ({ id, run: "CI", name, status, conclusion });
@@ -498,4 +601,92 @@ test("reading checks from GitHub: every page of jobs within a bound; a log's end
   assert.deepEqual(await readJobLog("owner/repo", 7, 1024, { token: "t", fetch: ranged }), { text: "tail", cut: true });
   const small = (async () => new Response("all of it")) as typeof fetch;
   assert.deepEqual(await readJobLog("owner/repo", 7, 1024, { token: "t", fetch: small }), { text: "all of it", cut: false });
+});
+
+// Nothing told an agent whose folder was made before a merge on
+// GitHub that the base branch had moved.
+test("the Console notices that GitHub's base branch moved: the editing agent is told once for each new commit, its window shows it, and team_pull settles it", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  const reviewer = h.agent("Reviewer", "look");
+  await h.ready(lead.id, reviewer.id);
+  writeFileSync(join(h.store.agent(lead.id)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  const moved = (id: string) => projectView(h.store, h.project.id)!.agents.find((a) => a.id === id)!.baseMoved;
+  const echo = async (text: string) => {
+    await h.ended(h.send(lead.id, text));
+    return h.said(lead.id).at(-1)!;
+  };
+  const note = 'main on GitHub has new commits that your branch does not have yet. team_pull(from: "main") brings them in.\n\n';
+  // GitHub's main is where the folders started: nothing to say.
+  await h.worker.checkBases();
+  assert.equal(moved(lead.id), null);
+  assert.equal(await echo("first"), "echo: first");
+  // A pull request merges on GitHub. Until the worker has asked, nothing shows.
+  const work = join(bare, "..", "work");
+  const merge = (file: string) => {
+    writeFileSync(join(work, file), "x\n");
+    git(work, "add", file);
+    git(work, "-c", "user.name=Owner", "-c", "user.email=o@x", "commit", "--quiet", "-m", `merge ${file}`);
+    git(work, "push", "--quiet", bare, "main");
+  };
+  merge("design.md");
+  assert.equal(moved(lead.id), null);
+  await h.worker.checkBases();
+  assert.equal(moved(lead.id), "main");
+  // Only an editing agent: a Code analysis agent has no branch to pull into.
+  assert.equal(moved(reviewer.id), null);
+  // Its next prompt says so, once; the window keeps showing it.
+  assert.equal(await echo("second"), `echo: ${note}second`);
+  assert.equal(await echo("third"), "echo: third");
+  await h.worker.checkBases();
+  assert.equal(await echo("fourth"), "echo: fourth");
+  assert.equal(moved(lead.id), "main");
+  // The pull brings it in, and nothing is left to say.
+  await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
+  assert.equal(moved(lead.id), null);
+  assert.equal(await echo("fifth"), "echo: fifth");
+  // The next merge is news again. A folder made after it starts from it.
+  merge("more.md");
+  await h.worker.checkBases();
+  const late = h.agent("Late");
+  await h.ready(late.id);
+  assert.equal(moved(late.id), null);
+  assert.equal(moved(lead.id), "main");
+  assert.equal(await echo("sixth"), `echo: ${note}sixth`);
+});
+
+test("a proposed tab warns when the proposing agent's branch has work that is not on GitHub's base branch", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  writeFileSync(join(h.store.agent(lead.id)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  const propose = (name: string) => h.ended(h.send(lead.id, call("team_propose_tab", { name, goal: "build it", members: [{ name: "Builder", access: "edit", model: "haiku" }] })));
+  const warning = (name: string) => needsView(h.store).notices.find((n) => n.proposal?.name === name)!.warning;
+  // Nothing of its own yet: the new tab's folders would miss nothing.
+  await propose("Early");
+  assert.equal(warning("Early"), null);
+  await h.ended(h.send(lead.id, "write plan.md"));
+  await h.until(() => h.store.commits(lead.id).some((c) => c.files.includes("plan.md")), "committed");
+  await propose("Build");
+  assert.equal(
+    warning("Build"),
+    "Lead's branch has changes in 1 file that were not on main when it last took main in. The new tab's folders are made from main on GitHub, so its agents will not have that work unless it has been merged there.",
+  );
+  assert.equal(warning("Early"), warning("Build"));
 });

@@ -41,10 +41,15 @@ export const teamGit = {
     if (me.permission !== "edit" || !project || project.source === "none") throw new TeamError("Only an agent that edits its folder can pull a teammate's work.");
     // A tab with steps: a merge could change files outside the step.
     if (this.store.tabSteps(me.tabId)) throw new TeamError("In a tab with steps, teammates do not pull each other's work: a merge could change files outside the current step.");
-    const from = this.teammate(c.team, me, c.args.from);
-    if (from.state !== "ready" || !from.folder) throw new TeamError(`${from.name} has no folder to pull from.`);
+    // The base branch by its name, unless a teammate has it:
+    // GitHub's latest, which a folder made before a merge does not have.
+    const wanted = String(c.args.from ?? "").trim().toLowerCase();
+    const base = project.source === "github" && wanted === project.baseBranch.toLowerCase() && !c.team.some((a) => a.id !== me.id && a.name.trim().toLowerCase() === wanted);
+    const from = base ? null : this.teammate(c.team, me, c.args.from);
+    const source = from ? `${from.name}'s work` : `${project.baseBranch} from GitHub`;
+    if (from && (from.state !== "ready" || !from.folder)) throw new TeamError(`${from.name} has no folder to pull from.`);
     // A Code analysis agent shows other agents' commits, not work of its own.
-    if (from.permission !== "edit" || !this.store.agentBase(from.id).branch) throw new TeamError(`${from.name} does not edit code on a branch of its own, so there is nothing of its own to pull.`);
+    if (from && (from.permission !== "edit" || !this.store.agentBase(from.id).branch)) throw new TeamError(`${from.name} does not edit code on a branch of its own, so there is nothing of its own to pull.`);
     return once(this, c, async () => {
       // Room for its record before the clone is changed.
       write(this, () => this.store.ensurePayloadRoom(t.id, 16_384));
@@ -67,27 +72,38 @@ export const teamGit = {
           // marker check needs them all); only the message is bounded,
           // so its record fits what was reserved for it.
           const listed = pulled.files.slice(0, 100);
-          write(this, () => this.store.setMerging(epoch, me.id, { from: from.id, fromName: from.name, files: pulled.files }));
-          result = `The merge of ${from.name}'s work has conflicts in: ${listed.join(", ")}${pulled.files.length > listed.length ? ` and ${pulled.files.length - listed.length} more (git status lists them)` : ""}. Edit those files to resolve the conflict markers (<<<<<<<, =======, >>>>>>>), then end your turn: the Console commits the merge. Or call team_pull_abort to go back.`;
+          write(this, () => this.store.setMerging(epoch, me.id, { from: from?.id ?? "", fromName: from?.name ?? project.baseBranch, files: pulled.files, ...(pulled.base ? { base: pulled.base } : {}) }));
+          result = `The merge of ${source} has conflicts in: ${listed.join(", ")}${pulled.files.length > listed.length ? ` and ${pulled.files.length - listed.length} more (git status lists them)` : ""}. Edit those files to resolve the conflict markers (<<<<<<<, =======, >>>>>>>), then end your turn: the Console commits the merge. Or call team_pull_abort to go back.`;
         } else {
           if (pulled.state === "merged" && pulled.sha) {
             this.queueRefresh(me, pulled.sha);
-            this.mergeSources.set(pulled.sha, from.id);
             this.claimChecked.add(pulled.sha);
             // What the pull brought in, against claims other than the
-            // source's own (pulling a claimant's work is the point).
-            void this.repos
-              .diffPaths(me, pulled.before, pulled.sha)
-              .then((files) => this.claimNotices(me, files, from.id))
-              .catch((error: unknown) => this.log(`claim check after a pull failed: ${message(error)}`));
+            // source's own (pulling a claimant's work is the point). What
+            // the base branch brought is nobody's edit here (the turn's own
+            // check leaves its history out too).
+            if (from) {
+              this.mergeSources.set(pulled.sha, from.id);
+              void this.repos
+                .diffPaths(me, pulled.before, pulled.sha)
+                .then((files) => this.claimNotices(me, files, from.id))
+                .catch((error: unknown) => this.log(`claim check after a pull failed: ${message(error)}`));
+            }
           }
-          result = pulled.state === "merged" ? `Merged ${from.name}'s work into your branch (commit ${pulled.sha!.slice(0, 8)}).` : `Your branch already has all of ${from.name}'s committed work.`;
+          result =
+            pulled.state === "merged"
+              ? `Merged ${source} into your branch (commit ${pulled.sha!.slice(0, 8)}).`
+              : from
+                ? `Your branch already has all of ${from.name}'s committed work.`
+                : `Your branch already has ${project.baseBranch} as GitHub has it now.`;
+          // Its changes are compared with the new base from here on.
+          if (pulled.base) result += ` ${project.baseBranch} is now at ${pulled.base.slice(0, 12)}: compare your own changes with that commit.`;
         }
       } catch (error) {
         if (error instanceof TeamError) throw error;
         throw new TeamError(`The pull did not work: ${this.redactor.text(message(error))}`);
       }
-      record(this, c, "team_pull", `team_pull from ${from.name}`, result);
+      record(this, c, "team_pull", `team_pull from ${from?.name ?? project.baseBranch}`, result);
       return result;
     });
   },

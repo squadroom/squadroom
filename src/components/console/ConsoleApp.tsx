@@ -585,8 +585,6 @@ export default function ConsoleApp() {
                     maximized={maximized === a.id}
                     onMaximize={() => setMaximized(maximized === a.id ? null : a.id)}
                     onChanges={() => setChangesFor(a.id)}
-                    onModel={() => setModal({ kind: "ai", agentId: a.id })}
-                    onNetwork={() => setModal({ kind: "agentNetwork", agentId: a.id })}
                     onOpenFile={openFile}
                     onOpenHelper={(helperId, name) => openHelper(a.id, helperId, name)}
                     run={run}

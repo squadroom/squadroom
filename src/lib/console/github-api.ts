@@ -96,6 +96,14 @@ async function githubCall(gh: GitHubApi, method: "GET" | "POST" | "PATCH", path:
   const json = await response.json().catch(() => null);
   return { status: response.status, json };
 }
+/** The GitHub no-reply address of the token's own account, which GitHub
+ * (and what deploys from it) recognises as that account's commits; null
+ * when GitHub does not say. */
+export async function noReplyEmail(gh: GitHubApi): Promise<string | null> {
+  const me = await githubCall(gh, "GET", "/user").catch(() => null);
+  const { id, login } = (me?.status === 200 ? me.json : {}) as { id?: unknown; login?: unknown };
+  return Number.isSafeInteger(id) && typeof login === "string" && /^[A-Za-z0-9-]{1,39}$/.test(login) ? `${id}+${login}@users.noreply.github.com` : null;
+}
 const NEEDS_PR_WRITE = "The GitHub token cannot open pull requests here. Give it Pull requests: Read and write for this repository (Settings → Developer settings → Fine-grained tokens).";
 /** A pull request call: refused (401, 403, or 404 for a repository the
  * token cannot see), it says what the token needs. */

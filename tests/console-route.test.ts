@@ -177,8 +177,11 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
     { action: "decide", requestId: 1, decision: "project" },
     { action: "cleanupDelete", keys: ["work/p/a"] },
     { action: "setAskFirst", agentId: "a000000000000", on: false },
-    // An agent's Network to Auto.
+    // An agent's Network to Auto; a tab's agents, or with a
+    // network request's answer.
     { action: "setNetwork", agentId: "a000000000000", auto: true },
+    { action: "setNetwork", tabId: "t000000000000", auto: true },
+    { action: "decide", requestId: 1, decision: "auto" },
   ];
   const open: Record<string, unknown>[] = [
     { action: "createProject", name: "Demo", source: "none" },
@@ -186,6 +189,9 @@ test("commands with weight beyond the page need a code entered in the last 8 hou
     { action: "decide", requestId: 1, decision: "deny" },
     { action: "setAskFirst", agentId: "a000000000000", on: true },
     { action: "setNetwork", agentId: "a000000000000", auto: false },
+    { action: "setNetwork", tabId: "t000000000000", auto: false },
+    { action: "decide", requestId: 1, decision: "again" },
+    { action: "decide", requestId: 1, decision: "dismiss" },
     { action: "rename", target: "project", id: "p000000000000", name: "Renamed" },
     { action: "restore", scope: "project", id: "p000000000000" },
     // No longer gated.

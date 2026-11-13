@@ -24,19 +24,23 @@ const EXCLUDE = [".", ...CONSOLE_DIRS.map((d) => `:(exclude)${d}`)];
  */
 export const STORED_OBJECTS = ["--no-replace-objects", "-c", "core.useReplaceRefs=false", "-c", "core.commitGraph=false"];
 
-const author = (name: string, agentId: string) => [
+/** A commit's author: the agent's name, with the owner's GitHub no-reply
+ * address when it is known, else an address of the agent's own. */
+const author = (name: string, agentId: string, email: string | null) => [
   "-c",
   `user.name=${name.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 60) || "Console agent"}`,
   "-c",
-  `user.email=${agentId}@console.local`,
+  `user.email=${email ?? `${agentId}@console.local`}`,
 ];
 
 export class Clone {
   readonly folder: string;
   private launcher: Launcher;
-  constructor(launcher: Launcher, folder: string) {
+  private email: string | null;
+  constructor(launcher: Launcher, folder: string, email: string | null = null) {
     this.launcher = launcher;
     this.folder = folder;
+    this.email = email;
   }
   /** Git in this clone, objects as stored (`init` is the launcher's own
    * action, recognised by its first argument, and has none to read). */
@@ -74,7 +78,7 @@ export class Clone {
    * `main`, so every turn's changes have something to be compared with. */
   async createEmpty(name: string, agentId: string): Promise<string> {
     await this.git(["init", "--quiet", "-b", "main"], "Creating the agent folder");
-    await this.git([...author(name, agentId), "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "Start"], "The first commit");
+    await this.git([...author(name, agentId, this.email), "commit", "--quiet", "--allow-empty", "--no-verify", "-m", "Start"], "The first commit");
     return (await this.head())!;
   }
   /** A GitHub project's clone, filled from the mirror's bundle. An editing
@@ -139,7 +143,7 @@ export class Clone {
     // the agent staged there is unstaged (the files stay on disk), and
     // files the repository already tracks there are kept, never deleted.
     await this.git(["reset", "--quiet", "--", ...CONSOLE_DIRS], "Clearing the index");
-    await this.git([...author(name, agentId), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
+    await this.git([...author(name, agentId, this.email), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
     const sha = await this.head();
     // A tab with steps: the commit is checked against where the step's
     // check began, tree to tree, before anything records or pushes it. One
@@ -219,10 +223,15 @@ export class Clone {
     const names = await this.git(["show", "--no-renames", "--name-only", "-z", "--format=", sha], "Reading the commit", 256 * 1024);
     return { stat: stat.stdout.trim(), patch: patch.truncated ? `${patch.stdout}\n… truncated` : patch.stdout, files: nulList(names.stdout) };
   }
+  /** Whether `at` holds the commit `sha` in its history. */
+  async contains(sha: string, at = "HEAD"): Promise<boolean> {
+    if (!/^[0-9a-f]{40,64}$/.test(sha)) return false;
+    return (await this.run(["merge-base", "--is-ancestor", sha, at], 4096)).code === 0;
+  }
   /** The commits after `from` up to `to` (all of `to`'s when null), newest
-   * first, each with its parents. */
-  async commitsBetween(from: string | null, to: string): Promise<{ sha: string; parents: string[] }[]> {
-    const r = await this.git(["rev-list", "--parents", "--max-count=1000", from ? `${from}..${to}` : to], "Listing commits", 1024 * 1024);
+   * first, each with its parents; none of `not`'s history. */
+  async commitsBetween(from: string | null, to: string, not: string | null = null): Promise<{ sha: string; parents: string[] }[]> {
+    const r = await this.git(["rev-list", "--parents", "--max-count=1000", from ? `${from}..${to}` : to, ...(not ? [`^${not}`] : [])], "Listing commits", 1024 * 1024);
     return r.stdout
       .split("\n")
       .filter(Boolean)
@@ -312,7 +321,7 @@ export class Clone {
   /** Merge a fetched ref into the current branch (a fast-forward when it
    * can). False when it stopped with conflicts. */
   async merge(ref: string, message: string, name: string, agentId: string): Promise<boolean> {
-    const r = await this.run([...author(name, agentId), "merge", "--no-edit", "--no-verify", "-m", message, ref], 64 * 1024);
+    const r = await this.run([...author(name, agentId, this.email), "merge", "--no-edit", "--no-verify", "-m", message, ref], 64 * 1024);
     if (r.code === 0) return true;
     if (await this.merging()) return false;
     throw fail("Merging", r);

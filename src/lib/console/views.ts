@@ -1,9 +1,10 @@
 // The page's reads: each view the route answers with, built from the store.
 // The owner's commands are in commands.ts.
 
-import { agentModel, type AgentKind } from "./agents.ts";
+import { agentModel, networkAutoKind, type AgentKind } from "./agents.ts";
 import { connectionPanels, type ConnectionPanel } from "./connections.ts";
 import { keysView, type KeysView } from "./keys-page.ts";
+import { networkRequest } from "./permissions.ts";
 import { roleLibrary, type RoleDef } from "./roles.ts";
 import { LEASE_TTL_MS, NEEDS_MAIL, PAUSE_ALL, type ConsoleStore, type TurnRow } from "./store.ts";
 import { DOCUMENT_REVIEW, DOCUMENT_REVIEW_ID, isOrchestrator, templateNames, type TabTemplate } from "./templates.ts";
@@ -85,6 +86,9 @@ export interface AgentView extends ConsoleAgent {
   tasks: ReturnType<ConsoleStore["tasks"]>;
   /** False when its client gives this model no task tools. */
   taskTools: boolean;
+  /** The base branch's name when GitHub's has commits this agent's branch
+   * has not taken in; else null. */
+  baseMoved: string | null;
 }
 export interface TimelineEntry {
   id: number;
@@ -276,31 +280,53 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
           tasks: store.tasks(a.id),
           summaryWaiting: store.carriedSummary(a.id) !== null,
           taskTools: agentModel(a.kind, a.model)?.taskTools !== false,
+          baseMoved: store.baseMoved(a) ? project.baseBranch : null,
         };
       }),
   };
 }
 
-/** The Needs you tray: open requests and interrupted turns, across every
- * project. */
+/** What the owner should know before creating a tab an agent proposed
+ *: in a GitHub project, new folders are made from the base
+ * branch on GitHub, so work on the proposing agent's branch is not in them.
+ * Null when its branch has no changes against the base it started from. */
+function unmergedWork(store: ConsoleStore, agentId: string): string | null {
+  const agent = store.agent(agentId);
+  const project = agent && store.project(agent.projectId);
+  if (!agent || project?.source !== "github" || agent.permission !== "edit") return null;
+  const files = store.diff(agentId)?.files.length ?? 0;
+  if (!files) return null;
+  const base = project.baseBranch;
+  return `${agent.name}'s branch has changes in ${files === 1 ? "1 file" : `${files} files`} that were not on ${base} when it last took ${base} in. The new tab's folders are made from ${base} on GitHub, so its agents will not have that work unless it has been merged there.`;
+}
+
+/** The Needs you tray: open requests and interrupted turns, across
+ * every project. */
 export function needsView(store: ConsoleStore) {
+  const asked = (r: ReturnType<ConsoleStore["openRequests"]>[number]) => ({
+    id: r.id,
+    agentId: r.agentId,
+    agentName: r.agentName,
+    projectId: r.projectId,
+    kind: r.kind,
+    tool: r.tool,
+    summary: r.summary,
+    // The whole stored input (redacted, at most 64 KB, a cut marked): the
+    // tray shows it on request, so the owner sees what Allow once allows.
+    input: r.input,
+    // Only where there is a rule to remember (a compound command has none).
+    canAlways: r.kind === "permission" && !!r.ruleKey,
+    canProject: r.kind === "permission" && !!r.ruleKey?.startsWith("network:"),
+    // A network request of an agent that has the Network setting: one
+    // click allows it and switches the agent to Auto.
+    canAuto: r.kind === "permission" && networkRequest(r.tool, r.ruleKey) && networkAutoKind(r.agentKind),
+    createdAt: r.createdAt,
+  });
   return {
-    requests: store.openRequests().map((r) => ({
-      id: r.id,
-      agentId: r.agentId,
-      agentName: r.agentName,
-      projectId: r.projectId,
-      kind: r.kind,
-      tool: r.tool,
-      summary: r.summary,
-      // The whole stored input (redacted, at most 64 KB, a cut marked): the
-      // tray shows it on request, so the owner sees what Allow once allows.
-      input: r.input,
-      // Only where there is a rule to remember (a compound command has none).
-      canAlways: r.kind === "permission" && !!r.ruleKey,
-      canProject: r.kind === "permission" && !!r.ruleKey?.startsWith("network:"),
-      createdAt: r.createdAt,
-    })),
+    requests: store.openRequests().map(asked),
+    // Permission requests that closed unanswered, each with how
+    // often it was asked and when it last closed.
+    expired: store.expiredRequests().map((r) => ({ ...asked(r), count: r.count, expiredAt: r.expiredAt })),
     messages: store.interruptedMessages().map((m) => ({
       id: m.id,
       projectId: m.projectId,
@@ -315,7 +341,7 @@ export function needsView(store: ConsoleStore) {
       const tab = p.scope === "tab" && p.id ? store.tab(p.id) : undefined;
       return { ...p, spend: tab ? tabSpendView(store, tab) : null };
     }),
-    notices: store.notices(),
+    notices: store.notices().map((n) => ({ ...n, warning: n.proposal ? unmergedWork(store, n.agentId) : null })),
     interrupted: store.interruptedTurns().map((t) => ({
       id: t.id,
       agentId: t.agentId,

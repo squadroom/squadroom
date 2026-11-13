@@ -7,6 +7,7 @@ import {
   checkGitHub,
   commentOnPullRequest,
   findPullRequest,
+  noReplyEmail,
   openPullRequest,
   readChecks,
   readJobLog,
@@ -33,6 +34,8 @@ import { commitMessage } from "./team.ts";
 // owner's mirror.
 
 const TOKEN_KEY = "CONSOLE_GIT_TOKEN";
+/** The flag that keeps a GitHub project's commit address. */
+const COMMIT_EMAIL = "commit-email:";
 /** Git's empty tree: the base of a folder that had no first commit. */
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const COMMIT_PATCH_BYTES = 256 * 1024;
@@ -152,9 +155,24 @@ export class Repos {
   private agentUid(): number {
     return statSync(this.o.paths.agentHome).uid;
   }
-  clone(agent: Pick<ConsoleAgent, "folder">): Clone {
-    return new Clone(this.o.launcher, agent.folder);
+  clone(agent: Pick<ConsoleAgent, "folder"> & { projectId?: string }): Clone {
+    return new Clone(this.o.launcher, agent.folder, agent.projectId ? this.o.store.flag(COMMIT_EMAIL + agent.projectId) : null);
   }
+  /** A GitHub project's commits carry the token's account's no-reply
+   * address, asked of GitHub once and kept; until GitHub has
+   * answered (asked again at most every ten minutes), the agent's own. */
+  private async commitEmail(project: ConsoleProject, epoch: number) {
+    if (project.source !== "github" || this.o.store.flag(COMMIT_EMAIL + project.id)) return;
+    if (Date.now() - (this.emailAsked.get(project.id) ?? 0) < 600_000) return;
+    this.emailAsked.set(project.id, Date.now());
+    try {
+      const email = await noReplyEmail(this.github(this.token(project.id)));
+      if (email) this.o.store.setFlag(COMMIT_EMAIL + project.id, email, epoch);
+    } catch {
+      // No token, or the worker is no longer the one writing: asked again later.
+    }
+  }
+  private emailAsked = new Map<string, number>();
   folderFor(agent: Pick<ConsoleAgent, "projectId" | "id">): string {
     return join(this.o.paths.agentHome, "work", agent.projectId, agent.id);
   }
@@ -176,8 +194,20 @@ export class Repos {
       /* Not set up: nothing to look for (and no token to push with). */
     }
   }
+  /** The commits a turn added to the agent's branch. The base branch's own
+   * history, and a merge of it, are GitHub's, not the agent's. */
   async commitsBetween(agent: ConsoleAgent, from: string | null, to: string) {
-    return this.clone(agent).commitsBetween(from, to);
+    const clone = this.clone(agent);
+    const base = this.o.store.agentBase(agent.id).baseCommit;
+    const commits = await clone.commitsBetween(from, to, base);
+    if (!base) return commits;
+    const own: typeof commits = [];
+    for (const c of commits) {
+      let ofBase = false;
+      for (const p of c.parents.slice(1)) ofBase ||= await clone.contains(p, base);
+      if (!ofBase) own.push(c);
+    }
+    return own;
   }
   /** Every path that differs between two commits, uncapped. */
   async diffPaths(agent: ConsoleAgent, from: string, to: string): Promise<string[]> {
@@ -223,7 +253,7 @@ export class Repos {
    * - No files: an empty repository of its own.
    * The project's bundle in /opt/console-shared is made and read in turn.
    */
-  async createFolder(agent: ConsoleAgent, project: ConsoleProject): Promise<{ folder: string; branch: string | null; base: string }> {
+  async createFolder(agent: ConsoleAgent, project: ConsoleProject, epoch: number): Promise<{ folder: string; branch: string | null; base: string }> {
     const folder = this.folderFor(agent);
     const clone = new Clone(this.o.launcher, folder);
     const branch = agent.permission === "edit" && project.source !== "none" ? consoleBranch(agent.id, agent.name) : null;
@@ -236,7 +266,10 @@ export class Repos {
         await mirror.update(token);
         this.checkDisk(await mirror.size());
         await mirror.bundleBase(project.baseBranch, bundle);
-        return { folder, branch, base: await clone.createFromBundle(bundle, project.baseBranch, branch) };
+        const base = await clone.createFromBundle(bundle, project.baseBranch, branch);
+        // The new folder starts from GitHub's base as it is now.
+        this.o.store.setBaseTip(epoch, project.id, base);
+        return { folder, branch, base };
       });
     }
     this.checkDisk(0);
@@ -262,6 +295,16 @@ export class Repos {
       if (made.code !== 0) throw new GitError(`Bundling the project's repository failed: ${made.stderr || `exit ${made.code}`}`);
       copyAgentFile(join(repo, "console-base.bundle"), bundle, this.agentUid());
       return { folder, branch, base: await clone.createFromBundle(bundle, "main", branch) };
+    });
+  }
+
+  /** Where GitHub's base branch is now: one request with the
+   * project's token, in turn with the project's other Git work so an older
+   * answer never replaces a newer fetch's. Nothing is fetched or merged. */
+  async checkBase(project: ConsoleProject, epoch: number) {
+    await this.serial(project.id, async () => {
+      const tip = await this.mirror(project).remoteTip(project.baseBranch, this.token(project.id));
+      if (tip) this.o.store.setBaseTip(epoch, project.id, tip);
     });
   }
 
@@ -322,35 +365,64 @@ export class Repos {
     return ref;
   }
 
+  /** GitHub's base branch as it is now, into this agent's clone (its own
+   * copy of the base branch): checked on GitHub again, fetched into
+   * the owner's mirror, then carried by the project's bundle. */
+  private fetchBase(into: ConsoleAgent, project: ConsoleProject, epoch: number): Promise<string> {
+    const ref = `refs/heads/${project.baseBranch}`;
+    const bundle = join(this.o.paths.shared, `${project.id}.bundle`);
+    return this.serial(project.id, async () => {
+      const token = this.token(project.id);
+      await checkGitHub(project.repo!, project.baseBranch, this.github(token));
+      const mirror = this.mirror(project);
+      await mirror.update(token);
+      await mirror.bundleBase(project.baseBranch, bundle);
+      const to = this.clone(into);
+      await to.fetchBundle(bundle, ref, ref);
+      const tip = await to.resolveBranch(project.baseBranch);
+      this.o.store.setBaseTip(epoch, project.id, tip);
+      return tip;
+    });
+  }
+
   /**
-   * team_pull: a teammate's latest committed work into this agent's
-   * branch. The agent's own changes so far are committed first, so
-   * the merge never mixes with uncommitted edits; the teammate's clone is
-   * only read. A clean merge (or fast-forward) is committed here; with
-   * conflicts the merge stays in progress for the agent to resolve.
+   * team_pull: a teammate's latest committed work into this
+   * agent's branch, or, with no teammate, the base branch as
+   * GitHub has it now. The agent's own changes so far are committed first,
+   * so the merge never mixes with uncommitted edits; the teammate's clone
+   * is only read. A clean merge (or fast-forward) is committed here; with
+   * conflicts the merge stays in progress for the agent to resolve. Once
+   * the branch holds the new base, its changes are compared with that.
    */
   async pull(
     me: ConsoleAgent,
-    from: ConsoleAgent,
+    from: ConsoleAgent | null,
     project: ConsoleProject,
     turnId: number,
     epoch: number,
-  ): Promise<{ state: "merged" | "current" | "conflicts"; sha: string | null; files: string[]; committed: string | null; before: string }> {
+  ): Promise<{ state: "merged" | "current" | "conflicts"; sha: string | null; files: string[]; committed: string | null; before: string; base: string | null }> {
+    await this.commitEmail(project, epoch);
     const mine = this.clone(me);
     if (await mine.merging()) throw new GitError("A merge is already in progress here. Finish it (resolve the conflicts) or call team_pull_abort.");
-    const theirs = await this.clone(from).head();
-    if (!theirs) throw new GitError(`${from.name} has no commits yet.`);
+    const theirs = from ? await this.clone(from).head() : null;
+    if (from && !theirs) throw new GitError(`${from.name} has no commits yet.`);
+    const source = from ? from.name : project.baseBranch;
     // Its sha goes back to the worker, which checks it like any turn's commit.
-    const committed = await this.commit(me, project, turnId, `Console turn ${turnId}: work so far, before pulling from ${from.name}\n\nAgent: ${me.name} (${me.id})`, epoch);
+    const committed = await this.commit(me, project, turnId, `Console turn ${turnId}: work so far, before pulling from ${source}\n\nAgent: ${me.name} (${me.id})`, epoch);
     const before = (await mine.head()) ?? "";
-    const ref = await this.fetchTeammate(from, me, theirs);
-    const { branch } = this.o.store.agentBase(from.id);
-    const message = `Merge ${from.name}'s work (${branch ?? theirs.slice(0, 8)}) into ${me.name}'s branch\n\nAgent: ${me.name} (${me.id})\nConsole-Turn: ${turnId}`;
-    if (!(await mine.merge(ref, message, me.name, me.id))) return { state: "conflicts", sha: null, files: await mine.unmerged(), committed, before };
+    const base = from ? null : await this.fetchBase(me, project, epoch);
+    const ref = from ? await this.fetchTeammate(from, me, theirs!) : `refs/heads/${project.baseBranch}`;
+    const what = from ? `${from.name}'s work (${this.o.store.agentBase(from.id).branch ?? theirs!.slice(0, 8)})` : `${project.baseBranch} (${base!.slice(0, 8)})`;
+    const message = `Merge ${what} into ${me.name}'s branch\n\nAgent: ${me.name} (${me.id})\nConsole-Turn: ${turnId}`;
+    if (!(await mine.merge(ref, message, me.name, me.id))) return { state: "conflicts", sha: null, files: await mine.unmerged(), committed, before, base };
+    if (base) this.o.store.setAgentBase(epoch, me.id, this.o.store.agentBase(me.id).branch, base);
     const head = await mine.head();
-    if (!head || head === before) return { state: "current", sha: head, files: [], committed, before };
+    if (!head || head === before) {
+      if (base) await this.refreshDiff(me, epoch);
+      return { state: "current", sha: head, files: [], committed, before, base };
+    }
     await this.record(me, turnId, head, epoch);
-    return { state: "merged", sha: head, files: [], committed, before };
+    return { state: "merged", sha: head, files: [], committed, before, base };
   }
   /** team_pull_abort: the branch goes back to how it was before the pull. */
   async abortPull(me: ConsoleAgent) {
@@ -402,11 +474,20 @@ export class Repos {
     step: { files: string[]; since: string } | null = null,
   ): Promise<string | null> {
     if (project.source === "none") return null;
+    await this.commitEmail(project, epoch);
     const clone = this.clone(agent);
     const only = step ? (p: string) => inStep(agent.folder, join(agent.folder, p), step.files) : undefined;
     const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files, only, since: step?.since });
     // A finished merge (team_pull) is no longer waiting.
-    if (sha && this.o.store.merging(agent.id) && !(await clone.merging())) this.o.store.setMerging(epoch, agent.id, null);
+    // A merge is finished whoever committed it (the agent may have, with
+    // git), or it was abandoned with git.
+    const merged = this.o.store.merging(agent.id);
+    if (merged && !(await clone.merging())) {
+      // A merge of the base branch that the branch now holds: the branch is
+      // compared with it from now.
+      if (merged.base && (await clone.contains(merged.base))) this.o.store.setAgentBase(epoch, agent.id, this.o.store.agentBase(agent.id).branch, merged.base);
+      this.o.store.setMerging(epoch, agent.id, null);
+    }
     if (!sha) return null;
     await this.record(agent, turnId, sha, epoch);
     return sha;

@@ -100,6 +100,9 @@ export interface ConsoleWorkerOptions {
   /** Events of turns older than this many days are compacted (default 30). */
   retentionDays?: number;
   retentionCheckMs?: number;
+  /** How often GitHub is asked where each project's base branch is (default
+   * ten minutes). */
+  baseCheckMs?: number;
   /** Where the page stages uploads; leftovers there are removed at start
    * (unset: not swept). */
   uploadsDir?: string;
@@ -180,6 +183,7 @@ export class ConsoleWorker {
   waits = new Map<number, { rt: Runtime; turnId: number; ruleKey: string | null; resolve: (a: OwnerAnswer) => void }>();
   private timers: ReturnType<typeof setInterval>[] = [];
   private ticking = false;
+  private checkingBases = false;
   private mcp: { url: string; close: () => Promise<void> } | null = null;
   epoch: number | null = null;
   stopped = false;
@@ -337,6 +341,7 @@ export class ConsoleWorker {
         if (n) this.log(`compacted ${n} turn(s) older than ${this.options.retentionDays ?? RETENTION_DAYS} days`);
       }, this.options.retentionCheckMs ?? 60_000),
     );
+    this.timers.push(setInterval(() => void this.checkBases(), this.options.baseCheckMs ?? 10 * 60_000));
     this.log(`worker started (lease epoch ${epoch})`);
   }
   /** Still the lease holder, and not stopping: checked immediately before
@@ -461,6 +466,26 @@ export class ConsoleWorker {
     if (!due || this.safe(() => this.store.flag(NEEDS_MAIL)) == null) return;
     if (this.safe(() => this.store.enqueueMail(needsYouKey(now), { kind: "needs_you", counts: needsCounts(needs) }, now, this.epoch!)))
       for (const key of due) this.needsMailed.add(key);
+  }
+
+  /** Where each GitHub project's base branch is now, so an editing agent
+   * whose folder was made before a merge is told, and its
+   * window shows it. One request a project each time, one project after
+   * another, and only for projects with an open editing agent. A project
+   * GitHub does not answer for is asked again next time. */
+  async checkBases() {
+    if (this.checkingBases || this.stopped || this.epoch === null) return;
+    this.checkingBases = true;
+    try {
+      const editing = new Set(this.store.agents().filter((a) => a.state === "ready" && a.permission === "edit").map((a) => a.projectId));
+      for (const project of this.store.projects()) {
+        if (this.stopped || this.epoch === null) return;
+        if (project.source !== "github" || project.state !== "ready" || project.archivedAt !== null || !editing.has(project.id)) continue;
+        await this.repos.checkBase(project, this.epoch).catch(() => {});
+      }
+    } finally {
+      this.checkingBases = false;
+    }
   }
 
   /** The dead-man's switch: one beat at a time. The fenced write is a lease
