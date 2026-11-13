@@ -1,7 +1,8 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import Markdown from "@/components/shared/Markdown";
 import { formatSize, toolPaths } from "@/lib/console/files";
 import type { Block } from "@/lib/console/transcript";
+import type { StepsRow } from "@/lib/console/ui";
 import { markdownPieces } from "@/lib/shared/markdown-stream";
 import styles from "./console.module.css";
 
@@ -39,6 +40,30 @@ const TextBlock = memo(function TextBlock({ text, live, onLink }: { text: string
   );
 });
 
+/** A run of tool rows: two or more show as one line that opens
+ * to the rows themselves. Open or closed is the owner's choice once made;
+ * until then a run with a failed tool is open. A single tool is drawn in
+ * the same place, so a row keeps what the owner opened when a second tool
+ * joins it. */
+export function StepsView({ row, onLink, onOpenFile }: { row: StepsRow; onLink: (href: string) => boolean; onOpenFile: (path: string) => void }) {
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? row.failed > 0;
+  return (
+    <div className={styles.steps}>
+      {row.line && (
+        <button className={row.failed ? `${styles.stepsLine} ${styles.stepsFailed}` : styles.stepsLine} aria-expanded={open} onClick={() => setChosen(!open)}>
+          <span aria-hidden="true">{open ? "▼" : "▶"}</span> {row.line}
+        </button>
+      )}
+      <div className={row.line ? `${styles.steps} ${styles.stepsRows}` : styles.steps} hidden={!!row.line && !open}>
+        {row.blocks.map((b) => (
+          <BlockView key={b.key} block={b} onLink={onLink} onOpenFile={onOpenFile} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** `live`: the block is the reply still streaming. */
 export default function BlockView({
   block,
@@ -56,6 +81,12 @@ export default function BlockView({
       return (
         <div className={styles.owner}>
           {block.text}
+          {block.during && (
+            <span className={styles.chip} title="The agent got this message in the middle of the turn it was working on">
+              {" "}
+              sent during the turn
+            </span>
+          )}
           {block.edited && (
             <span className={styles.chip} title="Edited while it waited">
               {" "}

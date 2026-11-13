@@ -52,7 +52,12 @@ export function claudeArgs(launch: ClaudeLaunch): string[] {
 
 /** What one stream-json line means to the Console. */
 export type ClaudeEvent =
-  | { type: "init"; sessionId: string | null; model: unknown; apiKeySource: unknown }
+  /** `capabilities`: the protocol features the client says it has. */
+  | { type: "init"; sessionId: string | null; model: unknown; apiKeySource: unknown; capabilities: string[] }
+  /** What became of a message written with a uuid (`command_lifecycle`):
+   * queued, started (taken into a turn), completed, or cancelled,
+   * discarded, refused (it will not run). */
+  | { type: "lifecycle"; uuid: string; state: string }
   | { type: "fallback" }
   | { type: "model"; model: unknown }
   | { type: "delta"; kind: "text" | "thinking"; text: string }
@@ -127,6 +132,7 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
           sessionId: typeof line.session_id === "string" ? line.session_id : null,
           model: line.model,
           apiKeySource: line.apiKeySource,
+          capabilities: Array.isArray(line.capabilities) ? line.capabilities.filter((c): c is string => typeof c === "string") : [],
         },
       ];
     if (line.subtype === "model_fallback" || line.subtype === "model_consent_fallback") return [{ type: "fallback" }];
@@ -181,6 +187,7 @@ export function readClaudeEvent(line: Record<string, unknown>): ClaudeEvent[] {
       },
     ];
   }
+  if (type === "command_lifecycle") return [{ type: "lifecycle", uuid: String(line.command_uuid ?? ""), state: String(line.state ?? "") }];
   if (type === "rate_limit_event") {
     const info = line.rate_limit_info as { status?: unknown; resetsAt?: unknown } | undefined;
     return [{ type: "rate_limit", status: String(info?.status ?? "unknown"), resetsAt: count(info?.resetsAt) ?? null }];
@@ -254,9 +261,18 @@ export class ClaudeProcess extends ClientProcess {
   prompt(text: string): Promise<void> {
     return this.write({ type: "user", message: { role: "user", content: text } });
   }
-  /** Ask Claude Code to stop the current turn; the process stays alive. */
+  /** Steer: a message written while a turn runs waits in the
+   * client's own queue and is taken into that turn at its next tool step
+   * ("next", the client's default); one that arrives after the last step
+   * starts a turn of its own in the client. The uuid makes the client
+   * report what became of it (`command_lifecycle`). */
+  steer(uuid: string, text: string): Promise<void> {
+    return this.write({ type: "user", uuid, priority: "next", message: { role: "user", content: text } });
+  }
+  /** Ask Claude Code to stop the current turn; the process stays alive.
+   * `cancel_queued`: a message still in its queue is dropped with it. */
   interrupt(id: string) {
-    this.send({ type: "control_request", request_id: id, request: { subtype: "interrupt" } });
+    this.send({ type: "control_request", request_id: id, request: { subtype: "interrupt", cancel_queued: true } });
   }
   /** Answer a `can_use_tool` control request. */
   answer(requestId: string, behavior: "allow" | "deny", message: string, input?: unknown) {

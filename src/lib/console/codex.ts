@@ -200,8 +200,8 @@ export class CodexServer extends RpcProcess {
   /** One request. A timeout rejects with outcome `unknown`: the server may
    * have accepted it. `late` then receives the reply if it still arrives:
    * the result, or the refusal (nothing was accepted). */
-  call(method: string, params: unknown, timeoutMs = 60_000, late?: LateReply): Promise<Record<string, unknown>> {
-    return this.request(method, params, { timeoutMs, late });
+  call(method: string, params: unknown, timeoutMs = 60_000, late?: LateReply, answered?: (ok: boolean) => void): Promise<Record<string, unknown>> {
+    return this.request(method, params, { timeoutMs, late, answered });
   }
 
   /** Initialize and check the login, with no switch either way: a

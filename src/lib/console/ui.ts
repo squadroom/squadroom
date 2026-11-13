@@ -4,6 +4,7 @@ import type { CleanupItem } from "./cleanup.ts";
 import type { ArchiveImpact, TimelineEntry } from "./views.ts";
 import type { NeedsLike } from "./notify.ts";
 import type { Overview } from "./overview.ts";
+import type { Block } from "./transcript.ts";
 import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, turnLimits, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
 
 // The Console page's decisions, pure and browser-safe (no DOM, no
@@ -54,6 +55,60 @@ export function keepIfSame<T extends object>(previous: T | null, next: T | null)
   const b = next as Record<string, unknown>;
   const keys = Object.keys(b);
   return keys.length === Object.keys(a).length && keys.every((k) => Object.is(a[k], b[k])) ? previous : next;
+}
+
+/** A run of tool rows in a window's transcript. `line` is the
+ * one line shown for two or more tools ("18 steps: 10 Edit, 5 Read, 2 Write,
+ * 1 Grep"), or null for a single tool, which shows as it always did. */
+export interface StepsRow {
+  type: "steps";
+  /** The run's first row's, so it stays the same while the run grows. */
+  key: string;
+  blocks: Block[];
+  line: string | null;
+  /** Tools in the run that failed: the line says so and the run opens. */
+  failed: number;
+}
+
+/**
+ * A window's transcript with each run of tool rows gathered.
+ * A run is consecutive tool rows; a Thinking row or an "allowed" line
+ * between them (an Always rule, Network auto) stays in the run, uncounted.
+ * Anything else ends it: text, a message, team mail, a push, an error, how
+ * a turn ended, and every request waiting for the owner or refused, so
+ * those always show. A
+ * failed tool is counted on the line. `working`: the agent's turn is
+ * running, so tools of the last run with no result yet are counted as
+ * running.
+ */
+export function transcriptRows(blocks: Block[], working = false): (Block | StepsRow)[] {
+  const rows: (Block | StepsRow)[] = [];
+  let run: Block[] = [];
+  const flush = (last: boolean) => {
+    const tools = run.filter((b) => b.type === "tool");
+    if (!tools.length) rows.push(...run);
+    else {
+      const failed = tools.filter((t) => t.error).length;
+      const running = working && last ? tools.filter((t) => t.output === null).length : 0;
+      const counts = new Map<string, number>();
+      for (const t of tools) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+      // Most used first; a tie keeps the order they first ran in.
+      const names = [...counts].sort((a, b) => b[1] - a[1]).map(([name, n]) => `${n} ${name}`);
+      const line =
+        tools.length < 2 ? null : `${tools.length} steps: ${names.join(", ")}${failed ? ` · ${failed} failed` : ""}${running ? ` · ${running} running` : ""}`;
+      rows.push({ type: "steps", key: `steps-${run[0].key}`, blocks: run, line, failed });
+    }
+    run = [];
+  };
+  for (const b of blocks) {
+    if (b.type === "tool" || b.type === "thinking" || (b.type === "permission" && b.decision === "allow")) run.push(b);
+    else {
+      flush(false);
+      rows.push(b);
+    }
+  }
+  flush(true);
+  return rows;
 }
 
 /** Where a project's agents work, in words (the project switcher's hint). */

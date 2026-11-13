@@ -33,6 +33,21 @@
 //   parallelwait  two permission requests at once (as two helpers would);
 //              the branch answered first writes parallel-resumed and keeps
 //              talking while the other still waits
+// Steer: turns that wait, announcing (but for `slow`) that the client
+// reports what becomes of a message written with a uuid and drops a queued
+// one on an interrupt that asks it to. Each such message is recorded in
+// steers.jsonl.
+//   steerable  takes each message into the turn at once ("started") and
+//              says it; the message "finish" ends the turn
+//   late       the turn's result is already out when the message is taken:
+//              the client starts a turn of its own with it (a second result)
+//   latetwo    as late, but that second turn waits for another message,
+//              refuses it, and only then gives its result
+//   dropsteer  refuses the message, then ends the turn
+//   holdsteer  queues the message and takes it only when the turn ends; an
+//              interrupt drops it ("cancelled")
+//   keepsteer  as holdsteer, but an interrupt does not drop the message
+//   slow       no such announcement; ends by itself after a moment
 // Team tools over the Console's MCP server:
 //   tools      lists the tools its session is offered
 //   team_list, team_push
@@ -108,7 +123,57 @@ const say = (text) => {
   send({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
   send({ type: "assistant", message: { model, content: [{ type: "text", text }] } });
 };
-let waiting = null; // "hang" | "deaf"
+let waiting = null; // "hang" | "deaf" | a steer word
+const STEER_WORDS = ["steerable", "late", "latetwo", "latetwo-second", "dropsteer", "holdsteer", "keepsteer"];
+const CAPS = ["interrupt_receipt_v1", "interrupt_cancel_queued_v1", "msg_lifecycle_v1"];
+const lifecycle = (uuid, state) => send({ type: "command_lifecycle", command_uuid: uuid, state, session_id: session });
+const heldSteers = [];
+/** A message written with a uuid while a steer turn waits. */
+function steer(q) {
+  const [uuid, text] = [q.uuid, q.message.content];
+  fs.appendFileSync("steers.jsonl", JSON.stringify({ uuid, priority: q.priority, text, during: waiting }) + "\n");
+  if (waiting === "dropsteer") {
+    waiting = null;
+    lifecycle(uuid, "refused");
+    return setTimeout(() => {
+      say("carried on");
+      result("ok");
+    }, 200);
+  }
+  if (waiting === "holdsteer" || waiting === "keepsteer") {
+    lifecycle(uuid, "queued");
+    return heldSteers.push(uuid);
+  }
+  if (waiting === "latetwo-second") {
+    waiting = null;
+    lifecycle(uuid, "refused");
+    return setTimeout(() => {
+      say("second answer");
+      result("second answer");
+    }, 300);
+  }
+  if (waiting === "late" || waiting === "latetwo") {
+    // The result first: the message then starts the client's next turn.
+    const two = waiting === "latetwo";
+    waiting = two ? "latetwo-second" : null;
+    say("first answer");
+    result("first answer");
+    lifecycle(uuid, "queued");
+    lifecycle(uuid, "started");
+    init({ capabilities: CAPS });
+    if (two) return;
+    say(`steered: ${text}`);
+    result(`steered: ${text}`);
+    return lifecycle(uuid, "completed");
+  }
+  lifecycle(uuid, "queued");
+  lifecycle(uuid, "started");
+  say(`steered: ${text}`);
+  if (text !== "finish") return;
+  waiting = null;
+  lifecycle(uuid, "completed");
+  result("finished");
+}
 async function approve(path, tool = "Write", input = { file_path: path, content: "x" }) {
   const response = await fetch(mcp.url, {
     method: "POST",
@@ -148,6 +213,11 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
       waiting = null;
       result("", { subtype: "error_during_execution", is_error: true });
     }
+    if (STEER_WORDS.includes(waiting)) {
+      if (q.request.cancel_queued && waiting !== "keepsteer") for (const uuid of heldSteers.splice(0)) lifecycle(uuid, "cancelled");
+      waiting = null;
+      result("", { subtype: "error_during_execution", is_error: true });
+    }
     if (waiting?.startsWith("stopapprove ")) {
       // Asks for a tool after being told to stop, then stops.
       const decision = await approve(waiting.slice(12));
@@ -162,6 +232,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
     return;
   }
   if (q.type !== "user") return;
+  if (q.uuid && STEER_WORDS.includes(waiting)) return steer(q);
   // The prompt arrived: the harness's `started` waits for this mark.
   fs.appendFileSync(`${process.env.HOME}/claude-prompts.jsonl`, JSON.stringify({ cwd: process.cwd(), at: Date.now() }) + "\n");
   // A Console upload notice comes first; the owner's own words follow it.
@@ -191,7 +262,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
     say(`decision: ${decision.behavior}`);
     return result(decision.behavior);
   }
-  init();
+  init(STEER_WORDS.includes(word) ? { capabilities: CAPS } : {});
   if (word === "parallelwait") {
     const first = approve("", "ParallelOne", {}).then(() => {
       fs.writeFileSync("parallel-resumed", "yes");
@@ -426,6 +497,16 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
       send({ type: "assistant", message: { model, content: [{ type: "tool_use", id: "toolu_agent1", name: "Agent", input: { description: "Look around", subagent_type: "Explore", prompt: "x" } }] } });
     waiting = "hang";
     return;
+  }
+  if (STEER_WORDS.includes(word)) {
+    say("working");
+    waiting = word;
+    return;
+  }
+  if (word === "slow") {
+    await new Promise((r) => setTimeout(r, 700));
+    say("slow done");
+    return result("ok");
   }
   if (word === "flood") {
     for (let i = 0; i < 40; i++)

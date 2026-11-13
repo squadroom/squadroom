@@ -97,6 +97,7 @@ export const agent = (r: Row): ConsoleAgent => ({
   effort: (r.effort as ConsoleEffort | null) ?? null,
   permission: r.permission as Permission,
   askFirst: r.ask_first === 1,
+  networkAuto: r.network_auto === 1,
   folder: r.folder as string,
   state: r.state as ConsoleAgent["state"],
   error: (r.error as string | null) ?? null,

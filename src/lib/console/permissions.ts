@@ -264,6 +264,15 @@ export function urlHost(url: unknown): string | null {
   }
 }
 
+/** How an automatic allow reads in the transcript and the stored request. */
+export const NETWORK_AUTO = "Network auto";
+/** A request the Network setting covers, told by what every network
+ * request already carries: a host rule (a command's network access,
+ * Claude's WebFetch) or, with no rule at all, Claude's WebSearch. The one
+ * test for both an agent on Auto and the requests settled when it is
+ * switched to Auto. */
+export const networkRequest = (tool: string, ruleKey: string | null | undefined) => (ruleKey ? ruleKey.startsWith("network:") : tool === "WebSearch");
+
 /**
  * What "Always for this agent" remembers for a command: the exact command
  * as written (only its ends trimmed: spaces inside quotes are part of an

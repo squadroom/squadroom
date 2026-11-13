@@ -163,6 +163,17 @@ export interface AgentSession {
   stale(agent: ConsoleAgent): boolean;
   /** Start a turn: the paid request. */
   prompt(turn: TurnRequest): Promise<PromptResult>;
+  /** Steer: the running turn can be handed an owner message
+   * now; null while that is not known yet (the client has not started the
+   * turn). Absent for a client that takes none in the middle of a turn
+   * (ACP): its messages wait for the turn's end. */
+  readonly steerable?: boolean | null;
+  /** Hand it over. `taken` is called exactly once, as the turn ends at the
+   * latest (after `endTurn`, for an answer read with the turn's end): true
+   * once the client has taken the message into this turn;
+   * false when it has not and will not (it refused, or the turn ended or
+   * was stopped first), and the message stays queued. */
+  steer?(text: string, taken: (ok: boolean) => void): void;
   /** The polite stop; `force` says the owner's Force stop (a shared
    * process then starts no other turn until it is ended). */
   interrupt(options?: { force?: boolean }): void;
@@ -400,8 +411,9 @@ interface RpcCallOptions {
    * program is gone, an error when the write failed with the program still
    * running (then whether it read the request cannot be known). */
   written?: (outcome: "written" | "gone" | "unknown") => void;
-  /** Told as the reply is read, before the next line is. */
-  answered?: () => void;
+  /** Told as the reply is read, before the next line is: whether it is a
+   * result (not a refusal). */
+  answered?: (ok: boolean) => void;
   /** After a timeout, still handed the reply should it come, once. */
   late?: LateReply;
 }
@@ -417,7 +429,7 @@ export abstract class RpcProcess extends ClientProcess {
   private nextId = 1;
   private calls = new Map<
     number,
-    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: () => void }
+    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: (ok: boolean) => void }
   >();
   /** Calls that timed out whose caller still wants the reply. */
   private late = new Map<number, LateReply>();
@@ -461,7 +473,7 @@ export abstract class RpcProcess extends ClientProcess {
     if (call.timer) clearTimeout(call.timer);
     // Told at once, before the next line is read (a promise settles only
     // after this read), so what the program says later is not this call's.
-    call.answered?.();
+    call.answered?.(!error);
     if (error) call.reject(error);
     else call.resolve(result);
   }

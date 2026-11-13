@@ -57,6 +57,11 @@ export const pause = {
     if (tab !== null) return tab || "This tab is paused.";
     return null;
   },
+  /** Whether an agent's queue waits for the owner's Resume: a pause, or
+   * its tab's usage hold. */
+  held(this: ConsoleStore, agent: Pick<ConsoleAgent, "projectId" | "tabId">): boolean {
+    return this.pausedFor(agent) !== null || this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", agent.tabId)?.usage_hold != null;
+  },
   pauseReason(this: ConsoleStore, scope: "tab" | "project", id: string): string | null {
     const r = this.get(`SELECT paused, pause_reason FROM console_${scope === "tab" ? "tabs" : "projects"} WHERE id = ?`, id);
     return r?.paused ? ((r.pause_reason as string | null) ?? "") : null;

@@ -42,6 +42,8 @@ class CodexSession implements AgentSession {
   /** Each item's files, rename destinations included (the file-change
    * approval checks them; none when they could not be read). */
   items = new Map<string, string[]>();
+  /** turn/steer calls not yet answered. */
+  private steers = new Set<(ok: boolean) => void>();
 
   constructor(driver: CodexLoginDriver, ctx: SessionContext) {
     this.driver = driver;
@@ -125,6 +127,33 @@ class CodexSession implements AgentSession {
     if (this.stopWanted) this.sendInterrupt();
   }
 
+  /** Steer: the App Server's turn/steer adds input to the turn
+   * that is running, named by its id (it refuses if that turn is no longer
+   * the active one, or is a review or a compaction). Its answer says it was
+   * taken; a refusal leaves the message queued. No answer in time is
+   * neither: the claim is kept (the message cannot be edited) until the
+   * answer comes late or the turn ends, and only then is it queued again
+   * (the agent may then see it twice, rather than never). */
+  get steerable() {
+    if (!this.turn || this.stopWanted || this.unknown) return false;
+    // The turn's id comes with turn/start's answer.
+    return this.started ? !!this.turnId : null;
+  }
+  steer(text: string, taken: (ok: boolean) => void) {
+    const server = this.driver.current;
+    if (!this.steerable || !this.thread || !server) return taken(false);
+    const settle = (ok: boolean) => {
+      if (this.steers.delete(settle)) taken(ok);
+    };
+    this.steers.add(settle);
+    server
+      // Settled as the answer is read, not when its promise resolves (a
+      // tick later): the turn's end may be read just before or after it.
+      .call("turn/steer", { threadId: this.thread.id, expectedTurnId: this.turnId, input: [{ type: "text", text, text_elements: [] }] }, this.driver.callMs, (reply) => settle("result" in reply), settle)
+      .catch((error: unknown) => {
+        if (!(error instanceof CodexError) || error.outcome !== "unknown") settle(false);
+      });
+  }
   interrupt(options: { force?: boolean } = {}) {
     this.stopWanted = true;
     if (options.force) this.forcing = true;
@@ -155,6 +184,11 @@ class CodexSession implements AgentSession {
     if (this.thread && this.turnId) this.thread.lastTurnId = this.turnId;
     this.turn = null;
     this.forcing = false;
+    // After this pass of the server's output: an answer to turn/steer read
+    // together with the turn's end, before it or after it, is applied as
+    // it is read, so a message the server took is never queued again.
+    const open = [...this.steers];
+    if (open.length) queueMicrotask(() => open.forEach((settle) => settle(false)));
   }
   close() {
     this.exited = true;

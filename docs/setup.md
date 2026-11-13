@@ -235,7 +235,7 @@ How sign-in works with and without them:
 | Emergency link | `npm run emergency` prints a single-use link (10 minutes) that replaces the sign-in's code step when mail is down; weighty actions still need a code | Not needed (the command says so) |
 
 Weighty actions are: **Always** permission rules, deleting folders in
-Clean up, switching **Ask me first** off, the ACP network switch, turning
+Clean up, switching **Ask me first** off, switching an agent's **Network** to Auto, the ACP network switch, turning
 image tools on, raising or removing a spend limit (a tab's or the
 Console-wide one), **Reset spend** and **Reset Console spend**, and every change on the Keys
 page. In a project where any agent (open or closed) has Ask me first on,
@@ -393,6 +393,28 @@ Things to know while using it:
   level. Its AI (Claude Code, Codex, …) stays the same. A turn that is
   running finishes as it began; the next one starts a new process with the
   new model, in the same conversation.
+- **Network…** (a Claude Code or Codex window's ⋯ menu) sets how that
+  agent's network requests are handled. **Ask**, the default, puts each
+  website it wants to reach in Needs you. On **Auto** it reaches any
+  website without asking: its commands' network access, WebFetch and
+  WebSearch. Each request is still noted in its window, and the window's
+  header shows **Network auto** while it is on. Turning Auto on needs a
+  fresh e-mailed code, and allows the requests that agent has waiting.
+  Everything else is asked or refused as before. An agent on Auto could
+  send anything it can read to any site, so keep it for agents whose
+  folders hold nothing you would mind leaking. Other agents have no such
+  setting; their network is the project's switch.
+- **Steer.** A message you send while an agent works waits in its queue.
+  When the agent is Claude Code or Codex and its turn is running, your
+  first queued message has a **Steer** button. Click it and the message
+  goes into that turn; the agent reads it at its next step, and the
+  transcript shows it there, marked "sent during the turn". After the
+  click it can't be edited or deleted. If the agent can't take it, it goes
+  back to the queue and runs as its own turn. Messages with files,
+  Re-sends and summary requests always wait for the turn to end.
+- **Tool rows.** Two or more tool rows in a row show as one line ("18
+  steps: 10 Edit, 5 Read, 2 Write, 1 Grep"). Click it to open the rows. A
+  failed tool is counted on the line and the run starts open.
 - **Checks.** In a GitHub project an editing agent can read the GitHub
   Actions checks of its pull request's latest pushed commit with
   `team_checks`, and the end of one job's log with `team_checks(job: n)`.

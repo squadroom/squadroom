@@ -113,7 +113,8 @@ export function acpToolLabel(kind: string, title: string): { name: string; summa
 }
 
 export type Block =
-  | { type: "owner"; key: string; text: string; edited?: boolean }
+  /** `during`: the agent took it in the middle of a turn. */
+  | { type: "owner"; key: string; text: string; edited?: boolean; during?: boolean }
   | { type: "text"; key: string; text: string }
   | { type: "thinking"; key: string; text: string }
   | { type: "tool"; key: string; name: string; summary: string; output: string | null; error: boolean }
@@ -135,9 +136,13 @@ export function transcript(events: ConsoleEvent[]): Block[] {
   // events are append-only, so revisions come later in the stream.
   const revised = new Map<number, string>();
   const withdrawn = new Set<number>();
+  // Messages the agent took during a running turn: each shows
+  // where it arrived (its "steer" row), not where it was written.
+  const steered = new Set<number>();
   for (const e of events) {
     if (e.kind === "revised") revised.set(e.turnId, String((e.body as { text?: unknown }).text ?? ""));
     else if (e.kind === "withdrawn") withdrawn.add(e.turnId);
+    else if (e.kind === "steer") steered.add(Number((e.body as { from?: unknown }).from));
   }
   // The turn each block came from: streamed text joins the last block only
   // when that block is the same turn's. (Comparing with the last event's
@@ -147,7 +152,7 @@ export function transcript(events: ConsoleEvent[]): Block[] {
   for (const e of events) {
     // Never interleaved with the running turn's own rows.
     if (e.kind === "revised" || e.kind === "withdrawn") continue;
-    if (e.kind === "owner" && withdrawn.has(e.turnId)) continue;
+    if (e.kind === "owner" && (withdrawn.has(e.turnId) || steered.has(e.turnId))) continue;
     const body = e.body as Record<string, unknown>;
     const last = blocks.at(-1);
     const key = String(e.id);
@@ -159,6 +164,9 @@ export function transcript(events: ConsoleEvent[]): Block[] {
         blocks.push(latest === undefined ? { type: "owner", key, text: String(body.text ?? "") } : { type: "owner", key, text: latest, edited: true });
         break;
       }
+      case "steer":
+        blocks.push({ type: "owner", key, text: String(body.text ?? ""), during: true, ...(revised.has(Number(body.from)) ? { edited: true } : {}) });
+        break;
       case "text":
       case "thinking":
         if (sameTurn && last?.type === e.kind) last.text += String(body.text ?? "");
@@ -184,9 +192,10 @@ export function transcript(events: ConsoleEvent[]): Block[] {
         break;
       }
       case "permission":
-        // Allowed actions show as their tool rows; refusals, owner requests
-        // and the owner's own approvals get a line.
-        if (body.decision === "allow" && !/owner/.test(String(body.reason ?? ""))) break;
+        // Allowed actions show as their tool rows; refusals, owner requests,
+        // the owner's own approvals and what Network auto let through
+        // get a line.
+        if (body.decision === "allow" && !/owner|^Network auto: /.test(String(body.reason ?? ""))) break;
         blocks.push({
           type: "permission",
           key,

@@ -315,6 +315,47 @@ export const turns = {
       });
   },
 
+  /** Steer: each message the owner clicked Steer on is handed
+   * to its agent's running turn, if that turn can take it now: its session
+   * says so, it is not waiting for the owner or being stopped, and no
+   * other message is on its way into it. It shows in the turn once the
+   * client has taken it. If no turn can take it (the turn ended first), or
+   * the client does not take it, it is an ordinary queued message again.
+   * So is one whose agent was paused, or whose tab began a usage hold,
+   * after the click and before the hand-over: it waits for Resume. */
+  steerTurns(this: ConsoleWorker): void {
+    const epoch = this.epoch!;
+    const out = new Set([...this.runtimes.values()].map((rt) => rt.turn?.steering));
+    for (const row of this.safe(() => this.store.steering()) ?? []) {
+      if (out.has(row.id)) continue;
+      const rt = this.runtimes.get(row.agentId);
+      const t = rt?.turn;
+      const session = rt?.session;
+      // Checked again here, not only at the click: a pause since then holds
+      // the message, also while the client is still starting the turn.
+      const held = !!rt && this.safe(() => this.store.held(this.store.agent(row.agentId) ?? rt.agent)) !== false;
+      const ready = !held && !!t && !t.stopping && t.waitingSince === null && t.steering === undefined;
+      // The client has not started the turn yet: asked again next pass.
+      if (ready && (session?.steerable === null || (session?.steerable && !t.validated))) continue;
+      const can = !!rt && ready && !!session?.steerable && !!session.steer;
+      if (!can || this.overSpend(rt.agent.tabId, !!rt.model.paid)) {
+        this.safe(() => this.store.releaseSteer(epoch, row.id));
+        continue;
+      }
+      t.steering = row.id;
+      session.steer!(row.prompt, (taken) => {
+        // The session answers once, by the turn's end at the latest.
+        const live = rt.turn === t;
+        if (live) t.steering = undefined;
+        // What the agent said before it is written first, so the message
+        // shows where it arrived.
+        if (live && taken) t.events.flush();
+        this.safe(() => (taken ? this.store.confirmSteer(epoch, row.id, t.id) : this.store.releaseSteer(epoch, row.id)));
+        if (live) t.events.atLeast(this.store.turnBytes(t.id));
+      });
+    }
+  },
+
   // ── Limits and stops ────────────────────────────────────────────────────
 
   handleStops(this: ConsoleWorker, open: TurnRow[]): void {

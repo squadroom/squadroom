@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { McpBackend, ToolResult } from "../../shared/mcp.ts";
 import { AcpDriver } from "../acp-session.ts";
-import { decide, inside, realInside, type Decision } from "../permissions.ts";
+import { decide, inside, NETWORK_AUTO, networkRequest, realInside, type Decision } from "../permissions.ts";
 import { truncateBytes } from "../redact.ts";
 import { errorMessage as message } from "../session.ts";
 import { claimCovers } from "../claims.ts";
@@ -77,6 +77,16 @@ export const needs = {
     let decision = policy;
     if (decision.behavior === "ask" && decision.ruleKey && this.store.hasRule(rt.agent.id, decision.ruleKey))
       decision = { behavior: "allow", reason: "Allowed always for this agent by the owner." };
+    // Network on Auto: the one place a network request, from any client,
+    // becomes an allow instead of a Needs you item. Read from the store
+    // each time, so the owner's switch holds from the next request.
+    const auto = policy.behavior === "ask" && !policy.question && networkRequest(tool, policy.ruleKey);
+    const autoReason = () =>
+      auto && this.store.agent(rt.agent.id)?.networkAuto ? `${NETWORK_AUTO}: ${this.redactor.text(policy.summary ?? tool).slice(0, 300)}, allowed without asking.` : null;
+    if (decision.behavior === "ask") {
+      const reason = autoReason();
+      if (reason) decision = { behavior: "allow", reason };
+    }
     if (decision.behavior !== "ask") {
       // An allow that could not be stored (a full turn, a store failure)
       // is not given.
@@ -85,6 +95,9 @@ export const needs = {
     }
     const id = this.record(rt, tool, input, decision);
     if (id === null) return deny("This turn reached its output limit.");
+    // The owner's switch to Auto may have landed between the check above
+    // and this request: it is allowed as the switch allows the others.
+    if (autoReason()) this.safe(() => this.store.allowWaitingNetwork(this.epoch!, rt.agent.id));
     const answer = await new Promise<OwnerAnswer>((resolve) =>
       this.waits.set(id, { rt, turnId: t.id, ruleKey: decision.ruleKey ?? null, resolve }),
     );
@@ -94,7 +107,8 @@ export const needs = {
         ? `The owner answered: ${answer.answer}`
         : "The owner did not answer."
       : answer.allow
-        ? "Allowed by the owner."
+        ? // The owner switched this agent to Auto while it waited (settled then).
+          (autoReason() ?? "Allowed by the owner.")
         : "Denied by the owner.";
     if (rt.turn === t) t.events.emit("permission", { tool, decision: answer.allow ? "allow" : "deny", reason });
     // A question is answered through a denial carrying the answer (Claude

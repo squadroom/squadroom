@@ -534,3 +534,41 @@ export function AgentAiDialog({ agent, run, onClose }: { agent: ProjectView["age
     </Dialog>
   );
 }
+
+/** An agent's Network setting, from its window's menu: Ask (a
+ * Needs you item per website, as before) or Auto. Auto needs a fresh code;
+ * the page asks for it. */
+export function AgentNetworkDialog({ agent, run, onClose }: { agent: ProjectView["agents"][number]; run: Run; onClose: () => void }) {
+  const [auto, setAuto] = useState(!!agent.networkAuto);
+  return (
+    <Dialog title={`Network: ${agent.name}`} onClose={onClose}>
+      <div className={styles.spendLimit}>
+        <label className={styles.radio}>
+          <input type="radio" name="agent-network" checked={!auto} onChange={() => setAuto(false)} />
+          Ask: each website it wants to reach waits for you in Needs you
+        </label>
+        <label className={styles.radio}>
+          <input type="radio" name="agent-network" checked={auto} onChange={() => setAuto(true)} />
+          Auto: it reaches websites without asking
+        </label>
+      </div>
+      <p className={styles.hint}>
+        On Auto this agent can reach any website without asking, which also means it could send anything it can read to any site. That covers its commands&apos;
+        network access, WebFetch and WebSearch; each one is still noted in its window. Requests it has waiting now are allowed when you save. Everything else
+        is asked or refused as before, and Forget its Always rules does not change this setting.
+      </p>
+      <div className={styles.dialogButtons}>
+        <button onClick={onClose}>Cancel</button>
+        <button
+          className={styles.primary}
+          disabled={auto === !!agent.networkAuto}
+          onClick={async () => {
+            if (await run({ action: "setNetwork", agentId: agent.id, auto })) onClose();
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </Dialog>
+  );
+}

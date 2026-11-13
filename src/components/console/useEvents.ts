@@ -61,7 +61,7 @@ export function useEvents(projectId: string | null, onStatus: () => void) {
           byAgent.set(event.agentId, own);
           touched.add(event.agentId);
           appendEvent(own, event);
-          if (event.kind === "status" || event.kind === "owner") status = true;
+          if (event.kind === "status" || event.kind === "owner" || event.kind === "steer") status = true;
         }
         publish();
         if (status) statusRef.current();
