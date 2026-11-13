@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { agentKind, reportsExpectedModel, type AgentModel } from "./agents.ts";
 import { claudeArgs, ClaudeProcess, PERMISSION_TOOL, toolSummary, type ClaudeEvent } from "./claude.ts";
 import { claudeSettings, decideControl } from "./permissions.ts";
-import { errorMessage, guarded, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type SessionTotals, type TurnRequest } from "./session.ts";
+import { errorMessage, guarded, OwnProcessDriver, type AgentDriver, type AgentSession, type PromptResult, type SessionContext, type SessionEvent, type SessionTotals, type TurnRequest } from "./session.ts";
 import { claudeTaskOp, unfollowable } from "./tasks.ts";
 import type { ConsoleAgent, TurnUsage } from "./types.ts";
 
@@ -118,6 +118,25 @@ function readTotals(value: unknown): ModelPart[] | null {
   return ok ? (value as ModelPart[]) : null;
 }
 
+/** What Claude Code must announce in its init event before a message is
+ * handed to a running turn: that it reports what becomes of a queued
+ * message, and that an interrupt can drop one still queued. */
+export const STEER_CAPABILITIES = ["msg_lifecycle_v1", "interrupt_cancel_queued_v1"];
+
+/** Two results' usage as one turn's: a figure either lacks is unknown, and
+ * so is the whole when either is. */
+export function sumUsage(a: TurnUsage | null, b: TurnUsage | null): TurnUsage | null {
+  if (!a || !b) return null;
+  const out: TurnUsage = {};
+  for (const f of ["inputTokens", "cacheReadTokens", "cacheWriteTokens", "outputTokens", "turns", "durationMs"] as const) {
+    const [x, y] = [a[f], b[f]];
+    if (x !== undefined && y !== undefined) out[f] = x + y;
+  }
+  return out;
+}
+
+type Completed = Extract<SessionEvent, { kind: "completed" }>;
+
 class ClaudeSession implements AgentSession {
   private proc: ClaudeProcess;
   private ctx: SessionContext;
@@ -131,6 +150,23 @@ class ClaudeSession implements AgentSession {
   private discard = false;
   private topModel: string | undefined;
   private taskCalls = new Set<string>();
+  // Steer.
+  /** The client announced what steering relies on (its init event). */
+  private canSteer = false;
+  /** Messages written to the running turn that the client has not taken
+   * yet, by uuid, each with what to call when it is taken or dropped. */
+  private steers = new Map<string, (ok: boolean) => void>();
+  /** A result that came while such a message was still untaken: the client
+   * starts a turn of its own with the message at once, which is still this
+   * Console turn, so its end waits for that one's result. */
+  private held: Completed | null = null;
+  /** That turn has started (its message was taken): only its result ends
+   * the Console turn, whatever becomes of a later message. */
+  private continued = false;
+  private stopped = false;
+  /** A message may run in the client with no turn to own it (an interrupt
+   * did not drop it): the process is ended, and replaced before its next use. */
+  private spent = false;
   /** The last result's running totals in this process (`modelUsage`);
    * null until one is seen for a resumed session whose totals neither this
    * worker nor the store knows. */
@@ -175,7 +211,7 @@ class ClaudeSession implements AgentSession {
   /** Settings are fixed at spawn, so a new teammate's clone or a new
    * project's folder restarts the process (resuming its session). */
   stale(agent: ConsoleAgent) {
-    return this.askFirst !== !!agent.askFirst || JSON.stringify(this.driver.host.deniedFolders(agent)) !== JSON.stringify(this.others);
+    return this.spent || this.askFirst !== !!agent.askFirst || JSON.stringify(this.driver.host.deniedFolders(agent)) !== JSON.stringify(this.others);
   }
   async prompt(turn: TurnRequest): Promise<PromptResult> {
     this.active = true;
@@ -183,6 +219,10 @@ class ClaudeSession implements AgentSession {
     this.discard = false;
     this.topModel = undefined;
     this.taskCalls = new Set();
+    this.canSteer = false;
+    this.held = null;
+    this.continued = false;
+    this.stopped = false;
     try {
       turn.sending();
       await this.proc.prompt(turn.text);
@@ -192,7 +232,24 @@ class ClaudeSession implements AgentSession {
     turn.delivered();
     return { outcome: "started" };
   }
+  get steerable() {
+    if (!this.active || this.stopped || this.discard) return false;
+    // Its init line says whether it can.
+    return this.initSeen ? this.canSteer : null;
+  }
+  steer(text: string, taken: (ok: boolean) => void) {
+    if (!this.steerable) return taken(false);
+    const uuid = randomUUID();
+    this.steers.set(uuid, taken);
+    this.proc.steer(uuid, text).catch(() => this.settleSteer(uuid, false));
+  }
+  private settleSteer(uuid: string, ok: boolean) {
+    const taken = this.steers.get(uuid);
+    this.steers.delete(uuid);
+    taken?.(ok);
+  }
   interrupt() {
+    this.stopped = true;
     this.proc.interrupt(randomUUID());
   }
   terminate(_reason: string, options: { immediate?: boolean } = {}) {
@@ -200,6 +257,8 @@ class ClaudeSession implements AgentSession {
   }
   endTurn() {
     this.active = false;
+    this.held = null;
+    for (const uuid of [...this.steers.keys()]) this.settleSteer(uuid, false);
   }
   close() {
     this.driver.retire(this.proc);
@@ -232,8 +291,25 @@ class ClaudeSession implements AgentSession {
       this.discard = true;
       emit({ kind: "violation", reason });
     };
+    if (ev.type === "lifecycle") {
+      // Taken into a turn: this one, at a tool step, or one the client
+      // starts for it right after this one's result (`held`).
+      if (ev.state === "started" || ev.state === "completed") {
+        if (this.held && this.steers.has(ev.uuid)) this.continued = true;
+        return this.settleSteer(ev.uuid, true);
+      }
+      if (ev.state !== "cancelled" && ev.state !== "discarded" && ev.state !== "refused") return;
+      // It will not run. With no other message outstanding, a result that
+      // waited for its turn is the turn's end after all.
+      this.settleSteer(ev.uuid, false);
+      const done = this.held;
+      if (!done || this.steers.size || this.continued) return;
+      this.held = null;
+      return emit(done);
+    }
     if (ev.type === "init") {
       this.initSeen = true;
+      this.canSteer = STEER_CAPABILITIES.every((c) => ev.capabilities.includes(c));
       // No silent switch: a subscription window never runs on API
       // credentials, an API-key window runs only on its own key, and each
       // runs only the model the registry expects.
@@ -312,15 +388,34 @@ class ClaudeSession implements AgentSession {
         // variant reports its own window).
         const window = this.topModel ? ev.windows.find((w) => w.model === this.topModel) : undefined;
         emit({ kind: "gauge", update: { contextWindow: window?.contextWindow ?? null, model: this.topModel ?? null }, measuredOnly: true });
-        return emit({
+        const done: Completed = {
           kind: "completed",
           outcome: ev.ok ? "done" : "failed",
           error: ev.ok ? null : `Claude Code reported ${ev.subtype}${ev.text ? `: ${ev.text}` : ""}`,
           text: ev.ok ? ev.text : undefined,
-          usage: charged,
-          // Only an API-key turn is charged from the totals.
-          totals: ctx.model.paid ? this.moved : undefined,
-        });
+          // With an earlier result of this same turn (a steered message's
+          // own client turn), both results' usage.
+          usage: this.held ? sumUsage(this.held.usage ?? null, charged ?? null) : charged,
+          // Only an API-key turn is charged from the totals: the latest
+          // that moved, this result's or the earlier one's.
+          totals: (ctx.model.paid ? this.moved : undefined) ?? this.held?.totals,
+        };
+        this.held = null;
+        this.continued = false;
+        if (!this.steers.size) return emit(done);
+        // A message written to this turn was not taken before its result.
+        // Stopped, it should have been dropped with the interrupt; one that
+        // was not may run with no turn to own it, so the process is ended.
+        if (this.stopped) {
+          this.spent = true;
+          this.driver.retire(this.proc);
+          return emit(done);
+        }
+        // Otherwise the client starts a turn with it now: the same Console
+        // turn, which ends with that one's result.
+        if (done.error) emit({ kind: "error", text: done.error });
+        this.held = done;
+        return;
       }
     }
   }

@@ -1,6 +1,6 @@
 import type { ConsoleCommand } from "@/lib/console/commands";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { agentModel } from "@/lib/console/agents";
+import { agentModel, networkAutoKind } from "@/lib/console/agents";
 import type { AgentView } from "@/lib/console/views";
 import { FOLDER_LISTING, resolveAgentPath } from "@/lib/console/files";
 import { gaugeLine } from "@/lib/console/gauge";
@@ -8,10 +8,10 @@ import { taskLine } from "@/lib/console/tasks";
 import { transcript } from "@/lib/console/transcript";
 import { STATUS_TEXT } from "@/lib/console/tree";
 import { PERMISSION_LABELS, type AgentStatus, type ConsoleEvent } from "@/lib/console/types";
-import { elapsed, fileLinks, pastedName, plural } from "@/lib/console/ui";
+import { elapsed, fileLinks, pastedName, plural, transcriptRows } from "@/lib/console/ui";
 import { atEnd } from "@/lib/console/view-state";
 import type { Run } from "./api";
-import BlockView from "./BlockView";
+import BlockView, { StepsView } from "./BlockView";
 import Icon from "@/components/shared/Icon";
 import InlineRename from "./InlineRename";
 import KindBadge from "./KindBadge";
@@ -32,6 +32,7 @@ export default function AgentWindow({
   onMaximize,
   onChanges,
   onModel,
+  onNetwork,
   onOpenFile,
   onOpenHelper,
   run,
@@ -44,6 +45,8 @@ export default function AgentWindow({
   onChanges: () => void;
   /** Change its model and thinking level. */
   onModel: () => void;
+  /** Its Network setting, Ask or Auto. */
+  onNetwork: () => void;
   onOpenFile: (agentId: string, path: string) => void;
   onOpenHelper: (helperId: number, name: string) => void;
   run: Run;
@@ -60,6 +63,9 @@ export default function AgentWindow({
   );
   const scroller = useRef<HTMLDivElement>(null);
   const blocks = useMemo(() => transcript(events), [events]);
+  // Runs of tool rows show as one line each.
+  const working = agent.status === "working";
+  const rows = useMemo(() => transcriptRows(blocks, working), [blocks, working]);
   const model = agentModel(agent.kind, agent.model);
   const busy = agent.status === "working" || agent.status === "queued" || agent.status === "needs_you";
   const [renaming, setRenaming] = useState(false);
@@ -93,6 +99,10 @@ export default function AgentWindow({
             onSelect: () => void run({ action: "setAskFirst", agentId: agent.id, on: !agent.askFirst }),
           },
         ]
+      : []),
+    // Where the Console decides each network request.
+    ...(networkAutoKind(agent.kind) || agent.networkAuto
+      ? [{ label: "Network…", hint: agent.networkAuto ? "Auto: reaches any website without asking" : "Ask: each website waits for you", onSelect: onNetwork }]
       : []),
     {
       label: "Forget its Always rules",
@@ -251,10 +261,15 @@ export default function AgentWindow({
             </button>
           ) : null;
         })()}
-        <span className={styles.badge} title={agent.askFirst ? "Ask me first: its file changes and commands wait for you in Needs you, as web access always does. Team tools (such as pulling teammates' work) and image tools don't wait." : undefined}>
+        <span className={styles.badge} title={agent.askFirst ? `Ask me first: its file changes and commands wait for you in Needs you${agent.networkAuto ? "" : ", as web access always does"}. Team tools (such as pulling teammates' work) and image tools don't wait.` : undefined}>
           {PERMISSION_LABELS[agent.permission]}
           {agent.askFirst ? " · ask first" : ""}
         </span>
+        {agent.networkAuto && (
+          <button className={`${styles.chip} ${styles.networkAuto}`} title="Network auto: it reaches any website without asking. Click to change" onClick={onNetwork}>
+            Network auto
+          </button>
+        )}
         {/* One line however many claims: a chip per claim pushed the
             transcript and composer out of a short window. The Team panel
             lists them all. */}
@@ -332,10 +347,14 @@ export default function AgentWindow({
         <div className={styles.transcript} ref={scroller} onScroll={onScroll}>
           <div className={styles.transcriptBody} ref={body}>
             {blocks.length === 0 && <p className={styles.hint}>{agent.role ? agent.role : "Send this agent a message to start."}</p>}
-            {blocks.map((b, i) => (
-              // The last text of a running turn is still streaming.
-              <BlockView key={b.key} block={b} live={agent.status === "working" && i === blocks.length - 1} onLink={onLink} onOpenFile={openFile} />
-            ))}
+            {rows.map((r, i) =>
+              r.type === "steps" ? (
+                <StepsView key={r.key} row={r} onLink={onLink} onOpenFile={openFile} />
+              ) : (
+                // The last text of a running turn is still streaming.
+                <BlockView key={r.key} block={r} live={working && i === rows.length - 1} onLink={onLink} onOpenFile={openFile} />
+              ),
+            )}
           </div>
         </div>
         {showLatest && (
@@ -372,11 +391,17 @@ export default function AgentWindow({
               <span className={styles.queuedText} title={q.text}>
                 {q.text}
               </span>
+              {q.steering && (
+                <span className={styles.chip} title="You clicked Steer: it is on its way into the turn the agent is working on. The agent reads it at its next step, so it can no longer be edited or deleted.">
+                  reaching the agent now
+                </span>
+              )}
               {q.summary && <span className={styles.chip}>summary request</span>}
               {q.next && <span className={styles.chip}>next</span>}
               {q.edited && <span className={styles.chip}>edited</span>}
               {q.files.length > 0 && <span className={styles.chip}>{q.files.length === 1 ? q.files[0] : `${q.files.length} files`}</span>}
-              <span className={styles.queuedButtons}>
+              {/* Handed to the running turn: no longer the owner's to change. */}
+              <span className={styles.queuedButtons} style={q.steering ? { display: "none" } : undefined}>
                 <button
                   // The summary request's text is fixed.
                   hidden={q.summary}
@@ -406,6 +431,11 @@ export default function AgentWindow({
                   </button>
                 ) : (
                   <button onClick={() => setDeleting(q.id)}>Delete</button>
+                )}
+                {q.steer && (
+                  <button title={`Hand it to ${agent.name} now, in the middle of the turn it is working on`} onClick={() => void run({ action: "steerQueued", turnId: q.id })}>
+                    Steer
+                  </button>
                 )}
                 {!q.first && (
                   <button title="Deliver it as soon as the current turn ends" onClick={() => void run({ action: "sendNext", turnId: q.id })}>

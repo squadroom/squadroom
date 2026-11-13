@@ -413,6 +413,10 @@ AGENT_KINDS.push(
   },
 );
 
+/** The kinds whose client takes an owner message in the middle of a turn
+ * (Steer): Claude Code and Codex. ACP has no such request. */
+export const steers = (kind: AgentKind) => kind === "claude-code" || kind === "codex";
+
 export function agentKind(kind: unknown): AgentKindInfo | undefined {
   return AGENT_KINDS.find((k) => k.kind === kind);
 }
@@ -427,3 +431,9 @@ export function reportsExpectedModel(expected: AgentModel, reported: unknown): b
   const name = reported.toLowerCase().replace(/\[[12]m\]$/, "").replace(/-\d{8}$/, "");
   return name === expected.runs;
 }
+
+/** The agents whose network requests the Console decides one by one, so
+ * the Network setting has something to switch: Claude Code and
+ * Codex. An ACP agent's sandbox cannot ask per host; its network is its
+ * project's switch. */
+export const networkAutoKind = (kind: string) => kind === "claude-code" || kind === "codex";

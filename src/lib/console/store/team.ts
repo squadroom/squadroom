@@ -277,7 +277,7 @@ export const team = {
       }
       // Never a summary turn: that is the agent's own handoff.
       const last = this.get(
-        "SELECT id, status, final_text, instruction_id FROM console_turns WHERE agent_id = ? AND status <> 'withdrawn' AND summary = 0 ORDER BY id DESC LIMIT 1",
+        "SELECT id, status, final_text, instruction_id FROM console_turns WHERE agent_id = ? AND status NOT IN ('withdrawn', 'steered') AND summary = 0 ORDER BY id DESC LIMIT 1",
         t.lead_agent as string,
       );
       const text = ((last?.final_text as string | null) ?? "").trim();

@@ -257,6 +257,12 @@
 .console button.gaugeHigh {
   color: var(--danger);
 }
+/* An agent on Network auto: never on silently. */
+.console button.networkAuto {
+  flex: none;
+  border-color: currentColor;
+  color: light-dark(#b45309, #fbbf24);
+}
 .badge {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -367,6 +373,38 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A run of tool rows: its one line, and the rows it opens to. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.steps[hidden] {
+  display: none;
+}
+.stepsRows {
+  padding-left: 10px;
+  border-left: 2px solid var(--hair);
+}
+.console button.stepsLine {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.console button.stepsLine:hover {
+  color: var(--text);
+}
+.console button.stepsFailed {
+  color: var(--danger);
 }
 .thinking p {
   white-space: pre-wrap;
@@ -939,7 +977,8 @@
     font-size: 13.5px;
     padding: 8px;
   }
-  .transcriptBody {
+  .transcriptBody,
+  .steps {
     gap: 6px;
   }
   .text :global(.markdown) {
@@ -957,6 +996,7 @@
   .thinking summary,
   .tool summary,
   .toolError summary,
+  .console button.stepsLine,
   .thinking p,
   .denied,
   .statusLine,

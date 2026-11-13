@@ -163,6 +163,17 @@ export interface AgentSession {
   stale(agent: ConsoleAgent): boolean;
   /** Start a turn: the paid request. */
   prompt(turn: TurnRequest): Promise<PromptResult>;
+  /** Steer: the running turn can be handed an owner message
+   * now; null while that is not known yet (the client has not started the
+   * turn). Absent for a client that takes none in the middle of a turn
+   * (ACP): its messages wait for the turn's end. */
+  readonly steerable?: boolean | null;
+  /** Hand it over. `taken` is called exactly once, as the turn ends at the
+   * latest (after `endTurn`, for an answer read with the turn's end): true
+   * once the client has taken the message into this turn;
+   * false when it has not and will not (it refused, or the turn ended or
+   * was stopped first), and the message stays queued. */
+  steer?(text: string, taken: (ok: boolean) => void): void;
   /** The polite stop; `force` says the owner's Force stop (a shared
    * process then starts no other turn until it is ended). */
   interrupt(options?: { force?: boolean }): void;

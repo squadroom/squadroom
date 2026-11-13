@@ -52,6 +52,9 @@ export interface ActiveTurn {
   helpers?: boolean;
   /** A Re-send of this interrupted turn. */
   resendOf: number | null;
+  /** Steer: the owner message being handed to this turn, until its client
+   * takes or refuses it. */
+  steering?: number;
 }
 export interface Runtime {
   agent: ConsoleAgent;

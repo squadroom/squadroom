@@ -140,6 +140,15 @@ month it started too.
   (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused; in a tab with steps, only the current step's files)
   or files it in Needs you (network per host, unknown tools, pushes). A
+  Claude Code or Codex agent whose Network setting is Auto
+  (`console_agents.network_auto`, the `setNetwork` command) has its
+  network requests allowed instead: a command's network access, WebFetch
+  and WebSearch. That is decided in one place, the worker's `permit()`,
+  with one test (`networkRequest` in `permissions.ts`), and each allow is
+  stored with the request and shown in the transcript as "Network auto:".
+  Switching to Auto also allows that agent's network requests already
+  waiting. Auto covers nothing else: writes, reads outside the folder,
+  unknown tools, Ask me first and pushes are decided as before. A
   path with a `..` part counts as outside it, and symbolic links are
   followed: one that leads out of the agent's folder counts as outside. An
   allow the Console cannot record is refused. Needs you shows a command
@@ -181,6 +190,32 @@ the defaults: a tab can have its own (`console_tabs.turn_limit`,
 `time_limit_min`), and the worker reads the tab's limits both when mail
 becomes a turn and again when a queued team turn is about to start, so a
 limit lowered meanwhile still holds it.
+
+### Steer
+
+A message the owner sends while an agent works is queued. For a Claude
+Code or Codex agent whose turn is running, the owner's first queued
+message can be handed to that turn (the `steerQueued` command). It has to
+be a plain message: no files, not a Re-send, a summary request or an
+approved push; and the turn must not be waiting for the owner, stopping,
+paused or writing a summary. The command only marks the message (status
+`steered`); the worker hands it to the client on its next pass and records
+it as taken only when the client says so:
+
+- **Claude Code** gets a user line with an id and reports what became of
+  it in `command_lifecycle` lines. The driver steers only when the
+  client's init line announces `msg_lifecycle_v1` and
+  `interrupt_cancel_queued_v1`; without them the message stays queued. If
+  the client takes the message only after the turn's result, it starts a
+  turn of its own with it, which the Console counts as the same turn, with
+  both results' usage.
+- **Codex** gets `turn/steer` for the running turn.
+
+No turn is made for a steered message: cost, limits and the commit are the
+running turn's. A message the client does not take is queued again, or
+stopped with the turn if the owner pressed Stop. After a worker restart, a
+message not known to be taken is queued again, and one that was taken is
+never sent twice. ACP agents cannot take a message mid-turn.
 
 `team_propose_tab` makes nothing by itself. It checks the proposed team as
 the setup screen would and stores it with a Needs you item. When the owner

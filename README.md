@@ -46,6 +46,25 @@ tabs. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 
+A message you send while an agent is working waits in its queue. For a
+Claude Code or Codex agent, your first queued message gets a **Steer**
+button: click it and the message goes into the turn the agent is working
+on, and the agent reads it at its next step. It shows in the transcript
+where the agent got it. Other agents can't take a message mid-turn, so
+theirs stay queued.
+
+In an agent's window, two or more tool rows in a row show as one line,
+such as "18 steps: 10 Edit, 5 Read, 2 Write, 1 Grep". Click it to see the
+rows. A run with a failed tool says so and starts open.
+
+Each website an agent wants to reach waits for you in Needs you. For a
+Claude Code or Codex agent you can change that in its menu, under
+**Network…**: on **Auto** the agent reaches any website without asking,
+each request is still noted in its window, and the window's header shows
+**Network auto** for as long as it is on. Turning Auto on needs a fresh
+e-mailed code. Read [the threat model](docs/threat-model.md) before you
+use it: an agent on Auto could send anything it can read to any site.
+
 An agent can also propose a new tab with a team of its own
 (`team_propose_tab`), for work that is better done apart. The proposal
 shows up in Needs you with **Create**, **Edit…** and **Decline**. Nothing

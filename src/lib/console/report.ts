@@ -46,7 +46,7 @@ export function runReport(d: ReportData): string {
     "",
     "## Summary",
     "",
-    `- Turns: ${d.turns.length} (${count(d.turns, "done")} done, ${count(d.turns, "failed")} failed, ${count(d.turns, "interrupted")} interrupted, ${count(d.turns, "stopped")} stopped)`,
+    `- Turns: ${d.turns.filter((t) => t.status !== "steered").length} (${count(d.turns, "done")} done, ${count(d.turns, "failed")} failed, ${count(d.turns, "interrupted")} interrupted, ${count(d.turns, "stopped")} stopped)`,
     `- API-key spend: ${usd(spend)}`,
     ...(first ? [`- From ${when(first)} to ${when(last)}`] : []),
     ...(d.steps ? [`- Step ${d.steps.index + 1} of ${d.steps.steps.length}: ${inline(d.steps.steps[d.steps.index]?.name ?? "")}`] : []),
@@ -62,7 +62,9 @@ export function runReport(d: ReportData): string {
   for (const t of d.turns) {
     const asker = t.trigger === "owner" ? "The owner" : "Its teammates";
     const name = inline(t.agentName);
-    out.push("", `### ${when(t.createdAt)} · ${name} · turn ${t.id} · ${t.status}${t.costUsd ? ` · ${usd(t.costUsd)}` : ""}`, "", `${asker}:`, "", quote(t.prompt));
+    // A message the agent took during a running turn is not a turn.
+    const what = t.status === "steered" ? `message ${t.id} · sent during the running turn` : `turn ${t.id} · ${t.status}`;
+    out.push("", `### ${when(t.createdAt)} · ${name} · ${what}${t.costUsd ? ` · ${usd(t.costUsd)}` : ""}`, "", `${asker}:`, "", quote(t.prompt));
     if (t.finalText) out.push("", `${name}:`, "", quote(t.finalText));
     if (t.reason && t.status !== "done") out.push("", "Ended:", "", quote(t.reason));
     for (const c of t.commits) out.push("", `Commit ${code(c.sha.slice(0, 12))}${c.files.length ? `: ${c.files.map(code).join(", ")}` : ""}`);

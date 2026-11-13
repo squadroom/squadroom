@@ -12,6 +12,10 @@
 //   ask        asks the owner a question (request_user_input)
 //   elicit     asks to call a tool on the console server and on another one
 //   hang       waits; an interrupt ends the turn
+//   steerable  waits; turn/steer adds input to it: "finish" ends the turn
+//              saying what it was given, anything else is said and it waits
+//              on. turn/steer for any other turn is refused, as
+//              is one for the turn whose first word is "nosteer"
 //   partial    reports one request's usage, then waits; an interrupt ends it
 //   deaf       waits and ignores interrupts
 //   lateack    accepts the turn but never answers turn/start: after a
@@ -239,6 +243,11 @@ async function runTurn(threadId, turnId, text) {
     usage(threadId, note, { inputTokens: 40, cachedInputTokens: 10, outputTokens: 5 });
     return; // waits for the interrupt
   }
+  if (word === "steerable") {
+    usage(threadId, note, { inputTokens: 20, cachedInputTokens: 5, outputTokens: 4 });
+    say("working");
+    return; // waits for turn/steer (or the interrupt)
+  }
   if (word === "deaf") turns.get(threadId).deaf = true;
   // hang, deaf, silent and anything else: wait (deaf ignores interrupts).
 }
@@ -294,9 +303,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         process.stdout.write(lines.join("\n") + "\n");
         return;
       }
-      turns.set(q.params.threadId, { id: turnId });
       const text = body(q.params.input[0].text);
       const word = text.split(" ")[0];
+      turns.set(q.params.threadId, { id: turnId, word });
       // lateack and silent: accepted, but the reply is never written.
       if (word === "laterefuse") {
         turns.delete(threadId);
@@ -306,6 +315,38 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       if (word !== "lateack" && word !== "silent" && word !== "earlyack") reply({ turn: { id: turnId, status: "inProgress" } });
       if (word === "earlyack") send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress" } } });
       void runTurn(q.params.threadId, turnId, text);
+      return;
+    }
+    case "turn/steer": {
+      // Only the active turn, named by its id, takes input (as the App
+      // Server: expectedTurnId must match).
+      const turn = turns.get(q.params.threadId);
+      if (!turn || turn.id !== q.params.expectedTurnId) return send({ id: q.id, error: { code: -32600, message: "no active turn to steer" } });
+      if (turn.word === "nosteer") return send({ id: q.id, error: { code: -32600, message: "cannot steer a review turn" } });
+      const threadId = q.params.threadId;
+      const text = q.params.input[0].text;
+      // "endnow": the answer and the turn's end in one write, so they are
+      // read together. "slowack": the answer comes after 400 ms.
+      if (text === "endnow") {
+        turns.delete(threadId);
+        const lines = [{ id: q.id, result: { turnId: turn.id } }, { method: "turn/completed", params: { threadId, turnId: turn.id, turn: { id: turn.id, status: "completed" } } }];
+        return process.stdout.write(lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+      }
+      if (text === "slowack") return setTimeout(() => reply({ turnId: turn.id }), 400);
+      reply({ turnId: turn.id });
+      const note = (method, params) => send({ method, params: { threadId, turnId: turn.id, ...params } });
+      // The steered input is an item of the turn, as the owner's first is.
+      note("item/started", { item: { type: "userMessage", id: `u${Date.now()}`, content: q.params.input } });
+      // The model's answer to it comes a moment later.
+      setTimeout(() => {
+        if (turns.get(threadId) !== turn) return;
+        note("item/agentMessage/delta", { itemId: "m2", delta: `steered: ${text}` });
+        note("item/completed", { item: { type: "agentMessage", id: "m2", text: `steered: ${text}` } });
+        if (text !== "finish") return;
+        usage(threadId, note, { inputTokens: 7, cachedInputTokens: 2, outputTokens: 3 });
+        turns.delete(threadId);
+        note("turn/completed", { turn: { id: turn.id, status: "completed" } });
+      }, 100);
       return;
     }
     case "turn/interrupt": {

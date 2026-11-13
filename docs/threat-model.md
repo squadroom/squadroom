@@ -52,8 +52,8 @@ only restates one of them is not a new finding.
 - **A stolen session cookie.** Weighty actions
   ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
   e-mailed code (and are refused when mail is off), so a cookie alone
-  cannot raise limits, change keys, grant permanent permissions or drop
-  Ask me first. When the owner has set a Console-wide monthly limit, it
+  cannot raise limits, change keys, grant permanent permissions, drop
+  Ask me first or switch an agent's Network to Auto. When the owner has set a Console-wide monthly limit, it
   caps every tab, new ones too, and raising, removing or resetting it is
   weighty.
 - **Runaway spend.** Paid keys must have a provider-side cap, which is the
@@ -77,6 +77,17 @@ only restates one of them is not a new finding.
 - **What you allow.** Network access you approve, an "Always" rule, or a
   project's ACP network switch lets agents reach those hosts; an ACP client
   may run some commands without asking, with the sandbox as its boundary.
+- **An agent on Network Auto.** A Claude Code or Codex agent you switch to
+  Auto reaches any website without asking: its commands' network access,
+  WebFetch and WebSearch. It could send anything it can read to any site
+  (its own folder, what the team tools give it, and any credential handed
+  to an agent, see above), and anything it fetches may try to mislead it.
+  Squadroom does not check where the requests go or what they carry; it
+  only notes each one in the agent's window and shows **Network auto** in
+  the window's header. Auto is off unless you switch it on, per agent,
+  with a fresh e-mailed code, and it changes nothing else: file writes,
+  reads outside the folder, unknown tools, Ask me first and pushes are
+  decided as before.
 - **Redaction gaps.** Only the values the Console handed out and common key
   shapes are redacted; other secrets an agent prints are stored as printed.
 - **Your Mac's own account.** Anyone who can run code as you, or as root,

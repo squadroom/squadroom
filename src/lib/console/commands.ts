@@ -108,11 +108,12 @@ export type ConsoleCommand =
   | { action: "createAgent"; tabId: string; name: string; role?: string; kind: string; model: string; effort?: string | null; permission: string; askFirst?: boolean }
   | { action: "setAskFirst"; agentId: string; on: boolean }
   | { action: "setAi"; agentId: string; model: string; effort?: string | null }
+  | { action: "setNetwork"; agentId: string; auto: boolean }
   | { action: "addRoute"; tabId: string; from: string; to: string; phrase?: string }
   | { action: "removeRoute"; routeId: number }
   | { action: "send"; agentId: string; text: string; uploadIds?: number[] }
   | { action: "editQueued"; turnId: number; text: string; uploadIds?: number[] }
-  | { action: "deleteQueued" | "sendNext"; turnId: number }
+  | { action: "deleteQueued" | "sendNext" | "steerQueued"; turnId: number }
   | { action: "renewUploads"; agentId: string; uploadIds: number[] }
   | { action: "releaseUpload"; agentId: string; uploadId: number }
   | { action: "stop"; agentId: string; force?: boolean }
@@ -159,7 +160,8 @@ interface FreshCodeContext {
 /**
  * Commands with weight beyond the page: a permanent or project-wide rule,
  * deleting folders, switching Ask me first off (or making agents without
- * it in a project that uses it), the ACP network switch, switching image
+ * it in a project that uses it), an agent's Network to Auto, the ACP
+ * network switch, switching image
  * tools on, raising a spend limit (a tab's or the Console's) or
  * resetting spend, raising a tab's turn limits, and every Keys write. Each
  * needs a code entered in the last CONSOLE_CODE_MS, so a stolen session
@@ -222,6 +224,10 @@ export function needsFreshCode(input: Record<string, unknown>, context: FreshCod
       return true;
     case "setAskFirst":
       return input.on === false;
+    // An agent's Network setting to Auto (any website without asking), not
+    // back to Ask.
+    case "setNetwork":
+      return input.auto !== false;
     // Switching a project's image tools on (paid calls), not off.
     case "setImageTools":
       return input.on !== false;
@@ -420,6 +426,8 @@ const queuedControl: CommandHandler = (store, input, options, action) => {
   const turnId = rowId(input.turnId, "That message is not valid.");
   if (action === "deleteQueued") return store.withdrawQueued(turnId);
   if (action === "sendNext") return { turnId: store.sendNext(turnId).id };
+  // Steer: marked here; the worker hands it to the client.
+  if (action === "steerQueued") return { turnId: store.askSteer(turnId).id };
   const prompt = new Redactor().text(text(input.text, "Message", PROMPT_MAX));
   const edited = store.editQueued(turnId, prompt, ids(input.uploadIds));
   return { turnId: edited.id, refusedUploads: edited.refusedUploads };
@@ -821,6 +829,10 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     if (typeof input.on !== "boolean") throw new CommandError("Say on or off.");
     return { agent: store.setAskFirst(id(input.agentId, "Agent"), input.on) };
   },
+  setNetwork(store, input) {
+    if (typeof input.auto !== "boolean") throw new CommandError("Say Ask or Auto.");
+    return { agent: store.setNetworkAuto(id(input.agentId, "Agent"), input.auto) };
+  },
   send(store, input) {
     const agent = store.agent(id(input.agentId, "Agent"));
     if (!agent) throw new CommandError("That agent does not exist.");
@@ -834,6 +846,7 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
   editQueued: queuedControl,
   deleteQueued: queuedControl,
   sendNext: queuedControl,
+  steerQueued: queuedControl,
   renewUploads(store, input) {
     return { renewed: store.renewUploads(id(input.agentId, "Agent"), ids(input.uploadIds)) };
   },

@@ -1,8 +1,9 @@
 import { readRunning, type BilledModel, type RunningUsage } from "../spend.ts";
+import { steers } from "../agents.ts";
 import type { ConsoleAgent, EventBody, EventKind, TurnStatus, TurnUsage } from "../types.ts";
 import type { SessionTotals } from "../session.ts";
-import type { ConsoleStore } from "../store.ts";
-import { OPEN } from "./rows.ts";
+import type { ConsoleStore, TurnRow } from "../store.ts";
+import { OPEN, turn } from "./rows.ts";
 import { SUMMARY_MAX } from "./turns.ts";
 
 type Charge = { usd: number; basis: "reported" | "allowance"; hold?: string };
@@ -99,6 +100,44 @@ export const lifecycle = {
       this.insertEvent(turnId, agent, "note", { text: "Fresh session: the next message begins a new conversation, opened with this summary." }, now);
     } else this.insertEvent(turnId, agent, "note", { text: "No summary was written, so the session was kept. Ask again, or use Start fresh." }, now);
   },
+  // ── Steer ────────────────────────────────────────────────────────────
+  /** The owner's queued message that Steer can hand to the agent's running
+   * turn, if there is one now: their first queued message to an agent whose
+   * client takes one mid-turn (Claude Code, Codex), a plain one (no files,
+   * not a Re-send, a summary request or an approved push), while that turn
+   * runs (not waiting for the owner, no Stop asked, not a summary), nothing
+   * is paused, and no other message is on its way into the turn. Team
+   * turns ahead of it keep waiting. Only the first, so the owner's messages
+   * reach the agent in the order they were sent. */
+  steerable(this: ConsoleStore, agentId: string): TurnRow | null {
+    const agent = this.agent(agentId);
+    const run = this.all("SELECT * FROM console_turns WHERE agent_id = ? AND status = 'running'", agentId).map(turn)[0];
+    if (!agent || !steers(agent.kind) || !run || run.stopRequested || run.summary || this.steering(agentId).length) return null;
+    if (this.pausedFor(agent) || this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", agent.tabId)?.usage_hold != null) return null;
+    const next = this.queuedTurns(agentId).find((q) => q.trigger === "owner");
+    if (!next || next.summary || next.resendOf !== null || this.pushApproved(next.id) || this.boundUploads(next.id).length) return null;
+    return next;
+  },
+  /** The client took it into turn `into`: it shows there, where it arrived. */
+  confirmSteer(this: ConsoleStore, epoch: number, turnId: number, into: number) {
+    this.transaction(() => {
+      const now = this.now();
+      if (!this.run("UPDATE console_turns SET ended_at = ? WHERE id = ? AND status = 'steered' AND ended_at IS NULL", now, turnId)) return;
+      this.insertEvent(into, this.agentOf(into), "steer", { text: this.turn(turnId)!.prompt, from: turnId }, now);
+    }, epoch);
+  },
+  /** The client did not take it (no turn could, it refused, or the turn
+   * ended first): an ordinary queued message again, in its old place. (One
+   * the owner's Stop reached first is stopped already, and stays so.) */
+  releaseSteer(this: ConsoleStore, epoch: number, turnId: number) {
+    this.write(epoch, "UPDATE console_turns SET status = 'queued', started_at = NULL WHERE id = ? AND status = 'steered' AND ended_at IS NULL", turnId);
+  },
+  /** Messages on their way into a running turn (Steer was clicked) that
+   * the client has not taken yet: an agent's, or everyone's. */
+  steering(this: ConsoleStore, agentId?: string): TurnRow[] {
+    return this.all(`SELECT * FROM console_turns WHERE status = 'steered' AND ended_at IS NULL${agentId ? " AND agent_id = ?" : ""} ORDER BY id`, ...(agentId ? [agentId] : [])).map(turn);
+  },
+
   /** The prompt reached the client: kept, so a worker that dies before the
    * turn ends still charges it at the next start. */
   markPrompted(this: ConsoleStore, epoch: number, turnId: number, on = true) {
@@ -142,6 +181,11 @@ export const lifecycle = {
         this.settle(t.id, "interrupted", null, this.now());
         this.settleHelpers(t.id, this.now());
       }
+      // A message on its way into a turn of an earlier worker, not known
+      // to have been taken: an ordinary queued message again, so it is
+      // never lost (the agent may see it twice if its client had taken it
+      // just as the worker died).
+      this.run("UPDATE console_turns SET status = 'queued', started_at = NULL WHERE status = 'steered' AND ended_at IS NULL");
       // A restart finds task calls whose results it never saw.
       this.run("UPDATE console_tasks SET stale = 1, pending = '{}' WHERE pending <> '{}'");
       return stale.length;

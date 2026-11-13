@@ -1,12 +1,28 @@
-import type { AgentKind, ConsoleEffort } from "../agents.ts";
+import { networkAutoKind, type AgentKind, type ConsoleEffort } from "../agents.ts";
 import type { ConsoleAgent, ConsoleProject, ConsoleTab, Permission, ProjectSource, ProjectState } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import type { TabTemplate, TemplateStep } from "../templates.ts";
+import { NETWORK_AUTO, networkRequest } from "../permissions.ts";
 import { agent, json, newId, project, tab } from "./rows.ts";
 
 /** Ask me first is offered on Claude Code windows only. */
 export const ASK_FIRST_CLAUDE_ONLY =
   "Ask me first is offered for Claude Code windows only: Codex's own check can let some commands run without asking, so it cannot hold every command for you yet.";
+
+/** The Network setting is offered where the Console decides each network
+ * request. */
+export const NETWORK_AUTO_KINDS_ONLY =
+  "Network Auto is offered for Claude Code and Codex agents only: other agents cannot ask per website, so their network is the project's own switch (the project menu's Network…).";
+
+/** Allow an agent's network requests still open (inside a transaction). */
+function allowWaiting(store: ConsoleStore, agentId: string) {
+  for (const r of store.all("SELECT id, tool, rule_key FROM console_requests WHERE agent_id = ? AND state = 'open' AND kind = 'permission'", agentId))
+    if (networkRequest(r.tool as string, r.rule_key as string | null))
+      store.run(
+        "UPDATE console_requests SET state = 'allowed', decided_by = 'console', reason = ?, decided_at = ? WHERE id = ?",
+        `${NETWORK_AUTO}: switched on while this waited.`, store.now(), r.id as number,
+      );
+}
 
 type Merging = { from: string; fromName: string; files: string[] };
 type RoleRow = { id: string; name: string; description: string; access: string; ai: string; prompt: string; builtIn: boolean };
@@ -69,6 +85,27 @@ export const projects = {
     if (on && a.kind !== "claude-code") throw new Error(ASK_FIRST_CLAUDE_ONLY);
     this.run("UPDATE console_agents SET ask_first = ? WHERE id = ?", on ? 1 : 0, agentId);
     return this.agent(agentId)!;
+  },
+  /** An agent's Network setting: Ask (off) or Auto. Switching to Auto also
+   * allows its network requests waiting in Needs you, in the same
+   * transaction, so none is left to click; the worker tells each waiting
+   * turn as it does for the owner's own answer. */
+  setNetworkAuto(this: ConsoleStore, agentId: string, auto: boolean): ConsoleAgent {
+    return this.transaction(() => {
+      const a = this.agent(agentId);
+      if (!a || a.state === "closed") throw new Error("That agent is closed.");
+      if (auto && !networkAutoKind(a.kind)) throw new Error(NETWORK_AUTO_KINDS_ONLY);
+      this.run("UPDATE console_agents SET network_auto = ? WHERE id = ?", auto ? 1 : 0, agentId);
+      if (auto) allowWaiting(this, agentId);
+      return this.agent(agentId)!;
+    });
+  },
+  /** The worker's side of the same: a request it opened just as the owner
+   * switched the agent to Auto. */
+  allowWaitingNetwork(this: ConsoleStore, epoch: number, agentId: string): void {
+    this.transaction(() => {
+      if (this.agent(agentId)?.networkAuto) allowWaiting(this, agentId);
+    }, epoch);
   },
   /** An agent's model and thinking level, changed by the owner: its kind
    * stays. A turn already running keeps what it started

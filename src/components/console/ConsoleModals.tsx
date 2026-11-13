@@ -8,7 +8,7 @@ import NewAgent from "./NewAgent";
 import { NewProject, NewTab } from "./NewProject";
 import ReportDialog from "./ReportDialog";
 import SearchDialog from "./SearchDialog";
-import { AgentAiDialog, ArchiveDialog, ClosedTabsDialog, FoldersDialog, NetworkDialog, PauseDialog, SaveTemplateDialog, SpendLimitDialog, StepsDialog, TurnLimitsDialog } from "./Settings";
+import { AgentAiDialog, AgentNetworkDialog, ArchiveDialog, ClosedTabsDialog, FoldersDialog, NetworkDialog, PauseDialog, SaveTemplateDialog, SpendLimitDialog, StepsDialog, TurnLimitsDialog } from "./Settings";
 import TeamSetupDialog from "./TeamSetupDialog";
 
 // The Console page's dialogs: which one is open, and each one's props.
@@ -19,6 +19,8 @@ export type Modal =
   | { kind: "project" | "agent" | "team" }
   /** An agent's model and thinking level, from its window's menu. */
   | { kind: "ai"; agentId: string }
+  /** An agent's Network setting, Ask or Auto, from its window's menu. */
+  | { kind: "agentNetwork"; agentId: string }
   /** A tab an agent proposed, opened from Needs you to change its team
    * before creating it. */
   | { kind: "proposal"; noticeId: number; proposal: Proposal }
@@ -127,6 +129,9 @@ export default function ConsoleModals({
       {m?.kind === "report" && <ReportDialog tabId={m.tabId} onClose={close} />}
       {m?.kind === "ai" && view?.agents.some((a) => a.id === m.agentId) && (
         <AgentAiDialog agent={view.agents.find((a) => a.id === m.agentId)!} run={run} onClose={close} />
+      )}
+      {m?.kind === "agentNetwork" && view?.agents.some((a) => a.id === m.agentId) && (
+        <AgentNetworkDialog agent={view.agents.find((a) => a.id === m.agentId)!} run={run} onClose={close} />
       )}
       {m?.kind === "proposal" && (
         <TeamSetupDialog

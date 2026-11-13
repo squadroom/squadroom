@@ -554,6 +554,7 @@ export class ConsoleWorker {
       for (const driver of this.drivers.values()) driver.tick();
       this.handleStops(open);
       this.enforceLimits();
+      this.steerTurns();
       this.schedule(open);
       this.stallCheck(open);
       this.linkResults(open);

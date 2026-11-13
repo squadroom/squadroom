@@ -30,7 +30,10 @@ export type TurnStatus =
   | "interrupted"
   | "failed"
   /** An owner message deleted before it ran: never delivered. */
-  | "withdrawn";
+  | "withdrawn"
+  /** An owner message handed to the agent during its running turn: it never
+   * runs as a turn of its own. */
+  | "steered";
 export const OPEN_TURN: TurnStatus[] = ["queued", "running", "waiting_for_owner"];
 
 export interface ConsoleProject {
@@ -92,6 +95,9 @@ export interface ConsoleAgent {
   /** Ask me first: changes, commands and web access go to Needs you. Off
    * when absent. */
   askFirst?: boolean;
+  /** Network on Auto: its network requests are allowed without a Needs you
+   * item. Off (Ask) when absent. */
+  networkAuto?: boolean;
   folder: string;
   state: AgentState;
   /** Why the agent is in `error`. */
@@ -153,7 +159,10 @@ export type EventKind =
   | "note"
   /** A queued owner message's new text, and its deletion. */
   | "revised"
-  | "withdrawn";
+  | "withdrawn"
+  /** An owner message the agent took during this turn; `from` is the
+   * message's own id. */
+  | "steer";
 export interface ConsoleEvent {
   id: number;
   turnId: number;
@@ -164,6 +173,7 @@ export interface ConsoleEvent {
 }
 export type EventBody =
   | { text: string }
+  | { text: string; from: number }
   | { id: string; name: string; summary: string }
   | { id: string; text: string; error: boolean }
   | { tool: string; decision: "allow" | "deny" | "ask"; reason: string }

@@ -165,6 +165,18 @@ export const turns = {
       return this.turn(turnId)!;
     });
   },
+  /** Steer: the owner hands this queued message to the turn
+   * its agent is working on. From here it cannot be edited, deleted or run
+   * as a turn; the worker gives it to the client (`started_at` is when it
+   * was asked, `ended_at` when the client took it), or queues it again. */
+  askSteer(this: ConsoleStore, turnId: number): TurnRow {
+    return this.transaction(() => {
+      const t = this.queuedOwner(turnId);
+      if (this.steerable(t.agentId)?.id !== turnId) throw new Error("That message cannot go into the running turn now. It stays queued.");
+      this.run("UPDATE console_turns SET status = 'steered', started_at = ? WHERE id = ? AND status = 'queued'", this.now(), turnId);
+      return this.turn(turnId)!;
+    });
+  },
   /** A Send next mark strictly later than any earlier one, so the latest
    * mark wins. */
   frontMark(this: ConsoleStore): number {
@@ -189,6 +201,13 @@ export const turns = {
           this.run("UPDATE console_turns SET stop_requested = ? WHERE id = ? AND (stop_requested IS NULL OR stop_requested = 'stop')", force ? "force" : "stop", t.id);
         changed++;
       }
+      // A message on its way into the turn (Steer) that the
+      // agent has not taken stops with it, as queued messages do.
+      for (const t of this.steering(agentId)) {
+        const reason = "Stopped before it started.";
+        this.run("UPDATE console_turns SET status = 'stopped', reason = ?, started_at = NULL, ended_at = ? WHERE id = ?", reason, now, t.id);
+        this.insertEvent(t.id, this.agent(agentId)!, "status", { status: "stopped", reason }, now);
+      }
       return changed;
     });
   },
@@ -201,10 +220,11 @@ export const turns = {
   openTurns(this: ConsoleStore): TurnRow[] {
     return this.all(`SELECT * FROM console_turns WHERE status IN (${OPEN}) ORDER BY id`).map(turn);
   },
-  /** Each agent's latest turn in a project (its window's status). */
+  /** Each agent's latest turn in a project (its window's status): never a
+   * message that did not run as a turn (deleted, or steered). */
   latestTurns(this: ConsoleStore, projectId: string): TurnRow[] {
     return this.all(
-      "SELECT t.* FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.project_id = ? AND t.id = (SELECT MAX(id) FROM console_turns WHERE agent_id = t.agent_id AND status <> 'withdrawn')",
+      "SELECT t.* FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.project_id = ? AND t.id = (SELECT MAX(id) FROM console_turns WHERE agent_id = t.agent_id AND status NOT IN ('withdrawn', 'steered'))",
       projectId,
     ).map(turn);
   },

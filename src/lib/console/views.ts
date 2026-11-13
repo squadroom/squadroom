@@ -74,7 +74,7 @@ export interface AgentView extends ConsoleAgent {
   merging: { fromName: string; files: string[] } | null;
   turn: Pick<ConsoleTurn, "id" | "status" | "reason" | "startedAt" | "endedAt" | "usage"> | null;
   /** The owner's queued messages, first to run first. */
-  queued: { id: number; text: string; first: boolean; next: boolean; edited: boolean; summary: boolean; files: string[] }[];
+  queued: { id: number; text: string; first: boolean; next: boolean; edited: boolean; summary: boolean; files: string[]; steering?: boolean; steer?: boolean }[];
   /** A summary waits for its new session's first message. */
   summaryWaiting: boolean;
   /** The context gauge for its current session. */
@@ -249,7 +249,12 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
           // The owner's queued messages, first to run first.
           queued: (() => {
             const all = store.queuedTurns(a.id);
-            return all
+            // First, a message on its way into the running turn: handed to
+            // the client, which has not taken it yet.
+            const steering = store.steering(a.id).map((q) => ({ id: q.id, text: q.prompt, first: false, next: false, edited: q.revisedAt !== null, summary: false, files: [], steering: true, steer: false }));
+            // The one message Steer can hand to the running turn now, if any.
+            const offer = store.steerable(a.id)?.id;
+            const waiting = all
               .filter((q) => q.trigger === "owner")
               .map((q) => ({
                 id: q.id,
@@ -261,7 +266,10 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
               edited: q.revisedAt !== null,
                 summary: q.summary,
                 files: store.boundUploads(q.id),
+                steering: false,
+                steer: q.id === offer,
               }));
+            return [...steering, ...waiting];
           })(),
           gauge: store.gauge(a.id),
           helpers: store.helpers(a.id),

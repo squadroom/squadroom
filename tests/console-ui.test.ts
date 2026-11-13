@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGENT_KINDS } from "../src/lib/console/agents.ts";
 import { followStream, parseSseFrames, type SseFrame } from "../src/lib/console/sse.ts";
+import { transcript, type Block } from "../src/lib/console/transcript.ts";
 import type { ConsoleEvent } from "../src/lib/console/types.ts";
 import {
   EVENT_BYTES_MAX,
@@ -30,6 +31,7 @@ import {
   keepIfSame,
   templateSummary,
   timelineLine,
+  transcriptRows,
   wholeInput,
   workerStatus,
   type EventWindow,
@@ -350,4 +352,79 @@ test("keepIfSame: the previous view when every field is equal, else the new one"
   assert.equal(keepIfSame(before, fewer), fewer);
   assert.equal(keepIfSame(null, before), before);
   assert.equal(keepIfSame(before, null), null);
+});
+
+// runs of tool rows show as one line.
+const toolRow = (key: number, name: string, extra: Partial<Extract<Block, { type: "tool" }>> = {}): Block => ({ type: "tool", key: String(key), name, summary: `/work/${key}`, output: "ok", error: false, ...extra });
+const textRow = (key: number): Block => ({ type: "text", key: String(key), text: "Done." });
+const lines = (rows: ReturnType<typeof transcriptRows>) => rows.map((r) => (r.type === "steps" ? (r.line ?? `one ${r.blocks.length}`) : r.type));
+
+test("tool rows: two or more in a row become one line, most used first; a single one stays as it is", () => {
+  const names = ["Read", "Edit", "Edit", "Grep", "Edit", "Write", "Read", "Write"];
+  const run = names.map((name, i) => toolRow(i + 1, name));
+  const rows = transcriptRows([textRow(0), ...run, textRow(20), toolRow(21, "Bash"), textRow(22)]);
+  assert.deepEqual(lines(rows), ["text", "8 steps: 3 Edit, 2 Read, 2 Write, 1 Grep", "text", "one 1", "text"]);
+  const group = rows[1];
+  assert.ok(group.type === "steps");
+  // The rows themselves, in order, for when it is opened.
+  assert.deepEqual(group.blocks, run);
+  assert.equal(group.failed, 0);
+  // A single tool is still a run of one (drawn as before), with no line.
+  assert.ok(rows[3].type === "steps" && rows[3].line === null);
+  assert.deepEqual(transcriptRows([]), []);
+});
+
+test("tool rows: everything that is not a tool ends the run, so nothing that needs the owner is ever inside one", () => {
+  const breakers: Block[] = [
+    { type: "text", key: "b", text: "x" },
+    { type: "owner", key: "b", text: "x" },
+    { type: "team", key: "b", messages: [] },
+    { type: "push", key: "b", text: "Pushed.", url: null },
+    { type: "note", key: "b", text: "x" },
+    { type: "upload", key: "b", name: "a", path: "a", size: 1 },
+    { type: "error", key: "b", text: "x" },
+    { type: "status", key: "b", status: "failed", reason: null },
+    { type: "permission", key: "b", tool: "Skill", decision: "ask", reason: "x" },
+    { type: "permission", key: "b", tool: "Write", decision: "deny", reason: "x" },
+  ];
+  for (const b of breakers) {
+    const rows = transcriptRows([toolRow(1, "Read"), toolRow(2, "Read"), b, toolRow(3, "Edit"), toolRow(4, "Edit")]);
+    assert.deepEqual(lines(rows), ["2 steps: 2 Read", b.type, "2 steps: 2 Edit"], `${b.type} ${"decision" in b ? b.decision : ""}`);
+  }
+});
+
+test("tool rows: a Thinking row or an allowed line stays inside its run and is not counted as a step", () => {
+  const allowed: Block = { type: "permission", key: "9", tool: "WebFetch", decision: "allow", reason: "Network auto: Network access to example.com (WebFetch) allowed without asking." };
+  const rows = transcriptRows([toolRow(1, "WebFetch"), allowed, toolRow(2, "WebFetch"), allowed]);
+  assert.deepEqual(lines(rows), ["2 steps: 2 WebFetch"]);
+  assert.ok(rows[0].type === "steps" && rows[0].blocks.length === 4);
+  const thinking: Block = { type: "thinking", key: "8", text: "hm" };
+  assert.deepEqual(lines(transcriptRows([thinking, toolRow(1, "Read"), thinking, toolRow(2, "Edit")])), ["2 steps: 1 Read, 1 Edit"]);
+  // With no tool beside them, they are ordinary rows.
+  assert.deepEqual(lines(transcriptRows([textRow(1), allowed, thinking])), ["text", "permission", "thinking"]);
+});
+
+test("tool rows: a failed tool is counted on the line; a tool still running is counted while the agent works", () => {
+  const failed = transcriptRows([toolRow(1, "Bash"), toolRow(2, "Bash", { error: true, output: "exit 1" }), toolRow(3, "Read")]);
+  assert.deepEqual(lines(failed), ["3 steps: 2 Bash, 1 Read · 1 failed"]);
+  assert.ok(failed[0].type === "steps" && failed[0].failed === 1);
+  // The last run of a running turn: its line grows with it and says what has no result yet.
+  const growing = [toolRow(1, "Read"), toolRow(2, "Bash", { output: null })];
+  assert.deepEqual(lines(transcriptRows(growing, true)), ["2 steps: 1 Read, 1 Bash · 1 running"]);
+  assert.deepEqual(lines(transcriptRows([...growing, toolRow(3, "Edit", { output: null })], true)), ["3 steps: 1 Read, 1 Bash, 1 Edit · 2 running"]);
+  // Not the last run, or no turn running (a tool whose result never came): not "running".
+  assert.deepEqual(lines(transcriptRows([...growing, textRow(4)], true)), ["2 steps: 1 Read, 1 Bash", "text"]);
+  assert.deepEqual(lines(transcriptRows(growing)), ["2 steps: 1 Read, 1 Bash"]);
+});
+
+test("tool rows: a run keeps its key while it grows, so the page keeps it open or closed", () => {
+  const ev = (id: number, kind: ConsoleEvent["kind"], body: Record<string, unknown>): ConsoleEvent => ({ id, turnId: 1, agentId: "a", kind, body: body as ConsoleEvent["body"], createdAt: 0 });
+  const events = [ev(1, "text", { text: "Looking." }), ev(2, "tool", { id: "t1", name: "Read", summary: "a.ts" }), ev(3, "tool_result", { id: "t1", text: "x" })];
+  const one = transcriptRows(transcript(events), true);
+  events.push(ev(4, "tool", { id: "t2", name: "Edit", summary: "a.ts" }), ev(5, "tool_result", { id: "t2", text: "boom", error: true }), ev(6, "tool", { id: "t3", name: "Grep", summary: "x" }));
+  const three = transcriptRows(transcript(events), true);
+  assert.deepEqual(lines(one), ["text", "one 1"]);
+  assert.deepEqual(lines(three), ["text", "3 steps: 1 Read, 1 Edit, 1 Grep · 1 failed · 1 running"]);
+  assert.equal(one[1].key, three[1].key);
+  assert.equal(three[1].key, "steps-2");
 });
