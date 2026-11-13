@@ -159,6 +159,59 @@ test("Codex: an answer read together with the turn's end still counts, and a lat
   await h.ended(slow);
 });
 
+test("Codex: the turn's end read just before turn/steer's answer, in the same output, still counts the message as taken", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const coder = h.codexAgent("Coder");
+  await h.ready(coder.id);
+  const turn = h.send(coder.id, "steerable");
+  await h.started(turn);
+  // turn/completed, then the answer, in one write: the answer is applied
+  // before the claim is given up, so the message does not run again.
+  const last = sendSteer(h, coder.id, "endfirst");
+  await h.ended(turn);
+  await steered(h, last);
+  await h.passes();
+  assert.equal(h.store.turn(last)!.status, "steered");
+  assert.equal(h.store.queuedMessages(coder.id).length, 0);
+  assert.equal(h.codexCalls().filter((c) => c.method === "turn/start").length, 1);
+  assert.deepEqual(owner(h, coder.id), ["steerable", "endfirst (during)"]);
+});
+
+test("a pause, or a usage hold, between the Steer click and the hand-over keeps the message queued until Resume", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent();
+  await h.ready(lead.id);
+  const turn = h.send(lead.id, "steerable");
+  await h.started(turn);
+  // Paused right after the click, before the worker's next pass.
+  const message = sendSteer(h, lead.id, "after the pause");
+  run(h, { action: "pause", scope: "tab", id: h.tab.id });
+  await h.until(() => h.store.turn(message)!.status === "queued", "the message is queued again");
+  await h.passes();
+  assert.deepEqual(steers(h, lead.id), []);
+  assert.deepEqual(view(h, lead.id).queued.map((q) => [q.text, q.steering, q.steer]), [["after the pause", false, false]]);
+  // Resumed: an ordinary queued message, with its Steer link again.
+  run(h, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.passes();
+  assert.equal(h.store.turn(message)!.status, "queued");
+  assert.deepEqual(steers(h, lead.id), []);
+  // The same for a usage hold that begins after the click.
+  steer(h, message);
+  h.store.run("UPDATE console_tabs SET usage_hold = 'Usage not reported: x' WHERE id = ?", h.tab.id);
+  await h.until(() => h.store.turn(message)!.status === "queued", "the message is queued again");
+  await h.passes();
+  assert.deepEqual(steers(h, lead.id), []);
+  h.store.run("UPDATE console_tabs SET usage_hold = NULL WHERE id = ?", h.tab.id);
+  run(h, { action: "resume", scope: "tab", id: h.tab.id });
+  steer(h, message);
+  await steered(h, message);
+  assert.deepEqual(steers(h, lead.id).map((s) => s.text), ["after the pause"]);
+  run(h, { action: "stop", agentId: lead.id });
+  await h.ended(turn);
+});
+
 test("a message stays queued, and runs as its own turn, when the client cannot take one or refuses it; an ACP agent has no Steer", async (t) => {
   const h = await harness(t);
   // The ACP agent's key.

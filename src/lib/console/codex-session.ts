@@ -147,13 +147,12 @@ class CodexSession implements AgentSession {
     };
     this.steers.add(settle);
     server
-      .call("turn/steer", { threadId: this.thread.id, expectedTurnId: this.turnId, input: [{ type: "text", text, text_elements: [] }] }, this.driver.callMs, (reply) => settle("result" in reply))
-      .then(
-        () => settle(true),
-        (error: unknown) => {
-          if (!(error instanceof CodexError) || error.outcome !== "unknown") settle(false);
-        },
-      );
+      // Settled as the answer is read, not when its promise resolves (a
+      // tick later): the turn's end may be read just before or after it.
+      .call("turn/steer", { threadId: this.thread.id, expectedTurnId: this.turnId, input: [{ type: "text", text, text_elements: [] }] }, this.driver.callMs, (reply) => settle("result" in reply), settle)
+      .catch((error: unknown) => {
+        if (!(error instanceof CodexError) || error.outcome !== "unknown") settle(false);
+      });
   }
   interrupt(options: { force?: boolean } = {}) {
     this.stopWanted = true;
@@ -186,8 +185,8 @@ class CodexSession implements AgentSession {
     this.turn = null;
     this.forcing = false;
     // After this pass of the server's output: an answer to turn/steer read
-    // together with the turn's end is applied first, so a message the
-    // server took is never queued again.
+    // together with the turn's end, before it or after it, is applied as
+    // it is read, so a message the server took is never queued again.
     const open = [...this.steers];
     if (open.length) queueMicrotask(() => open.forEach((settle) => settle(false)));
   }

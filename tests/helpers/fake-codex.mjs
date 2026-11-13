@@ -327,9 +327,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       const text = q.params.input[0].text;
       // "endnow": the answer and the turn's end in one write, so they are
       // read together. "slowack": the answer comes after 400 ms.
-      if (text === "endnow") {
+      // "endfirst": the same, with the turn's end written before the answer.
+      if (text === "endnow" || text === "endfirst") {
         turns.delete(threadId);
         const lines = [{ id: q.id, result: { turnId: turn.id } }, { method: "turn/completed", params: { threadId, turnId: turn.id, turn: { id: turn.id, status: "completed" } } }];
+        if (text === "endfirst") lines.reverse();
         return process.stdout.write(lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
       }
       if (text === "slowack") return setTimeout(() => reply({ turnId: turn.id }), 400);

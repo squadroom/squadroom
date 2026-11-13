@@ -113,7 +113,7 @@ export const lifecycle = {
     const agent = this.agent(agentId);
     const run = this.all("SELECT * FROM console_turns WHERE agent_id = ? AND status = 'running'", agentId).map(turn)[0];
     if (!agent || !steers(agent.kind) || !run || run.stopRequested || run.summary || this.steering(agentId).length) return null;
-    if (this.pausedFor(agent) || this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", agent.tabId)?.usage_hold != null) return null;
+    if (this.held(agent)) return null;
     const next = this.queuedTurns(agentId).find((q) => q.trigger === "owner");
     if (!next || next.summary || next.resendOf !== null || this.pushApproved(next.id) || this.boundUploads(next.id).length) return null;
     return next;

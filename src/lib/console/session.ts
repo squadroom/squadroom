@@ -411,8 +411,9 @@ interface RpcCallOptions {
    * program is gone, an error when the write failed with the program still
    * running (then whether it read the request cannot be known). */
   written?: (outcome: "written" | "gone" | "unknown") => void;
-  /** Told as the reply is read, before the next line is. */
-  answered?: () => void;
+  /** Told as the reply is read, before the next line is: whether it is a
+   * result (not a refusal). */
+  answered?: (ok: boolean) => void;
   /** After a timeout, still handed the reply should it come, once. */
   late?: LateReply;
 }
@@ -428,7 +429,7 @@ export abstract class RpcProcess extends ClientProcess {
   private nextId = 1;
   private calls = new Map<
     number,
-    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: () => void }
+    { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null; answered?: (ok: boolean) => void }
   >();
   /** Calls that timed out whose caller still wants the reply. */
   private late = new Map<number, LateReply>();
@@ -472,7 +473,7 @@ export abstract class RpcProcess extends ClientProcess {
     if (call.timer) clearTimeout(call.timer);
     // Told at once, before the next line is read (a promise settles only
     // after this read), so what the program says later is not this call's.
-    call.answered?.();
+    call.answered?.(!error);
     if (error) call.reject(error);
     else call.resolve(result);
   }

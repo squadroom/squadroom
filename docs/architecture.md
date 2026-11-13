@@ -213,7 +213,9 @@ it as taken only when the client says so:
 
 No turn is made for a steered message: cost, limits and the commit are the
 running turn's. A message the client does not take is queued again, or
-stopped with the turn if the owner pressed Stop. After a worker restart, a
+stopped with the turn if the owner pressed Stop. The worker checks pauses
+and usage holds again as it hands a message over: one paused after the
+click is queued again and waits for Resume. After a worker restart, a
 message not known to be taken is queued again, and one that was taken is
 never sent twice. ACP agents cannot take a message mid-turn.
 
