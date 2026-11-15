@@ -47,7 +47,9 @@ only restates one of them is not a new finding.
   Content-Security-Policy keeps the page to its own address for scripts,
   styles, fonts, images, media (plus inline `data:` ones) and requests,
   frames no address (`frame-src 'none'`), and no
-  other site may frame it. It does allow inline scripts, which Next.js
+  other site may frame it. It also allows `blob:` images and media, which
+  a script in an HTML preview can make from its own data; nothing is
+  fetched for one. It does allow inline scripts, which Next.js
   needs to start each page, and inline styles, so it is a second line of
   defence: what keeps an agent's output from making your browser call
   out, or call one of Squadroom's own routes with your cookies, is that

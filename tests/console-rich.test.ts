@@ -333,11 +333,22 @@ test("an HTML preview leaves out what is missing, outside the folder or past the
   assert.equal(body(again).split("data:image/png").length - 1, 5);
   assert.deepEqual(again.leftOut, [{ name: "big.png", why: "the page with its files put in is more than 16.0 MB" }]);
   assert.ok(again.document.length < PREVIEW_MAX_DOCUMENT + 1024);
+  // What counts is what goes into the page: text in a `data:` address is
+  // percent-encoded, nine characters for each of these.
+  const wide = `<svg xmlns="http://www.w3.org/2000/svg"><text>${"\u6f22".repeat(160_000)}</text></svg>`;
+  const encoded = await previewDocument(`<img src="wide.svg">`.repeat(13) + `<style>a{background:url(wide.svg)}</style>`, "p.html", async () => ({ kind: "text", text: wide }));
+  assert.equal(body(encoded).split("data:image/svg+xml").length - 1, 11);
+  assert.deepEqual(encoded.leftOut, [{ name: "wide.svg", why: "the page with its files put in is more than 16.0 MB" }]);
+  assert.ok(encoded.document.length < PREVIEW_MAX_DOCUMENT + 1024);
   // A sheet that imports itself many times is put in to the depth and no
   // further: not once more for each import at the last level.
   const selfish = await previewDocument(`<link rel="stylesheet" href="s.css">`, "p.html", async () => ({ kind: "text", text: `@import "s.css";`.repeat(12) + "a{}" }));
   assert.equal(body(selfish).split("a{}").length - 1, 1 + 12 + 144 + 1728);
   assert.deepEqual(selfish.leftOut, [{ name: "s.css", why: "style sheets import each other more than 4 deep" }]);
+  // A letter whose lower case is longer (`\u0130`) before a script or style
+  // does not move where its content is taken to end.
+  const dotted = await previewDocument(`<p>${"\u0130".repeat(10)}</p><script src="app.js"></SCRIPT><STYLE>a{}</Style><h1>Hello</h1>`, "p.html", async () => ({ kind: "text", text: "go()" }), true);
+  assert.equal(body(dotted), `<p>${"\u0130".repeat(10)}</p><script>go()</script><style>a{}</style><h1>Hello</h1>`);
   // A file that is not HTML at all, or is cut short, comes through whole.
   for (const odd of ["", "plain", "<script src='a.js'>never closed", "<!-- open", "<img src='x.png", "<style>a{}"]) assert.equal(body(await previewDocument(odd, "p.html", async () => null)), odd);
 });

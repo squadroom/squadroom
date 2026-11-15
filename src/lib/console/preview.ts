@@ -87,6 +87,8 @@ interface Loaded {
   path: string;
   text?: string;
   base64?: string;
+  /** The text as a `data:` address carries it, worked out once. */
+  encoded?: string;
 }
 
 /** The file as a `data:` address. `href` is how the page named it: a
@@ -94,7 +96,7 @@ interface Loaded {
 function dataUri(file: Loaded, href: string): string {
   const mime = fileKind(file.path).kind === "image" ? fileKind(file.path).mime : (MIME[file.path.slice(file.path.lastIndexOf(".") + 1).toLowerCase()] ?? "application/octet-stream");
   const fragment = /#[\w.:%=&,()-]*$/.exec(href.trim())?.[0] ?? "";
-  return (file.text !== undefined ? `data:${mime};charset=utf-8,${encodeURIComponent(file.text)}` : `data:${mime};base64,${file.base64 ?? ""}`) + fragment;
+  return (file.text !== undefined ? `data:${mime};charset=utf-8,${(file.encoded ??= encodeURIComponent(file.text))}` : `data:${mime};base64,${file.base64 ?? ""}`) + fragment;
 }
 
 /** A file beside the page, by the way it is named: not a web address, any
@@ -129,15 +131,17 @@ function loader(read: (path: string) => Promise<PreviewFile | null>) {
    * absolute path, a fragment): that is left as written, and the frame's
    * policy stops it. A relative path is resolved against `from` and may
    * not climb out of the folder; the read checks it again, on disk.
+   * `uri` says the file goes in as a `data:` address, which is longer
+   * than the file (text is percent-encoded): that length is what counts.
    */
-  const load = (from: string, href: string): Promise<Loaded | null> | undefined => {
+  const load = (from: string, href: string, uri = false): Promise<Loaded | null> | undefined => {
     const h = href.trim();
     if (!isLocal(h)) return undefined;
     const path = resolveFromDocument("/", from, h);
     if (!path) return Promise.resolve(skip(h, "it is outside this agent's folder"));
     // A file is read once, and counted each time it is put in.
     return once(path).then((file) => {
-      const size = file ? (file.text ?? file.base64 ?? "").length : 0;
+      const size = !file ? 0 : uri ? dataUri(file, h).length : (file.text ?? file.base64 ?? "").length;
       if (put + size > PREVIEW_MAX_DOCUMENT) return skip(path, `the page with its files put in is more than ${formatSize(PREVIEW_MAX_DOCUMENT)}`);
       put += size;
       return file;
@@ -201,7 +205,7 @@ async function inlineCss(css: string, from: string, files: Loader, depth: number
     return sheet;
   });
   return replaceEach(imported, CSS_URL, async (m) => {
-    const file = await files.load(from, m[1] ?? m[2] ?? m[3]);
+    const file = await files.load(from, m[1] ?? m[2] ?? m[3], true);
     return file ? `url("${dataUri(file, m[1] ?? m[2] ?? m[3])}")` : m[0];
   });
 }
@@ -252,6 +256,10 @@ function tagEnd(html: string, from: number): number {
 }
 
 const TAG = /<(script|style|link|meta|img|source|video|audio|iframe|frame|object|embed|portal|fencedframe)(?=[\s/>])/iy;
+// Where a script's or style's content ends. Looked for in the file as
+// written, letters of either case: a lower-cased copy can differ in length
+// (`İ` becomes two characters), and its offsets would then be wrong here.
+const CLOSING = { script: /<\/script/gi, style: /<\/style/gi };
 const MODULE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(?\s*)["']\.{0,2}\//;
 
 /** One tag (and for a script or style its content), rewritten; null to
@@ -262,7 +270,7 @@ async function rewritten(name: string, attrs: string, content: string, from: str
   const has = (n: string) => list.some((a) => a.name === n);
   const data = async (n: string) => {
     const href = get(n);
-    const file = href === undefined ? null : await files.load(from, href);
+    const file = href === undefined ? null : await files.load(from, href, true);
     return file ? dataUri(file, href!) : undefined;
   };
   // What an embedded frame would show is taken from it here; the browser's
@@ -342,7 +350,6 @@ async function rewritten(name: string, attrs: string, content: string, from: str
 export async function previewDocument(html: string, path: string, read: (path: string) => Promise<PreviewFile | null>, scripts = false): Promise<Preview> {
   const files = loader(read);
   const late: string[] = [];
-  const lower = html.toLowerCase();
   const parts: (string | Promise<string>)[] = [];
   let done = 0;
   for (let i = html.indexOf("<"); i >= 0; i = html.indexOf("<", i)) {
@@ -364,7 +371,8 @@ export async function previewDocument(html: string, path: string, read: (path: s
     let end = close + 1;
     let content = "";
     if (name === "script" || name === "style") {
-      const closing = lower.indexOf(`</${name}`, end);
+      CLOSING[name].lastIndex = end;
+      const closing = CLOSING[name].exec(html)?.index ?? -1;
       const after = closing < 0 ? -1 : html.indexOf(">", closing);
       if (after < 0) break;
       content = html.slice(end, closing);
