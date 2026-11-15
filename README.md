@@ -8,7 +8,7 @@ several repos open with a different team on each piece of work.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/console-desktop-dark.png">
-  <img src="docs/images/console-desktop-light.png" alt="Squadroom with the Weather Station project open: four agent windows side by side (Lead, Backend, Frontend and Reviewer), the team timeline above them, and two items waiting in Needs you.">
+  <img src="docs/images/console-desktop-light.png" alt="Squadroom with the weather-app project open on its Forecast page tab: four agent windows side by side (Lead, Builder, Designer and Reviewer), each header showing its model, its status and its Network setting, the team line above them, and two items waiting in Needs you.">
 </picture>
 
 Website: [squadroom.github.io](https://squadroom.github.io)
@@ -245,21 +245,42 @@ The pictures use invented demo data; they follow your light or dark setting.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/team-messages-dark.png">
-  <img src="docs/images/team-messages-light.png" alt="The Team panel open above the agent windows: messages from Lead to Frontend and Backend, Backend reporting a commit to Lead, Lead asking Reviewer for a review and Reviewer answering.">
+  <img src="docs/images/team-messages-light.png" alt="The Team panel open above the agent windows: Lead sends Designer its part, Builder reports a commit to Lead, Lead asks Reviewer for a review, Reviewer answers, and Lead passes the note on to Builder.">
 </picture>
 
 **Changes and pull requests.** Each agent's Changes view shows its branch, the pull request it opened, the approve gate, every file changed against main, and each turn's commit with its diff.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/changes-pr-dark.png">
-  <img src="docs/images/changes-pr-light.png" alt="Backend's Changes dialog: branch console/a2-backend, pull request #42 opened, an Approve button, five changed files, and one turn's commit expanded to its stat and diff.">
+  <img src="docs/images/changes-pr-light.png" alt="Builder's Changes dialog: branch console/a2-builder, pull request #42 opened, an Approve button, four changed files, and one turn's commit expanded to its stat and diff.">
 </picture>
 
-**Needs you on a phone.** Network requests, questions and pushes wait in one tray, on desktop or phone.
+**Needs you on a phone.** Network requests, questions and pushes wait in one tray, on desktop or phone. A request that got no answer while you were away stays there too.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/phone-needs-you-dark.png">
-  <img src="docs/images/phone-needs-you-light.png" alt="The Needs you tray on a phone: Frontend asks for network access to registry.npmjs.org with Allow once and Always buttons, and Docs asks a question with an answer box." width="320">
+  <img src="docs/images/phone-needs-you-light.png" alt="The Needs you tray on a phone: Designer asks for network access to registry.npmjs.org, with Allow once, Always, and Allow, Network to Auto buttons; below it, a network request from Tester that got no answer, with Ask again, Dismiss, Always and Network to Auto buttons." width="320">
+</picture>
+
+**Menus.** A tab's menu has one line for each thing, with its current value next to it and a switch for Network auto.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menus-dark.png">
+  <img src="docs/images/menus-light.png" alt="The menu of the Forecast page tab, open: Rename, Pause tab, Spend limit with the amount spent, Turn limits showing 40 turns and 2 h, Network auto showing 1 of 3 with a switch, Run report, Save as template and Close tab.">
+</picture>
+
+**Maths, diagrams and images in a reply.** A reply can hold maths, a Mermaid diagram and a picture from the agent's own folder, and all three show in place.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/rich-reply-dark.png">
+  <img src="docs/images/rich-reply-light.png" alt="One agent window at full size. Its reply explains retry waits with two formulas drawn as maths, a flowchart from the forecast page through the cache to the service, and a bar chart of the wait before each retry.">
+</picture>
+
+**HTML preview.** The file panel shows an HTML file an agent wrote as a page, with its scripts off until you press Run scripts.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/html-preview-dark.png">
+  <img src="docs/images/html-preview-light.png" alt="The file panel beside the agent windows, previewing mockups/forecast.html: a weather page with today's temperature and seven day cards. Above it are the Files, Source and Run scripts buttons, and below it a note that scripts are off and nothing is loaded from the internet.">
 </picture>
 
 ## Requirements
