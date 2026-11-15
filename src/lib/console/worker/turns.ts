@@ -2,6 +2,7 @@ import { agentKind, type AgentModel } from "../agents.ts";
 import { TurnEvents } from "../events.ts";
 import { uploadsNote } from "../files.ts";
 import { keyFor } from "../keys.ts";
+import { PUSH_FAILURE_CHARS, pushFailedNote } from "../push-failure.ts";
 import { errorMessage as message, type SessionTotals } from "../session.ts";
 import { fingerprint, loginKey, NO_REQUESTS } from "../spend.ts";
 import type { TurnRow } from "../store.ts";
@@ -124,7 +125,11 @@ export const turns = {
     const baseNote = baseNews
       ? `${project!.baseBranch} on GitHub has new commits that your branch does not have yet. team_pull(from: "${project!.baseBranch}") brings them in.\n\n`
       : "";
-    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${baseNote}${t.prompt}`;
+    // Its last push failed: said once, with the reason, so it does not ask
+    // for the same push again blindly.
+    const pushNews = this.store.failedPush(rt.agent.id, true);
+    const pushNote = pushNews ? `${pushFailedNote(this.redactor.shorten(pushNews.text, PUSH_FAILURE_CHARS))}\n\n` : "";
+    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${baseNote}${pushNote}${t.prompt}`;
     // Recorded only once the client has accepted the turn (which an
     // unacknowledged start proves later, or never).
     let spent = false;
@@ -139,6 +144,7 @@ export const turns = {
       if (shown.length) this.safe(() => this.store.clearShown(this.epoch!, rt.agent.id, shown));
       if (uploads.length) this.safe(() => this.store.markDelivered(this.epoch!, uploads.map((u) => u.id), t.id));
       if (baseNews) this.safe(() => this.store.baseTold(this.epoch!, rt.agent.id, baseNews));
+      if (pushNews) this.safe(() => this.store.pushTold(this.epoch!, rt.agent.id, pushNews.job));
     };
     const session = this.ensureSession(rt);
     // Before the paid request is handed over: the durable mark must succeed,

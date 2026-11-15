@@ -51,8 +51,12 @@ export const CLONE_TMP = ".console-tmp";
 export const CONSOLE_DIRS = [CLONE_TMP, UPLOADS_DIR];
 /** A Git command that failed, as a GitError: the last lines it printed,
  * with the token taken out. */
-export const fail = (what: string, r: RunResult, token?: string | null) => {
-  let detail = r.stderr.split("\n").filter(Boolean).slice(-3).join(" ").slice(0, 400);
+export const fail = (what: string, r: RunResult, token?: string | null, remote = false) => {
+  const lines = r.stderr.split("\n").filter(Boolean);
+  // A refused push: GitHub's own reason comes in `remote:` lines above
+  // Git's last three (a ruleset's, say), so the first of them are kept too.
+  const said = remote ? lines.slice(0, -3).filter((l) => l.startsWith("remote:")).slice(0, 4).map((l) => l.trim()) : [];
+  let detail = [...said, ...lines.slice(-3)].join(" ").slice(0, 400);
   if (token) detail = detail.split(token).join("[redacted]");
   return new GitError(`${what} failed${detail ? `: ${detail}` : ` (exit ${r.code})`}`);
 };

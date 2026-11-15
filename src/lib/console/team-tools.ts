@@ -126,7 +126,7 @@ export const TEAM_TOOLS = [
   {
     name: "team_push",
     description:
-      "Ask to push your console/ branch to GitHub and open its pull request (the owner approves it). It is pushed after this turn ends and its changes are committed. Give the pull request a title and a description in Markdown: what changed and why, the files, the checks you ran, and what the owner should test. If the owner has switched Codex reviews on, a new pull request gets one; on later pushes, set review to true to ask for another.",
+      "Ask to push your console/ branch to GitHub and open its pull request (the owner approves it). It is pushed after this turn ends and its changes are committed; if the push fails, your next turn starts with the reason. Give the pull request a title and a description in Markdown: what changed and why, the files, the checks you ran, and what the owner should test. If the owner has switched Codex reviews on, a new pull request gets one; on later pushes, set review to true to ask for another.",
     inputSchema: {
       type: "object",
       properties: {
@@ -139,7 +139,7 @@ export const TEAM_TOOLS = [
   {
     name: "team_pr",
     description:
-      "Read your branch's open pull request on GitHub: its state, whether your newer commits are pushed, Codex's review state, every open review thread (with its id) and the conversation, each comment whole with its formatting and a number. With comment (that number) or thread (an id), read just that one in full, however long. Read-only; GitHub projects.",
+      "Read your branch's open pull request on GitHub: its state, whether your newer commits are pushed (and, if your last push failed, why), Codex's review state, every open review thread (with its id) and the conversation, each comment whole with its formatting and a number. With comment (that number) or thread (an id), read just that one in full, however long. Read-only; GitHub projects.",
     inputSchema: {
       type: "object",
       properties: {

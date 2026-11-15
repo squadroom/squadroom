@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
@@ -9,6 +9,8 @@ import { CHECKS_CHARS, JOB_LOG_CHARS, checksText, cleanComment, codexState, jobL
 import { readChecks, readJobLog } from "../src/lib/console/github-api.ts";
 import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 import { resendNote } from "../src/lib/console/team.ts";
+import { needNotices } from "../src/lib/console/notify.ts";
+import { pushFailedNote, pushFailedNotice, pushHint } from "../src/lib/console/push-failure.ts";
 
 // an agent reads its own pull request (Codex's
 // findings, comments) and answers a finding, through the worker with the
@@ -738,4 +740,126 @@ test("a proposed tab warns when the proposing agent's branch has work that is no
     "Lead's branch has changes in 1 file that were not on main when it last took main in. The new tab's folders are made from main on GitHub, so its agents will not have that work unless it has been merged there.",
   );
   assert.equal(warning("Early"), warning("Build"));
+});
+
+// A push GitHub refuses (one that changes a workflow file, with a token
+// that may not) must reach both sides: the agent is told why, so it does
+// not ask for the same push again, and the owner has it in Needs you.
+const WORKFLOW_REFUSAL =
+  "Pushing console/builder-1a2b failed:  ! [remote rejected] 0123abcd -> console/builder-1a2b (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope) error: failed to push some refs to 'https://github.com/owner/repo.git'";
+const WORKFLOW_HINT =
+  "GitHub refused because this branch changes a workflow file (.github/workflows/…) and the Console's GitHub token may not change workflows. Add the Workflows permission to that token (classic token: the `workflow` scope), then push again.";
+
+test("a failed push in plain words: known causes get a hint and who has to act, unknown ones keep their text", () => {
+  assert.deepEqual(pushHint(WORKFLOW_REFUSAL), { who: "owner", text: WORKFLOW_HINT });
+  // A fine-grained token or an app is refused in other words.
+  assert.equal(pushHint("refusing to allow a GitHub App to create or update workflow `.github/workflows/x.yml` without `workflows` permission")?.text, WORKFLOW_HINT);
+  const cause = (text: string) => {
+    const h = pushHint(text);
+    return h && `${h.who}: ${h.text.split(/[ .:]/).slice(0, 3).join(" ")}`;
+  };
+  // A protected branch or a ruleset: the owner's to change.
+  assert.equal(cause("remote: error: GH006: Protected branch update failed for refs/heads/console/a."), "owner: GitHub refused because");
+  assert.match(pushHint("remote: error: GH013: Repository rule violations found for refs/heads/console/a.")!.text, /branch protection rule or ruleset .* The owner has to act/);
+  assert.match(pushHint(" ! [remote rejected] a -> console/a (protected branch hook declined)")!.text, /ruleset/);
+  // The token expired, was revoked or is wrong.
+  for (const text of [
+    "Pushing console/a failed: remote: Invalid username or token. fatal: Authentication failed for 'https://github.com/owner/repo.git/'",
+    "The GitHub token cannot read owner/repo (401). It needs access to this repository.",
+    "fatal: unable to access 'https://github.com/owner/repo.git/': The requested URL returned error: 401",
+    "GitHub did not open the pull request (401: Bad credentials).",
+  ])
+    assert.match(pushHint(text)!.text, /^GitHub did not accept the Console's GitHub token: .* The owner has to act: put a working token on the Keys page/, text);
+  // A branch named after a status code is not a cause.
+  assert.equal(pushHint("Pushing console/fix-401 failed (exit 1)"), null);
+  // Non-fast-forward: the agent's to fix.
+  for (const text of [" ! [rejected] a -> console/a (non-fast-forward)", " ! [rejected] a -> console/a (fetch first)", "remote: - Cannot force-push to this branch"])
+    assert.deepEqual([pushHint(text)!.who, /non-fast-forward rejection\)\. The agent has to act/.test(pushHint(text)!.text)], ["agent", true], text);
+  assert.equal(pushHint("GitHub could not be reached. Try again in a minute."), null);
+
+  // The owner's item: the branch, the hint, then what Git said.
+  assert.equal(pushFailedNotice("console/builder-1a2b", WORKFLOW_REFUSAL), `The push of console/builder-1a2b did not go through. ${WORKFLOW_HINT}\n\nDetails: ${WORKFLOW_REFUSAL}`);
+  assert.equal(pushFailedNotice(null, "Only an editing agent's console/ branch is pushed."), "The push of its branch did not go through. Only an editing agent's console/ branch is pushed.");
+  // The agent's line: the reason, who acts, and that asking again changes nothing.
+  assert.equal(
+    pushFailedNote(WORKFLOW_REFUSAL),
+    `Your last push did not go through. ${WORKFLOW_HINT} (${WORKFLOW_REFUSAL})\nOnly the owner can fix this, and it is in their Needs you. Asking for the same push again (team_push) will fail the same way until the cause is fixed.`,
+  );
+  assert.match(pushFailedNote(" ! [rejected] a -> console/a (non-fast-forward)"), /\nThis is yours to fix\. Asking for the same push again/);
+  assert.equal(
+    pushFailedNote("GitHub could not be reached. Try again in a minute."),
+    "Your last push did not go through. GitHub could not be reached. Try again in a minute.\nThe owner has been told in their Needs you. Asking for the same push again (team_push) will fail the same way until the cause is fixed.",
+  );
+});
+
+test("a failed push is put in Needs you with the reason and told to the agent once; a later push that goes through clears both", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  writeFileSync(join(h.store.agent(lead.id)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  const branch = h.store.agentBase(lead.id).branch!;
+  const echo = async (text: string) => {
+    await h.ended(h.send(lead.id, text));
+    return h.said(lead.id).at(-1)!;
+  };
+  await echo("write fix.txt");
+  await h.until(() => h.store.commits(lead.id).some((c) => c.files.includes("fix.txt")), "committed");
+  // "GitHub" refuses the push as it refuses a workflow change.
+  const hook = join(bare, "hooks", "pre-receive");
+  writeFileSync(hook, "#!/bin/sh\necho 'refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope' >&2\nexit 1\n");
+  chmodSync(hook, 0o755);
+  const push = async (state: "done" | "failed") => {
+    const id = h.store.queuePush(lead.id).id;
+    await h.until(() => h.store.job(id)!.state !== "queued" && h.store.job(id)!.state !== "running", "the push ends");
+    assert.equal(h.store.job(id)!.state, state, h.store.job(id)!.message ?? "");
+    return h.store.job(id)!;
+  };
+  const items = () => needsView(h.store).notices.filter((n) => n.text.startsWith("The push of"));
+  const failed = await push("failed");
+  assert.match(failed.message!, /create or update workflow/);
+  // The owner's Needs you: the agent, the branch, the hint, Git's words.
+  assert.equal(items().length, 1);
+  const item = items()[0];
+  assert.deepEqual([item.agentId, item.agentName, item.kind], [lead.id, "Lead", "note"]);
+  assert.ok(item.text.startsWith(`The push of ${branch} did not go through. ${WORKFLOW_HINT}\n\nDetails: Pushing ${branch} failed: `), item.text);
+  // It notifies as any Needs you item does.
+  assert.ok(needNotices(needsView(h.store)).some((n) => n.key === `notice:${item.id}` && n.title === "Lead" && n.body.startsWith(`The push of ${branch} did not go through. GitHub refused`)));
+  // The agent's next turn starts with the reason, once.
+  const note = pushFailedNote(failed.message!);
+  assert.ok(note.startsWith(`Your last push did not go through. ${WORKFLOW_HINT} (Pushing ${branch} failed: `));
+  assert.equal(await echo("second"), `echo: ${note}\n\nsecond`);
+  assert.equal(await echo("third"), "echo: third");
+  // team_pr says it too, while that push is its latest.
+  assert.equal(await echo(call("team_pr")), `team_pr: error: ${note}\n\n${branch} has no open pull request yet. Push it with team_push (the owner approves), which opens one.`);
+  // The same push again fails the same way: the agent is told again, and
+  // the owner's item stays as it is (no second notification).
+  const again = await push("failed");
+  assert.deepEqual(items().map((n) => n.id), [item.id]);
+  assert.equal(await echo("fourth"), `echo: ${pushFailedNote(again.message!)}\n\nfourth`);
+  assert.equal(await echo("fifth"), "echo: fifth");
+  // Dismissed by the owner, it is gone; the next failure is a new item.
+  runCommand(h.store, { action: "dismissNotice", noticeId: item.id });
+  assert.equal(items().length, 0);
+  await push("failed");
+  assert.equal(items().length, 1);
+  assert.notEqual(items()[0].id, item.id);
+  // The owner fixes the cause. A push that goes through settles it: the
+  // item goes, and the agent is told nothing more (not even the failure
+  // it had not heard of yet).
+  rmSync(hook);
+  const done = await push("done");
+  assert.match(done.message!, new RegExp(`^Pushed ${branch.replace("/", "\\/")} \\(push ${done.id}\\)`));
+  assert.equal(items().length, 0);
+  assert.equal(h.store.failedPush(lead.id), null);
+  assert.equal(await echo("sixth"), "echo: sixth");
+  gh.state.head = git(h.store.agent(lead.id)!.folder, "rev-parse", "HEAD");
+  assert.match(await echo(call("team_pr")), /^team_pr: Pull request #100 \(open\)/);
 });

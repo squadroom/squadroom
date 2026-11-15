@@ -1,4 +1,5 @@
 import { pushRequest, pushSummary } from "../pull-request.ts";
+import { PUSH_FAILURE_CHARS, pushFailedNote } from "../push-failure.ts";
 import { errorMessage as message } from "../session.ts";
 import { TeamError } from "../team.ts";
 import type { ConsoleWorker } from "../worker.ts";
@@ -136,10 +137,14 @@ export const teamGit = {
       ...(args.comment !== undefined ? { comment: args.comment as number } : {}),
       ...(typeof args.thread === "string" ? { thread: args.thread } : {}),
     };
+    // A latest push that failed is said first: what GitHub shows is then
+    // older than the agent's work, and why.
+    const last = this.store.failedPush(me.id);
+    const failed = last && this.store.latestJob(me.id)?.id === last.job ? `${pushFailedNote(this.redactor.shorten(last.text, PUSH_FAILURE_CHARS))}\n\n` : "";
     try {
-      return await this.repos.readAgentPullRequest(me, project, focus);
+      return failed + (await this.repos.readAgentPullRequest(me, project, focus));
     } catch (error) {
-      throw new TeamError(this.redactor.text(message(error)));
+      throw new TeamError(failed + this.redactor.text(message(error)));
     }
   },
 

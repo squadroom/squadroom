@@ -11,6 +11,10 @@ const files = (v: unknown) => JSON.parse((v as string) || "[]") as string[];
  * commit of it each agent was last told about: flags. */
 const BASE_TIP = "base-tip:";
 const BASE_TOLD = "base-told:";
+/** An agent's latest push failed, by agent: the job, its Needs you item and
+ * whether the agent has been told. A flag. */
+const PUSH_FAILED = "push-failed:";
+type PushFailure = { job: number; notice: number | null; told: boolean };
 
 export const git = {
   // ── The base branch on GitHub ───────────────────────────────
@@ -351,7 +355,51 @@ export const git = {
     const [r] = this.claimRows(epoch, "console_jobs", "queued", 1, skip, ...skipAgents);
     return r && job(r);
   },
+  /** A push ended. One that went through settles an earlier failure of its
+   * agent: its Needs you item goes, and nothing is left to tell the agent. */
   finishJob(this: ConsoleStore, epoch: number, id: number, state: "done" | "failed", message: string, url: string | null = null, head: string | null = null) {
-    this.write(epoch, "UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", state, message, url, head, this.now(), id);
+    this.transaction(() => {
+      this.run("UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", state, message, url, head, this.now(), id);
+      const agentId = this.job(id)?.agentId;
+      const failed = state === "done" && agentId ? this.pushFailure(agentId) : null;
+      if (!failed) return;
+      if (failed.notice !== null) this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", failed.notice);
+      this.setFlag(PUSH_FAILED + agentId, null);
+    }, epoch);
+  },
+  // ── A failed push ───────────────────────────────────────────
+  pushFailure(this: ConsoleStore, agentId: string): PushFailure | null {
+    const flag = this.flag(PUSH_FAILED + agentId);
+    return flag ? (JSON.parse(flag) as PushFailure) : null;
+  },
+  /** A push failed: the job's record, the owner's Needs you item and what
+   * the agent's next turn is told, in one transaction. An item of the
+   * agent's earlier failed push is replaced, unless it is still open and
+   * says the same (the owner is not notified again for the same words). */
+  failPush(this: ConsoleStore, epoch: number, id: number, message: string, notice: string) {
+    this.transaction(() => {
+      this.run("UPDATE console_jobs SET state = 'failed', message = ?, ended_at = ? WHERE id = ?", message, this.now(), id);
+      const agentId = this.job(id)?.agentId;
+      if (!agentId || !this.agent(agentId)) return;
+      const before = this.pushFailure(agentId)?.notice ?? null;
+      const kept = before !== null && !!this.get("SELECT 1 AS x FROM console_notices WHERE id = ? AND dismissed = 0 AND text = ?", before, notice);
+      if (before !== null && !kept) this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", before);
+      const noticeId = kept ? before : this.insert("INSERT INTO console_notices (agent_id, text, created_at) VALUES (?, ?, ?)", agentId, notice, this.now());
+      this.setFlag(PUSH_FAILED + agentId, JSON.stringify({ job: id, notice: noticeId, told: false } satisfies PushFailure));
+    }, epoch);
+  },
+  /** The agent's failed push that no later push of it has settled, with
+   * its text; `untold` only one the agent has not been told of yet. */
+  failedPush(this: ConsoleStore, agentId: string, untold = false): { job: number; text: string } | null {
+    const failed = this.pushFailure(agentId);
+    const text = failed && !(untold && failed.told) ? this.job(failed.job)?.message : null;
+    return failed && text ? { job: failed.job, text } : null;
+  },
+  /** The agent has been told of that failed push (a later one is news). */
+  pushTold(this: ConsoleStore, epoch: number, agentId: string, job: number) {
+    this.transaction(() => {
+      const failed = this.pushFailure(agentId);
+      if (failed?.job === job) this.setFlag(PUSH_FAILED + agentId, JSON.stringify({ ...failed, told: true }));
+    }, epoch);
   },
 };

@@ -343,7 +343,11 @@ current tab, use **Add**:
   prompt you can change for this agent. A Claude Code agent can also have
   **Ask me first**: its file changes and commands wait for you in Needs
   you, as web access always does. Team tools (pulling a teammate's work,
-  say) and image tools don't wait.
+  say) and image tools don't wait. You switch it on and off in the
+  agent's menu. Switched off, it stops asking at once, also in a turn
+  that is already running, and what that agent has waiting in Needs you
+  for that reason alone is allowed. Switched on, it applies from the
+  agent's next turn.
 - **Team** (projects with files) sets up several at once. Either an Orchestrator (Code analysis) with
   up to seven members, which splits your goal among them, or a pair: a Lead
   you talk to and a Reviewer it asks before reporting back.
@@ -391,7 +395,16 @@ Things to know while using it:
   next turn. Your uploads (`.console-uploads`) are never in the Console's
   commits, and a push whose commits add a file there is refused (if an
   agent commits them itself, that branch can't be pushed until the commit
-  is removed). With `CONSOLE_CODEX_REVIEW=on` in
+  is removed). If a push fails, Needs you gets a note with the agent, the
+  branch and the reason, and the agent's next turn starts with one line
+  saying its last push did not go through and why, so it does not ask for
+  the same push again. For the usual causes the note says who has to act:
+  you, when the token may not change workflow files
+  (`.github/workflows/…`), when a branch rule on GitHub does not allow the
+  push, or when GitHub did not accept the token; the agent, when its
+  branch dropped commits that were already pushed. Nothing is pushed again
+  by itself. The next push of that agent that goes through removes the
+  note. With `CONSOLE_CODEX_REVIEW=on` in
   `.env.local` (off by default; restart the
   worker after changing it), Squadroom also comments `@codex review` on the
   pull request, for repositories that use Codex's GitHub reviewer.

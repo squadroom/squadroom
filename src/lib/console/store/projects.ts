@@ -2,7 +2,7 @@ import { networkAutoKind, type AgentKind, type ConsoleEffort } from "../agents.t
 import type { ConsoleAgent, ConsoleProject, ConsoleTab, Permission, ProjectSource, ProjectState } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import type { TabTemplate, TemplateStep } from "../templates.ts";
-import { NETWORK_AUTO, networkRequest } from "../permissions.ts";
+import { ASK_FIRST_REASON, NETWORK_AUTO, networkRequest } from "../permissions.ts";
 import { agent, json, newId, project, tab } from "./rows.ts";
 
 /** Ask me first is offered on Claude Code windows only. */
@@ -13,6 +13,20 @@ export const ASK_FIRST_CLAUDE_ONLY =
  * request. */
 export const NETWORK_AUTO_KINDS_ONLY =
   "Network Auto is offered for Claude Code and Codex agents only: other agents cannot ask per website, so their network is the project's own switch (the project menu's Network…).";
+
+/** Allows an agent's open requests asked for Ask me first alone. Claude
+ * Code only: its reasons are the Console's own text, where another kind's
+ * may carry words the model chose. */
+function allowAskFirst(store: ConsoleStore, agentId: string): void {
+  if (store.agent(agentId)?.kind !== "claude-code") return;
+  store.run(
+    "UPDATE console_requests SET state = 'allowed', decided_by = 'owner', decided_at = ? WHERE state = 'open' AND agent_id = ? AND substr(reason, 1, ?) = ?",
+    store.now(),
+    agentId,
+    ASK_FIRST_REASON.length,
+    ASK_FIRST_REASON,
+  );
+}
 
 /** Allow an agent's network requests still open, and take those that
  * closed unanswered out of Needs you: Auto covers them from now on (inside
@@ -84,13 +98,26 @@ export const projects = {
   askFirstInUse(this: ConsoleStore, projectId: string): boolean {
     return !!this.get("SELECT 1 AS x FROM console_agents WHERE project_id = ? AND ask_first = 1 LIMIT 1", projectId);
   },
-  /** Ask me first on or off: from the window's next turn. */
+  /** Ask me first on or off. Off applies at once, also to a running turn,
+   * and allows what it has waiting in Needs you for that reason alone, in
+   * the same transaction (the worker tells each waiting turn as for the
+   * owner's own answer). On applies fully from the window's next turn. */
   setAskFirst(this: ConsoleStore, agentId: string, on: boolean): ConsoleAgent {
     const a = this.agent(agentId);
     if (!a || a.state === "closed") throw new Error("That agent is closed.");
     if (on && a.kind !== "claude-code") throw new Error(ASK_FIRST_CLAUDE_ONLY);
-    this.run("UPDATE console_agents SET ask_first = ? WHERE id = ?", on ? 1 : 0, agentId);
-    return this.agent(agentId)!;
+    return this.transaction(() => {
+      this.run("UPDATE console_agents SET ask_first = ? WHERE id = ?", on ? 1 : 0, agentId);
+      if (!on) allowAskFirst(this, agentId);
+      return this.agent(agentId)!;
+    });
+  },
+  /** The worker's side of the same: a request it opened just as the owner
+   * switched Ask me first off. */
+  allowWaitingAskFirst(this: ConsoleStore, epoch: number, agentId: string): void {
+    this.transaction(() => {
+      if (this.agent(agentId)?.askFirst === false) allowAskFirst(this, agentId);
+    }, epoch);
   },
   /** An agent's Network setting: Ask (off) or Auto. Switching to Auto also
    * allows its network requests waiting in Needs you, in the same

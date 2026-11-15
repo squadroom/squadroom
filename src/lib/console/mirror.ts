@@ -297,7 +297,7 @@ export class Mirror {
     if (!/^[0-9a-f]{40,64}$/.test(sha)) throw new GitError("Not a commit.");
     const ref = `refs/heads/${branch}`;
     let r = await ownerGit(["push", "--quiet", this.url, `+${sha}:${ref}`], token, this.dir);
-    if (r.code !== 0) throw fail(`Pushing ${branch}`, r, token);
+    if (r.code !== 0) throw fail(`Pushing ${branch}`, r, token, true);
     r = await ownerGit(["update-ref", ref, sha], null, this.dir);
     if (r.code !== 0) throw fail("Recording the push", r);
   }

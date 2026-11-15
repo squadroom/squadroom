@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { agentKind } from "./agents.ts";
 import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "./acp.ts";
 import type { SandboxSpec } from "./launcher.ts";
-import { inside, outsideStep, realInside, type Decision } from "./permissions.ts";
+import { ASK_FIRST_REASON, inside, outsideStep, realInside, type Decision } from "./permissions.ts";
 import { TEAM_TOOL_NAMES } from "./team-tools.ts";
 import { acpToolLabel } from "./transcript.ts";
 import { errorMessage as message, guarded, oneLine, OwnProcessDriver, type AgentDriver, type AgentSession, type DriverHost, type PromptResult, type SessionContext, type TurnRequest } from "./session.ts";
@@ -97,7 +97,7 @@ export function decideAcp(
     default:
       return ask(`${title} needs the owner's approval.`);
   }
-  return agent.askFirst && decision.behavior === "allow" ? ask("Ask me first: the owner decides.") : decision;
+  return agent.askFirst && decision.behavior === "allow" ? ask(`${ASK_FIRST_REASON}the owner decides.`) : decision;
 }
 
 /** The usage of a request no model ran. */

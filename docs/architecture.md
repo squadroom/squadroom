@@ -155,7 +155,14 @@ month it started too.
   waiting. `setNetwork` takes one agent or a tab (every agent of the tab
   that has the setting), and the decision `auto` on a network request in
   Needs you allows it and switches its agent to Auto. Auto covers nothing else: writes, reads outside the folder,
-  unknown tools, Ask me first and pushes are decided as before. A
+  unknown tools, Ask me first and pushes are decided as before. Ask me
+  first is read from the store for every request, not taken from the
+  agent as its turn started, so switching it off stops a running turn
+  from asking. `setAskFirst` off also allows, in the same transaction,
+  that agent's open requests whose reason starts with `ASK_FIRST_REASON`
+  (Claude Code agents only: their reasons are the Console's own text),
+  and the worker asks the store once more right after it records such a
+  request (`allowWaitingAskFirst`), as it does for Network Auto. A
   path with a `..` part counts as outside it, and symbolic links are
   followed: one that leads out of the agent's folder counts as outside. An
   allow the Console cannot record is refused. Needs you shows a command
@@ -300,6 +307,20 @@ title and description that will be posted from your account (the first
 1,200 characters; Show all has the rest), and **Open pull request** asks
 for that approval too. Once you choose **Always** for an agent's pushes,
 its later pushes are posted without asking.
+
+A push that fails is recorded by the store's `failPush` in one
+transaction: the job as failed, a note in Needs you (the agent, the branch
+and the reason) and a flag for the agent (`push-failed:<agent>`). The
+texts come from `src/lib/console/push-failure.ts`, which is pure:
+`pushHint` knows a refused workflow file, a branch protection rule or
+ruleset, a token GitHub did not accept and a non-fast-forward rejection,
+and says whether the owner or the agent has to act. The agent's next
+prompt starts with one line from `pushFailedNote`, once, and `team_pr`
+starts with the same line while the failed push is the agent's latest
+job. The same failure again keeps the open note instead of adding one. A
+later push of that agent that goes through dismisses the note and clears
+the flag. Nothing is retried. For a refused push, Git's failure text keeps
+up to four of GitHub's `remote:` lines as well as its last three lines.
 
 `team_checks` reads, with the same token, the GitHub Actions jobs of the
 latest commit on the agent's own pull request, and with a job's number the

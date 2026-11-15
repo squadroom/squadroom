@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { branchPatchView, changesView } from "../src/lib/console/views.ts";
+import { branchPatchView, changesView, needsView } from "../src/lib/console/views.ts";
 import { consoleBranch, CONSOLE_BRANCH, parseRepo, validBranch } from "../src/lib/console/git.ts";
 import { checkGitHub } from "../src/lib/console/github-api.ts";
 import { Mirror } from "../src/lib/console/mirror.ts";
@@ -163,6 +163,10 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   await h.until(() => ["done", "failed"].includes(h.store.job(refused.id)!.state), "push refused");
   assert.match(h.store.job(refused.id)!.message ?? "", /contains a credential/);
   assert.notEqual(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
+  // The agent's next turn is told why, and the owner's Needs you has it.
+  await h.ended(h.send(lead.id, "noted"));
+  assert.match(h.said(lead.id).at(-1)!, /^echo: Your last push did not go through\. [^\n]*contains a credential[^\n]*\nThe owner has been told in their Needs you\. [^\n]*\n\nnoted$/);
+  assert.equal(needsView(h.store).notices.filter((n) => n.text.startsWith(`The push of ${branch} did not go through.`)).length, 1);
   // And never while the agent works.
   const busy = h.send(lead.id, "hang");
   await h.started(busy);

@@ -216,20 +216,23 @@ export function decide(
   return askFirst(tool, (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>) ?? decision;
 }
 
+/** How every Ask me first reason starts: what switching it off allows. */
+export const ASK_FIRST_REASON = "Ask me first: ";
+
 /** Ask me first: an action the boundaries allow that changes something or
  * reaches out goes to the owner; null when it only reads (or is the
  * Console's own tool: the team and image tools never wait here). */
 function askFirst(tool: string, input: Record<string, unknown>): Decision | null {
   if (FILE_WRITE.has(tool)) {
     const path = targetPath(tool, input) ?? "a file";
-    return { behavior: "ask", reason: "Ask me first: file changes need the owner's approval.", ruleKey: "ask-first:write", summary: `${tool} ${path}` };
+    return { behavior: "ask", reason: `${ASK_FIRST_REASON}file changes need the owner's approval.`, ruleKey: "ask-first:write", summary: `${tool} ${path}` };
   }
   if (tool === "Bash") {
     const command = String(input.command ?? "");
     const rule = commandRule(command);
     return {
       behavior: "ask",
-      reason: "Ask me first: commands need the owner's approval.",
+      reason: `${ASK_FIRST_REASON}commands need the owner's approval.`,
       // "Always" remembers this exact command, and only a plain one: a rule
       // must never approve anything the owner did not see.
       ...(rule ? { ruleKey: `ask-first:command:${rule}` } : {}),
