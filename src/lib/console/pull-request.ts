@@ -274,7 +274,7 @@ export const CHECKS_CHARS = 10_000;
 type Job = { id: number; run: string; name: string; status: string; conclusion: string | null };
 /** passed; failed (a log worth reading); other (ended without a result:
  * cancelled, needs an action, …); running. Skipped and neutral jobs pass. */
-const outcome = (j: Job): "passed" | "failed" | "other" | "running" =>
+export const outcome = (j: Pick<Job, "status" | "conclusion">): "passed" | "failed" | "other" | "running" =>
   j.status !== "completed"
     ? "running"
     : j.conclusion === "success" || j.conclusion === "skipped" || j.conclusion === "neutral"
@@ -329,6 +329,23 @@ export function checksText(jobs: Job[], headSha: string, branchHead: string | nu
             ? "Every job listed passed."
             : "Every check passed.",
   ].join("\n");
+}
+
+/** A commit's checks in one line (team_project): its GitHub
+ * Actions runs (workflows) counted by how they ended, the failed ones named
+ * (names already redacted by the caller). */
+export function checksSummary(runs: { name: string; status: string; conclusion: string | null }[], incomplete = false): string {
+  if (!runs.length) return "checks: none started";
+  const of = (o: ReturnType<typeof outcome>) => runs.filter((r) => outcome(r) === o);
+  const failed = of("failed");
+  const names = failed.slice(0, 3).map((r) => short(r.name || "unnamed", 60));
+  const parts = [
+    of("passed").length ? `${of("passed").length} passed` : "",
+    failed.length ? `${failed.length} failed (${names.join(", ")}${failed.length > names.length ? ", …" : ""})` : "",
+    of("running").length ? `${of("running").length} still running` : "",
+    of("other").length ? `${of("other").length} without a result` : "",
+  ].filter(Boolean);
+  return `checks: ${parts.join(", ")}${incomplete ? " (GitHub has more than were read)" : ""}`;
 }
 
 /** The end of a job's log: whole lines, without GitHub's timestamps, each

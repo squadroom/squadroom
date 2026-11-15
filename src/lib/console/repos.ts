@@ -7,18 +7,23 @@ import {
   checkGitHub,
   commentOnPullRequest,
   findPullRequest,
+  mergePullRequest,
   noReplyEmail,
   openPullRequest,
+  readBranches,
   readChecks,
   readJobLog,
   readPullRequest,
+  readPullState,
   readReviewThreadComments,
+  readRuns,
   replyToReviewThread,
   reviewThreadOwner,
   type GitHubApi,
 } from "./github-api.ts";
 import { CONSOLE_FILES_IN_BRANCH, Mirror } from "./mirror.ts";
-import { CODEX_REVIEW, JOB_LOG_BYTES, checksText, jobLogText, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
+import { CODEX_REVIEW, JOB_LOG_BYTES, checksSummary, checksText, jobLogText, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
+import { checksLine, checksRefusal, mergeCommitTitle, movedRefusal, notConsole, notFound, pullRefusal, reviewLine, unpushedRefusal, unstableRefusal, type MergeAsk, type PullState } from "./merge.ts";
 import { agentModel } from "./agents.ts";
 import type { Launcher } from "./launcher.ts";
 import { credentialValues, keyFor } from "./keys.ts";
@@ -27,6 +32,7 @@ import { Redactor, truncateBytes } from "./redact.ts";
 import type { ConsoleStore } from "./store.ts";
 import type { ConsoleAgent, ConsoleJob, ConsoleProject } from "./types.ts";
 import { commitMessage } from "./team.ts";
+import type { AgentOnGitHub } from "./team-project.ts";
 
 // Projects, clones, per-turn commits, the changes view and Push branch.
 // The worker calls these. Every Git command on an agent's repository runs
@@ -42,6 +48,10 @@ const COMMIT_PATCH_BYTES = 256 * 1024;
 /** What Redactor.text leaves in place of a credential. */
 const REDACTION_MARK = /\[redacted …/;
 const BRANCH_PATCH_BYTES = 512 * 1024;
+/** How often, and how far apart, GitHub is asked again while it has not
+ * yet worked out whether a pull request can be merged. */
+const MERGEABLE_TRIES = 5;
+const MERGEABLE_WAIT_MS = 1_500;
 /** No new clone when free disk would fall below this. */
 export const MIN_FREE_BYTES = 5 * 1024 ** 3;
 /** Free bytes on the volume holding `path`, as an ordinary user sees them. */
@@ -587,6 +597,38 @@ export class Repos {
     const log = await readJobLog(project.repo!, job.id, JOB_LOG_BYTES, gh);
     return redact(jobLogText(job, log, redact));
   }
+  /** team_project: where each of these agents' branches stands on GitHub,
+   * by agent id, read with the owner's token in the worker and redacted.
+   * One request for every branch and its pull request, then one for each
+   * open pull request's checks; checks that cannot be read are null, and
+   * nothing else fails for them. Nothing is written. */
+  async readProjectBranches(project: ConsoleProject, agents: ConsoleAgent[]): Promise<Map<string, AgentOnGitHub>> {
+    const gh = this.github(this.token(project.id));
+    const branches = new Map(agents.map((a) => [a.id, this.o.store.agentBase(a.id).branch!]));
+    const read = await readBranches(project.repo!, project.baseBranch, [...branches.values()], gh);
+    const out = new Map<string, AgentOnGitHub>();
+    await Promise.all(
+      agents.map(async (agent) => {
+        const got = read.get(branches.get(agent.id)!);
+        if (!got) return; // GitHub reported an error for this branch only.
+        const head = this.recordedHead(agent);
+        // What the folder has that GitHub lacks, counted in the folder.
+        const unpushed =
+          got.head && head && got.head !== head
+            ? await this.clone(agent).countBetween(got.head, head).catch(() => null)
+            : null;
+        const checks =
+          got.pr?.state === "OPEN"
+            ? await readRuns(project.repo!, got.pr.headSha, gh).then(
+                (r) => checksSummary(r.runs.map((run) => ({ ...run, name: this.o.redactor.text(run.name) })), r.incomplete),
+                () => null,
+              )
+            : null;
+        out.set(agent.id, { head: got.head, unpushed, pr: got.pr, checks });
+      }),
+    );
+    return out;
+  }
   /** team_pr_reply, before the owner is asked: the agent's pull request
    * has every commit its folder has (a reply describes what is on GitHub),
    * and the thread belongs to that pull request. */
@@ -609,6 +651,88 @@ export class Repos {
     const { resolveError } = await replyToReviewThread(threadId, body, resolve, this.github(token));
     if (resolveError) return `Replied on pull request #${number}, but the thread could not be resolved (${resolveError}). Do not reply again; the owner can resolve it on GitHub.`;
     return `Replied on pull request #${number}${resolve ? " and resolved the thread" : ""}.`;
+  }
+
+  // ── team_merge ──────────────────────────────────────────────────────────
+  /** A pull request of this project that may be merged now, with the agent
+   * whose branch it is and its checks; otherwise why not. Only a pull
+   * request from an agent's own `console/` branch of this project, in the
+   * project's repository, into its base branch, is ever read further. With
+   * `pinned`, its head must still be that commit. Everything here is as
+   * GitHub has it at this moment: asked once when the agent asks, and
+   * again when the owner has approved. */
+  private async mergeable(project: ConsoleProject, number: number, gh: GitHubApi, pinned: string | null = null) {
+    const repo = project.repo!;
+    let pr = await readPullState(repo, number, gh);
+    if (!pr) throw new GitError(notFound(number, repo));
+    const author = this.branchAgent(project, pr);
+    if (!author) throw new GitError(notConsole(number));
+    // GitHub works out whether a pull request can be merged only when
+    // asked, and again after its base branch moved (another merge just
+    // before this one): asked a few more times before giving up.
+    for (let i = 0; i < MERGEABLE_TRIES && pr.state === "open" && !pr.draft && pr.mergeable === null; i++) {
+      await new Promise((r) => setTimeout(r, MERGEABLE_WAIT_MS));
+      pr = (await readPullState(repo, number, gh)) ?? pr;
+    }
+    // What was read last is what is merged: it must still be the same
+    // agent's branch into this project's base (a pull request can be
+    // retargeted while GitHub works out whether it merges).
+    if (this.branchAgent(project, pr)?.id !== author.id) throw new GitError(notConsole(number));
+    const refused = pullRefusal(pr);
+    if (refused) throw new GitError(refused);
+    if (pinned && pr.headSha !== pinned) throw new GitError(movedRefusal({ number, sha: pinned }, pr.headSha));
+    const read = await readChecks(repo, pr.headSha, gh);
+    // Names are masked whole before anything shortens them.
+    const jobs = read.jobs.map((j) => ({ ...j, run: this.o.redactor.text(j.run), name: this.o.redactor.text(j.name) }));
+    const failing = checksRefusal(number, pr.headSha, jobs, read.incomplete) ?? (pr.mergeableState === "unstable" ? unstableRefusal(number) : null);
+    if (failing) throw new GitError(failing);
+    return { pr, author, jobs };
+  }
+  /** The agent of this project whose `console/` branch a pull request is
+   * from, or undefined: never a fork's branch, another base, or a branch
+   * no agent of this project has. */
+  private branchAgent(project: ConsoleProject, pr: PullState): ConsoleAgent | undefined {
+    if (pr.headRepo?.toLowerCase() !== project.repo!.toLowerCase() || pr.baseRef !== project.baseBranch || !CONSOLE_BRANCH.test(pr.headRef)) return undefined;
+    return this.o.store.agents(project.id).find((a) => a.permission === "edit" && this.o.store.agentBase(a.id).branch === pr.headRef);
+  }
+  /** team_merge, before the owner is asked: the pull request (the asking
+   * agent's own, or the one numbered, of its project) can be merged as it
+   * is, and its branch on GitHub is what its agent has committed. Returns
+   * what the owner is shown and approves. Nothing is written. */
+  async checkMerge(asker: ConsoleAgent, project: ConsoleProject, number: number | null): Promise<MergeAsk> {
+    if (project.source !== "github") throw new GitError("Only a GitHub project's pull requests are merged.");
+    const gh = this.github(this.token(project.id));
+    const wanted = number ?? (await this.agentPullRequest(asker, project)).pr.number;
+    const { pr, author, jobs } = await this.mergeable(project, wanted, gh);
+    const head = author.folder && author.state !== "closed" ? await this.clone(author).head().catch(() => null) : null;
+    if (head && head !== pr.headSha) throw new GitError(unpushedRefusal(author.id === asker.id ? null : author.name, pr.number, head, pr.headSha));
+    // Codex's state and the open threads, when GitHub gives them: shown to
+    // the owner, never a reason to refuse.
+    const review = await readPullRequest(project.repo!, pr.number, gh).then(reviewLine, () => null);
+    return {
+      number: pr.number,
+      url: pr.url,
+      title: this.o.redactor.text(pr.title).slice(0, 300),
+      branch: pr.headRef,
+      base: pr.baseRef,
+      sha: pr.headSha,
+      authorId: author.id,
+      authorName: author.name,
+      checks: checksLine(jobs),
+      review,
+    };
+  }
+  /** team_merge, once the owner approved: everything is checked again as
+   * GitHub has it now, then GitHub is asked to squash-merge the pull
+   * request at the commit the owner saw (GitHub refuses if its head is
+   * another by then). The worker pushes nothing to the base branch, and
+   * the branch is not deleted. Returns the commit GitHub made. */
+  async merge(ask: MergeAsk, project: ConsoleProject): Promise<string> {
+    if (project.source !== "github") throw new GitError("Only a GitHub project's pull requests are merged.");
+    const gh = this.github(this.token(project.id));
+    const { author } = await this.mergeable(project, ask.number, gh, ask.sha);
+    if (author.id !== ask.authorId) throw new GitError(notConsole(ask.number));
+    return (await mergePullRequest(project.repo!, ask.number, { sha: ask.sha, title: mergeCommitTitle(ask.title, ask.number) }, gh)).sha;
   }
 
   /** Push branch: the agent's `console/` branch, from a bundle in its

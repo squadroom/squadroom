@@ -287,7 +287,9 @@ mail must be configured.
 - **`CONSOLE_GIT_TOKEN`** (for GitHub projects): a fine-grained token for
   the chosen repositories with **Contents: read and write**, to open
   pull requests **Pull requests: read and write**, and, so agents can read
-  a pull request's checks with `team_checks`, **Actions: Read-only**. The
+  a pull request's checks with `team_checks` and ask for merges with
+  `team_merge` (a merge needs its checks read first), **Actions:
+  Read-only**. Merging needs nothing more. The
   worker uses it only in its own mirror and for these calls; it never
   reaches an agent.
 - **Paid API keys** (`XAI_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`,
@@ -379,7 +381,9 @@ Things to know while using it:
   it. Codex never asks about file changes here: it makes those in its own
   folder by itself, and any request to write elsewhere is declined.
 - **Changes** (a window's ⋯ menu) shows each turn's commit; a commit's
-  diff loads when you open it, and is always shown as text. Each commit's
+  diff loads when you open it, and is always shown as text. A very long
+  diff stops after about 100,000 characters, with **Show the rest**. With
+  more than 30 turns, the newest 30 are listed, with **Show all**. Each commit's
   message holds your whole request for that turn. In a GitHub project the
   commit's author is the agent's name with the GitHub no-reply address of
   the account your token belongs to, so GitHub, and a service that deploys
@@ -491,6 +495,45 @@ Things to know while using it:
   `team_checks`, and the end of one job's log with `team_checks(job: n)`.
   The token needs **Actions: Read-only** (step 8). Nothing tells an agent
   when checks finish; it looks again in a later turn.
+- **The whole project.** Any agent in a project with files can call
+  `team_project` to see every open tab: its agents, what each is doing,
+  their branches and, in a GitHub project, each branch's last push (or why
+  it failed), whether GitHub has it and how many commits are not pushed
+  yet, its pull request and a one-line summary of its checks, then the base
+  branch's latest commit. It only reads, and shows names and states, never
+  another tab's conversation or files. Agents use it instead of asking you
+  to look something up on GitHub.
+- **Merges.** In a GitHub project, an editing agent whose pull request is
+  ready (pushed, checks passed, review answered) calls `team_merge`; a Lead
+  can ask for another agent's pull request of the same project with
+  `team_merge(pull_request: n)`, in the order it needs. The worker checks
+  first and refuses, with a reason the agent can act on, when the pull
+  request is not open or is a draft, is not one Squadroom opened for an
+  agent of this project, conflicts with the base branch, has a check that
+  failed or is still running, or has commits that are not pushed yet.
+  Otherwise Needs you shows who asks, the pull request's number, title and
+  link, the branch, the commit, a line on the checks and a line on the
+  review. **Approve** or **Deny**: there is no **Always**, no fresh code is
+  asked for, and the item stays until you answer it, even after the
+  agent's turn has ended. On **Approve** the worker checks everything again
+  and asks GitHub to squash-merge the pull request at exactly the commit
+  you were shown. If the branch moved or a check changed in the meantime,
+  nothing is merged, and you and the agent are told why. The branch is not
+  deleted. The agent's window gets a line saying it was merged, the agent
+  is told at the start of its next turn, and the project's other editing
+  agents hear that the base branch has new commits. After a merge, an
+  agent should start its next work with `team_pull` of the base branch.
+- **A window's history.** When you open a project, each window loads only
+  its latest 80 events (at most 150 KB). **Show earlier messages** at the
+  top of a window loads the next 200 (at most 300 KB) above, without moving
+  what you are reading, until the start of the conversation is there. A
+  window keeps at most 2,000 events or 2 MB on the page; past that it says
+  earlier messages are not kept on the page, and search still finds them.
+  An empty window says "Loading its conversation…" until its history
+  arrives. Nothing is removed from the store.
+- **"The Console is not answering."** shows in place of the browser's own
+  error (such as "Load failed") while the web server restarts or the
+  network is gone. It goes away by itself at the page's next answer.
 - **Proposed tabs.** An agent can propose a new tab with its own team
   (`team_propose_tab`). You find it in Needs you: **Create** makes the tab
   and team as proposed, **Edit…** opens the team in the setup screen so
@@ -527,13 +570,15 @@ Things to know while using it:
   several editing agents and several reviewers, with any routes. Saving
   such a tab keeps its Orchestrator (so no other agent in it may be named
   Orchestrator). You move to the next step from the
-  tab's menu once each editing agent's current commit is approved in
-  Changes (an agent that changed nothing, or has not run yet, has nothing to
-  approve), after a
+  tab's menu once each editing agent's current commit is approved, in
+  its window or in Changes (an agent that changed nothing, or has not run
+  yet, has nothing to approve), after a
   reviewer's review when the tab has a Code analysis agent other than the
   Orchestrator. In such a tab Changes offers only an approval after a
   review, and a commit approved without one can be approved again after
-  the review. Agents are told at the start of each turn that only you move
+  the review. The same approve line and buttons also sit under an editing
+  agent's window header once its branch has a commit, so you can approve
+  without opening Changes. Agents are told at the start of each turn that only you move
   the tab to the next step, and that a push or a merge doesn't.
 - **Clean up** (or `npm run console:cleanup`) lists folders no open agent
   uses, with commits never pushed marked; nothing is removed until you

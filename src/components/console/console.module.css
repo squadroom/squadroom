@@ -321,6 +321,10 @@
   flex-direction: column;
   gap: 8px;
 }
+/* Its top reads earlier messages on request. */
+.earlier {
+  align-self: center;
+}
 .console .latest {
   position: absolute;
   right: 14px;

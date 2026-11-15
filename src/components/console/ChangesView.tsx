@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type SyntheticEvent } from "react";
 import type { changesView } from "@/lib/console/views";
 import { nextPolled, type Polled } from "@/lib/console/polled";
-import { approvalLine } from "@/lib/console/ui";
+import { shownCommits, shownPatch } from "@/lib/console/ui";
 import { api, usePolled, type Run } from "./api";
+import ApproveGate from "./ApproveGate";
 import Dialog from "./Dialog";
 import { useBusy } from "./useBusy";
 import styles from "./console.module.css";
@@ -22,6 +23,24 @@ function StatFiles({ files, onOpenFile }: { files: string[]; onOpenFile: (path: 
 }
 
 type Changes = NonNullable<ReturnType<typeof changesView>>;
+
+/** An opened patch: a very long one is cut, so a phone is not handed it
+ * whole, until the rest is asked for. */
+function PatchText({ patch }: { patch: string | null }) {
+  const [all, setAll] = useState(false);
+  if (patch === null) return <pre>Loading…</pre>;
+  const shown = shownPatch(patch, all);
+  return (
+    <>
+      <pre>{shown.text}</pre>
+      {shown.rest > 0 && (
+        <button className={styles.linkButton} onClick={() => setAll(true)}>
+          Show the rest ({Math.ceil(shown.rest / 1000)} KB)
+        </button>
+      )}
+    </>
+  );
+}
 type Commit = Changes["commits"][number];
 
 /** One turn's commit: its patch is asked for once, when it is first opened,
@@ -46,7 +65,7 @@ function CommitDetails({ agentId, commit }: { agentId: string; commit: Commit })
         Turn {commit.turnId} · {commit.sha.slice(0, 8)} · {commit.stat.split("\n").at(-1)}
       </summary>
       <pre>{commit.stat}</pre>
-      {failed ? <p className={styles.errorLine}>{failed}</p> : <pre>{patch ?? "Loading…"}</pre>}
+      {failed ? <p className={styles.errorLine}>{failed}</p> : <PatchText patch={patch} />}
     </details>
   );
 }
@@ -75,52 +94,8 @@ function BranchDetails({ agentId, diff }: { agentId: string; diff: NonNullable<C
     <details className={styles.tool} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary>{diff.stat.split("\n").at(-1)}</summary>
       <pre>{diff.stat}</pre>
-      {failed ? <p className={styles.errorLine}>{failed}</p> : <pre>{patch ?? "Loading…"}</pre>}
+      {failed ? <p className={styles.errorLine}>{failed}</p> : <PatchText patch={patch} />}
     </details>
-  );
-}
-
-type Approval = Changes["approval"];
-
-/** The approve gate: approve the branch's current commit, optionally only
- * after a Code analysis teammate reviewed it; a later commit cancels the approval. */
-function ApproveGate({ agentId, approval, run }: { agentId: string; approval: Approval; run: Run }) {
-  // Where a step waits for a review (a tab with steps and a reviewer),
-  // only an approval after one is offered, the finished review first.
-  const [reviewerId, setReviewerId] = useState(() => (approval.reviewNeeded ? ((approval.reviewers.find((r) => r.reviewed) ?? approval.reviewers[0])?.id ?? "") : ""));
-  const reviewer = approval.reviewers.find((r) => r.id === reviewerId);
-  const approvedNow = approval.current?.current && approval.current.sha === approval.head;
-  // Approved without a review there: it can be approved again, after one.
-  const unreviewed = !!approvedNow && approval.reviewNeeded && !approval.current?.reviewerId;
-  return (
-    <div className={styles.pushRow}>
-      <span className={styles.hint}>
-        {approvalLine(approval)}
-        {unreviewed && " This tab's steps move on only after an approval that follows a review: approve it again."}
-      </span>
-      {approval.head && (!approvedNow || unreviewed) && (
-        <>
-          {approval.reviewers.length > 0 && (
-            <select aria-label="Reviewed by" value={reviewerId} onChange={(e) => setReviewerId(e.target.value)}>
-              {!approval.reviewNeeded && <option value="">No review needed</option>}
-              {approval.reviewers.map((r) => (
-                <option key={r.id} value={r.id}>
-                  After {r.name}&apos;s review{r.reviewed ? " (done)" : " (not yet)"}
-                </option>
-              ))}
-            </select>
-          )}
-          <button disabled={(!!reviewer && !reviewer.reviewed) || (approval.reviewNeeded && !reviewer)} onClick={() => void run({ action: "approve", agentId, sha: approval.head!, reviewerId: reviewerId || null })}>
-            Approve {approval.head.slice(0, 7)}
-          </button>
-        </>
-      )}
-      {approval.current && (
-        <button className={styles.linkButton} onClick={() => void run({ action: "revokeApproval", agentId })}>
-          Withdraw approval
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -131,6 +106,7 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
   const [polled, setPolled] = useState<Polled<Changes> | null>(null);
   const changes = polled?.value ?? null;
   const [failed, setFailed] = useState<string | null>(null);
+  const [allCommits, setAllCommits] = useState(false);
   // A later answer clears an earlier error; an unchanged one is not drawn
   // again.
   const load = useCallback(
@@ -144,6 +120,7 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
     [agentId],
   );
   usePolled(load, 3_000);
+  const commits = shownCommits(changes?.commits ?? [], allCommits);
   const pushing = changes?.push?.state === "queued" || changes?.push?.state === "running";
   // Push and Open pull request: one at a time, so a double click queues one,
   // and busy until the list read after it shows the push.
@@ -200,12 +177,17 @@ export default function ChangesView({ agentId, onClose, run, onOpenFile }: { age
           )}
           <h3 className={styles.subhead}>Each turn</h3>
           {changes.commits.length === 0 && <p className={styles.hint}>No turn has changed files yet.</p>}
-          {changes.commits.map((c) => (
+          {commits.shown.map((c) => (
             <div key={c.id}>
               <CommitDetails agentId={agentId} commit={c} />
               <StatFiles files={c.files ?? []} onOpenFile={onOpenFile} />
             </div>
           ))}
+          {commits.hidden > 0 && (
+            <button className={styles.linkButton} onClick={() => setAllCommits(true)}>
+              Show all {changes.commits.length} commits
+            </button>
+          )}
         </>
       )}
     </Dialog>

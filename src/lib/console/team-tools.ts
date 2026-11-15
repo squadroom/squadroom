@@ -11,6 +11,12 @@ export const TEAM_TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "team_project",
+    description:
+      "See where every tab of your project stands: each tab's agents, what each is doing, its branch and, in a GitHub project, its last push (or why it failed), whether GitHub has the branch and which commits are not pushed yet, its pull request and its checks; then the base branch's latest commit. Use it before asking the owner to look anything up on GitHub. Read-only: names and states, never anyone's conversation or files.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "team_send",
     description:
       "Send a message to a teammate in your tab. It is delivered when they are free; no answer is expected. Not a reply to an ask: answer asks with team_reply.",
@@ -165,6 +171,15 @@ export const TEAM_TOOLS = [
     },
   },
   {
+    name: "team_merge",
+    description:
+      "Ask for an open pull request to be merged into the base branch (squash and merge): your own, or with pull_request another agent's of your project by its number, which is how a Lead merges several agents' work in the order it needs. The owner approves each merge in their Needs you; the Console then merges it on GitHub at the commit the owner saw. Ask when it is ready: pushed, every check passed (team_checks) and the review answered (team_pr). It is refused, with the reason, when the pull request is not open or is a draft, conflicts with the base branch (bring the base in with team_pull, then push), has a check that failed or still runs, or has commits not pushed yet. This does not wait: you are told the result at the start of a later turn. Use it instead of asking the owner to merge on GitHub.",
+    inputSchema: {
+      type: "object",
+      properties: { pull_request: { type: "integer", minimum: 1, description: "Another agent's pull request of your project, by its number. Leave it out for your own." } },
+    },
+  },
+  {
     name: "team_read",
     description:
       "Read the rest of a long message you received (a teammate's final message, routed to you or answering your ask, is cut and says so). Give its message_id and offset as the message says. Read-only.",
@@ -190,8 +205,8 @@ export const TEAM_TOOL_NAMES = new Set(TEAM_TOOLS.map((t) => t.name));
 /** The team tools offered to one agent: the ones the worker would accept
  * from it, so no schema is paid for in every request's prefix for a call
  * that is always refused. An editing agent claims, and pulls unless its
- * project has no files; only an editing agent of a GitHub project pushes
- * and reads or answers its pull request. */
+ * project has no files; only an editing agent of a GitHub project pushes,
+ * reads or answers its pull request, and asks for a merge. */
 export function teamToolsFor(agent: { permission: "look" | "edit" }, project: { source: "folder" | "none" | "github" } | undefined) {
   const edit = agent.permission === "edit";
   const withFiles = edit && !!project && project.source !== "none";
@@ -200,8 +215,9 @@ export function teamToolsFor(agent: { permission: "look" | "edit" }, project: { 
     switch (name) {
       case "team_pull":
         return withFiles;
-      // A team needs a project with files.
+      // A team needs a project with files, and so does its branches' state.
       case "team_propose_tab":
+      case "team_project":
         return !!project && project.source !== "none";
       case "team_claim":
         return edit;
@@ -209,6 +225,7 @@ export function teamToolsFor(agent: { permission: "look" | "edit" }, project: { 
       case "team_pr":
       case "team_pr_reply":
       case "team_checks":
+      case "team_merge":
         return github;
       default:
         return true;
@@ -223,6 +240,7 @@ export const TEAM_NOTE = [
   "",
   "You work in a team of agents in one tab of the Console. Use the console tools:",
   "- team_list to see your teammates;",
+  "- team_project to see where every tab of the project stands: each tab's agents and what they are doing, their branches and, in a GitHub project, whether a branch reached GitHub (or why its push failed), its pull request and its checks. Look there before asking the owner to check anything on GitHub. It only reads, and shows no conversation or file of another tab;",
   "- team_send(to, message) to tell a teammate something;",
   "- team_ask(to, message) to ask for something (a review, an answer). It never waits: end your turn, and the answer arrives as your next message;",
   "- team_reply(correlation_id, message) to answer an ask you were given; otherwise your final message answers it;",
@@ -230,6 +248,7 @@ export const TEAM_NOTE = [
   "- team_diff(from, path?) to read a teammate's committed changes. You cannot open other agents' folders, so use this (or your own folder, if you are Code analysis) instead of asking anyone to paste a patch;",
   "- team_push(title, body) to ask the owner to push your branch and open its pull request, which may then get a Codex review (GitHub projects);",
   "- team_pr to read your pull request (Codex's findings, every comment in full; team_pr(comment: n) or team_pr(thread: id) for one long item), and team_pr_reply(thread, message, resolve) to answer a finding. team_push also replaces the pull request's title and description with the ones you give. team_checks shows the checks GitHub ran on your pull request's latest pushed commit, and team_checks(job: n) the end of a failed job's log: use them for what cannot run in your sandbox (other browsers, a local server). GitHub is reached only through these tools: there is no gh login or token in your sandbox, by design, so do not try gh, curl or the web for it;",
+  "- team_merge when your pull request is ready (pushed, every check passed, the review answered): it asks the owner to approve the merge in their Needs you, and the Console then merges it on GitHub (squash). Use it instead of telling the owner to merge on GitHub. team_merge(pull_request: n) asks for another agent's pull request of your project, so a Lead can have several merged in the order it needs. It does not wait; you are told the result at the start of a later turn. After your pull request is merged, start your next work with team_pull of the base branch (GitHub projects, Code edit agents);",
   "- team_pull(from) to bring a teammate's committed work into your branch (team_pull_abort to give up a conflicted merge). Your folder has no Git remote and never updates from GitHub by itself: in a GitHub project, team_pull with the base branch's name (usually main) brings in what was merged there since your folder was made. The owner has no button for that, so do not ask them to refresh your folder;",
   "- team_claim(paths, note) before editing shared areas, and team_release when done; respect teammates' claims;",
   "- team_hold(to, reason) to ask a teammate to hang on while you change something, and team_resume(to) afterwards;",

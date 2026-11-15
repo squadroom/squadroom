@@ -93,8 +93,8 @@ test("Console routes: sign-in on every request; commands need Origin; the live v
   assert.match(text, /"text":"second"/);
   assert.doesNotMatch(text, /"text":"first"/);
 
-  // A fresh view gets each window's own latest events: a busy window never
-  // pushes a quiet one's transcript out.
+  // A fresh view gets each window's own latest 80 events: a
+  // busy window never pushes a quiet one's transcript out.
   const quiet = (await (
     await route.POST(
       new Request(URL_BASE, {
@@ -105,15 +105,15 @@ test("Console routes: sign-in on every request; commands need Origin; the live v
     )
   ).json()) as { agent: { id: string } };
   state.consoleStore.queueTurn(quiet.agent.id, "quiet one");
-  for (let i = 0; i < 1005; i++) state.consoleStore.queueTurn(agent.agent.id, `busy ${i}`);
+  for (let i = 0; i < 85; i++) state.consoleStore.queueTurn(agent.agent.id, `busy ${i}`);
   const fresh = new AbortController();
   const all = await live.GET(new Request(`${URL_BASE}/events?project=${project.id}`, { headers: owner.get, signal: fresh.signal }));
   const freshReader = all.body!.getReader();
   let streamed = "";
-  while (!streamed.includes('"busy 1004"')) streamed += new TextDecoder().decode((await freshReader.read()).value);
+  while (!streamed.includes('"busy 84"')) streamed += new TextDecoder().decode((await freshReader.read()).value);
   fresh.abort();
   assert.match(streamed, /"text":"quiet one"/);
-  assert.equal([...streamed.matchAll(/"text":"busy \d+"/g)].length, 1000);
+  assert.equal([...streamed.matchAll(/"text":"busy \d+"/g)].length, 80);
   assert.doesNotMatch(streamed, /"text":"busy 4"/);
 
   // The navigation tree streams too, and follows renames without a reload.
@@ -354,7 +354,7 @@ test("without mail, commands with weight beyond the page are refused with how to
   assert.equal((await post({ action: "createProject", name: "Demo", source: "none" })).status, 200);
 });
 
-test("an open stream ends when the session does; a fresh view's history is bounded by bytes per window", async (t) => {
+test("an open stream ends when the session does; a fresh view's history is short per window, earlier slices on request", async (t) => {
   const restore = useSignedInEnv();
   state.consoleStore = new ConsoleStore(":memory:");
   t.after(() => {
@@ -375,11 +375,23 @@ test("an open stream ends when the session does; a fresh view's history is bound
   const response = await live.GET(new Request(`${URL_BASE}/events?project=${project.id}`, { headers: owner.get, signal: fresh.signal }));
   const reader = response.body!.getReader();
   let text = "";
-  while (!text.includes('"39:')) text += new TextDecoder().decode((await reader.read()).value);
-  // About a megabyte of the newest, not all 2.4 MB.
+  while (!text.includes(": history ")) text += new TextDecoder().decode((await reader.read()).value);
+  // A short recent part: about 150 KB of the newest, not all
+  // 2.4 MB, then the line that says it all came and this window has more.
   const shown = [...text.matchAll(/"text":"(\d+):/g)].map((m) => Number(m[1]));
-  assert.ok(shown.length < 20 && shown.length > 10, String(shown.length));
-  assert.equal(shown.at(-1), 39);
+  assert.deepEqual(shown, [38, 39]);
+  assert.match(text, new RegExp(`: history \\["${agent.id}"\\]`));
+  // Earlier messages, a bounded slice before the oldest the page holds.
+  const oldest = Number(/id: (\d+)\ndata: [^\n]*"text":"38:/.exec(text)![1]);
+  const earlier = (await (await route.GET(new Request(`${URL_BASE}?events=${agent.id}&before=${oldest}`, { headers: owner.get }))).json()) as {
+    events: { id: number }[];
+    more: boolean;
+  };
+  assert.ok(earlier.events.length >= 4 && earlier.events.length <= 6, String(earlier.events.length));
+  assert.equal(earlier.events.at(-1)!.id, oldest - 1);
+  assert.equal(earlier.more, true);
+  assert.equal((await route.GET(new Request(`${URL_BASE}?events=${agent.id}&before=x`, { headers: owner.get }))).status, 400);
+  assert.equal((await route.GET(new Request(`${URL_BASE}?events=nobody&before=9`, { headers: owner.get }))).status, 404);
   // Polling a view the page has: only its version comes back.
   const first = (await (await route.GET(new Request(`${URL_BASE}?project=${project.id}`, { headers: owner.get }))).json()) as { version: string; tabs: unknown[] };
   assert.ok(first.version && first.tabs.length);

@@ -88,6 +88,7 @@ export type ConsoleCommand =
   | { action: "dismissNotice"; noticeId: number }
   | { action: "createTeam"; tabId: string; setup?: unknown }
   | { action: "decideProposal"; noticeId: number; decision: "create" | "decline"; setup?: unknown }
+  | { action: "decideMerge"; noticeId: number; decision: "approve" | "deny" }
   | { action: "saveRole"; role: Partial<RoleDef> }
   | { action: "deleteRole" | "resetRole"; id: string }
   | { action: "cleanupDelete"; keys: string[] }
@@ -166,8 +167,9 @@ interface FreshCodeContext {
  * tools on, raising a spend limit (a tab's or the Console's) or
  * resetting spend, raising a tab's turn limits, and every Keys write. Each
  * needs a code entered in the last CONSOLE_CODE_MS, so a stolen session
- * cookie alone (good for 30 days) cannot do them. Pushes and their approvals, archiving and closing, and
- * roles do not need one. Pure: decided from the request and `context`.
+ * cookie alone (good for 30 days) cannot do them. Pushes and their approvals, archiving and closing,
+ * roles, and approving a merge an agent asked for do not need one. Pure:
+ * decided from the request and `context`.
  */
 export function needsFreshCode(input: Record<string, unknown>, context: FreshCodeContext = {}): boolean {
   switch (input.action as CommandAction) {
@@ -503,6 +505,17 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     if (!tab) throw new CommandError("That tab does not exist.");
     codeStillNeeded(store, input, options);
     return createTeam(store, tab, input.setup);
+  },
+  decideMerge(store, input) {
+    // A merge an agent asked for with team_merge: approved, the worker
+    // checks it again and asks GitHub to squash-merge it at the commit
+    // shown; denied, the agent is told. Each merge is answered on its own:
+    // there is no "Always".
+    const n = store.notices().find((x) => x.id === Number(input.noticeId) && x.merge);
+    if (!n) throw new CommandError("That merge request has already been answered.");
+    if (input.decision !== "approve" && input.decision !== "deny") throw new CommandError("Choose Approve or Deny.");
+    store.settleMerge(n.id, input.decision === "approve");
+    return { done: true };
   },
   decideProposal(store, input, options) {
     // A tab an agent proposed: the owner creates it, as proposed or with

@@ -9,7 +9,7 @@ const files = (v: unknown) => JSON.parse((v as string) || "[]") as string[];
 // what a Code analysis folder was shown, diffs and push jobs.
 /** GitHub's base branch as the worker last saw it, by project, and the
  * commit of it each agent was last told about: flags. */
-const BASE_TIP = "base-tip:";
+export const BASE_TIP = "base-tip:";
 const BASE_TOLD = "base-told:";
 /** An agent's latest push failed, by agent: the job, its Needs you item and
  * whether the agent has been told. A flag. */
@@ -23,12 +23,15 @@ export const git = {
   setBaseTip(this: ConsoleStore, epoch: number, projectId: string, sha: string) {
     this.setFlag(BASE_TIP + projectId, sha, epoch);
   },
+  baseTip(this: ConsoleStore, projectId: string): string | null {
+    return this.flag(BASE_TIP + projectId);
+  },
   /** The commit GitHub's base branch has moved to since this agent's branch
    * last took it in, or null: for an editing agent of a GitHub project,
    * whose changes are compared with an older commit of it. */
   baseMoved(this: ConsoleStore, agent: ConsoleAgent): string | null {
     if (agent.permission !== "edit" || this.project(agent.projectId)?.source !== "github") return null;
-    const tip = this.flag(BASE_TIP + agent.projectId);
+    const tip = this.baseTip(agent.projectId);
     const { branch, baseCommit } = this.agentBase(agent.id);
     return tip && branch && baseCommit && tip !== baseCommit ? tip : null;
   },
@@ -140,6 +143,12 @@ export const git = {
   },
   settlingAgents(this: ConsoleStore): string[] {
     return this.all("SELECT id FROM console_agents WHERE settling IS NOT NULL").map((r) => r.id as string);
+  },
+  /** The agent's diff without its patch (up to 512 KB), for what is read
+   * on every poll. */
+  diffSummary(this: ConsoleStore, agentId: string): { base: string; head: string; stat: string; files: string[]; updatedAt: number } | null {
+    const r = this.get("SELECT base, head, stat, files, updated_at FROM console_diffs WHERE agent_id = ?", agentId);
+    return r ? { base: r.base as string, head: r.head as string, stat: r.stat as string, files: files(r.files), updatedAt: r.updated_at as number } : null;
   },
   diff(this: ConsoleStore, agentId: string): { base: string; head: string; stat: string; patch: string; files: string[]; updatedAt: number } | null {
     const r = this.get("SELECT * FROM console_diffs WHERE agent_id = ?", agentId);
@@ -285,7 +294,7 @@ export const git = {
     if (!r) return null;
     const sha = r.sha as string;
     const cancelledBy = (r.cancelled_by as string | null) ?? null;
-    return { sha, reviewerId: (r.reviewer_id as string | null) ?? null, reviewedAt: (r.reviewed_at as number | null) ?? null, approvedAt: r.approved_at as number, cancelledBy, current: !cancelledBy && this.diff(agentId)?.head === sha };
+    return { sha, reviewerId: (r.reviewer_id as string | null) ?? null, reviewedAt: (r.reviewed_at as number | null) ?? null, approvedAt: r.approved_at as number, cancelledBy, current: !cancelledBy && this.diffSummary(agentId)?.head === sha };
   },
   revokeApproval(this: ConsoleStore, agentId: string): boolean {
     return this.run("DELETE FROM console_approvals WHERE agent_id = ?", agentId) === 1;
@@ -297,7 +306,7 @@ export const git = {
    * (team_push) passes its lease epoch. */
   queuePush(this: ConsoleStore, agentId: string, request: ConsoleJob["request"] = null, epoch?: number): ConsoleJob {
     return this.transaction(() => {
-      const open = this.get("SELECT id, state FROM console_jobs WHERE agent_id = ? AND state IN ('queued', 'running')", agentId);
+      const open = this.get("SELECT id, state FROM console_jobs WHERE agent_id = ? AND kind = 'push' AND state IN ('queued', 'running')", agentId);
       if (open && request && open.state === "queued") this.run("UPDATE console_jobs SET request = ? WHERE id = ?", JSON.stringify(request), open.id as number);
       const id = open
         ? (open.id as number)
@@ -328,8 +337,9 @@ export const git = {
     const r = this.get("SELECT * FROM console_jobs WHERE id = ?", id);
     return r && job(r);
   },
+  /** The agent's latest push (a merge it asked for is not one). */
   latestJob(this: ConsoleStore, agentId: string): ConsoleJob | undefined {
-    const r = this.get("SELECT * FROM console_jobs WHERE agent_id = ? ORDER BY id DESC LIMIT 1", agentId);
+    const r = this.get("SELECT * FROM console_jobs WHERE agent_id = ? AND kind = 'push' ORDER BY id DESC LIMIT 1", agentId);
     return r && job(r);
   },
   /** Each agent's latest successful push: the commit it pushed (null when
@@ -338,7 +348,7 @@ export const git = {
     const out = new Map<string, { head: string | null; at: number }>();
     if (!agentIds.length) return out;
     const rows = this.all(
-      `SELECT j.agent_id, j.head, COALESCE(j.ended_at, j.created_at) AS at FROM console_jobs j WHERE j.state = 'done' AND j.agent_id IN (${agentIds.map(() => "?").join(",")}) AND j.id = (SELECT MAX(id) FROM console_jobs WHERE agent_id = j.agent_id AND state = 'done')`,
+      `SELECT j.agent_id, j.head, COALESCE(j.ended_at, j.created_at) AS at FROM console_jobs j WHERE j.state = 'done' AND j.kind = 'push' AND j.agent_id IN (${agentIds.map(() => "?").join(",")}) AND j.id = (SELECT MAX(id) FROM console_jobs WHERE agent_id = j.agent_id AND kind = 'push' AND state = 'done')`,
       ...agentIds,
     );
     for (const r of rows) out.set(r.agent_id as string, { head: (r.head as string | null) ?? null, at: r.at as number });
@@ -349,9 +359,10 @@ export const git = {
   agentsWithJobs(this: ConsoleStore): string[] {
     return this.all("SELECT DISTINCT agent_id FROM console_jobs WHERE state IN ('queued', 'running')").map((r) => r.agent_id as string);
   },
-  /** Claim the oldest queued job. */
+  /** Claim the oldest queued job. A push waits while its agent works
+   * (`skipAgents`); a merge changes no folder, so it does not. */
   claimJob(this: ConsoleStore, epoch: number, skipAgents: string[] = []): ConsoleJob | undefined {
-    const skip = skipAgents.length ? ` AND agent_id NOT IN (${skipAgents.map(() => "?").join(", ")})` : "";
+    const skip = skipAgents.length ? ` AND (kind <> 'push' OR agent_id NOT IN (${skipAgents.map(() => "?").join(", ")}))` : "";
     const [r] = this.claimRows(epoch, "console_jobs", "queued", 1, skip, ...skipAgents);
     return r && job(r);
   },
@@ -361,7 +372,7 @@ export const git = {
     this.transaction(() => {
       this.run("UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", state, message, url, head, this.now(), id);
       const agentId = this.job(id)?.agentId;
-      const failed = state === "done" && agentId ? this.pushFailure(agentId) : null;
+      const failed = state === "done" && agentId && this.job(id)?.kind === "push" ? this.pushFailure(agentId) : null;
       if (!failed) return;
       if (failed.notice !== null) this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", failed.notice);
       this.setFlag(PUSH_FAILED + agentId, null);

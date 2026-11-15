@@ -85,7 +85,10 @@ only restates one of them is not a new finding.
   cannot raise limits, change keys, grant permanent permissions, drop
   Ask me first or switch an agent's Network to Auto. Switching Ask me
   first off also allows what that agent has waiting in Needs you for that
-  reason alone, and nothing else that waits there. When the owner has set a Console-wide monthly limit, it
+  reason alone, and nothing else that waits there. Approving a merge an
+  agent asked for (`team_merge`) needs no fresh code, so a cookie alone
+  could approve one that is already waiting, but could not ask for one,
+  change what it merges or skip its checks. When the owner has set a Console-wide monthly limit, it
   caps every tab, new ones too, and raising, removing or resetting it is
   weighty.
 - **Runaway spend.** Paid keys must have a provider-side cap, which is the

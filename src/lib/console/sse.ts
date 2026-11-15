@@ -9,6 +9,9 @@ export interface SseFrame {
   data: string;
   /** A fresh stream's `: start <id>` comment: where its history began. */
   start: number | null;
+  /** A fresh stream's `: history <ids>` comment, after its history: all of
+   * it arrived, and these agents have earlier events. */
+  history: string[] | null;
 }
 
 /** The complete frames in `buffer` (each ends with a blank line) and the
@@ -21,7 +24,13 @@ export function parseSseFrames(buffer: string): { frames: SseFrame[]; rest: stri
     buffer = buffer.slice(at + 2);
     const field = (name: string) => lines.filter((l) => l.startsWith(`${name}: `)).map((l) => l.slice(name.length + 2));
     const start = lines.map((l) => /^: start (\d+)$/.exec(l)).find(Boolean);
-    frames.push({ event: field("event")[0] ?? null, data: field("data").join("\n"), start: start ? Number(start[1]) : null });
+    const history = lines.map((l) => /^: history (\[.*\])$/.exec(l)).find(Boolean);
+    frames.push({
+      event: field("event")[0] ?? null,
+      data: field("data").join("\n"),
+      start: start ? Number(start[1]) : null,
+      history: history ? (JSON.parse(history[1]) as string[]) : null,
+    });
   }
   return { frames, rest: buffer };
 }

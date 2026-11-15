@@ -6,8 +6,8 @@ import { BUILT_IN_ROLES, type RoleDef } from "@/lib/console/roles";
 import { gridShape } from "@/lib/console/transcript";
 import { addMenu, projectMenu, tabMenu, type MenuContext } from "@/lib/console/menus";
 import { focusTarget, readCollapsed, toggle, writeCollapsed, type TreeProject } from "@/lib/console/tree";
-import type { ConsoleProject } from "@/lib/console/types";
-import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, sidebarShortcut, type Appearance, type SettingsSection } from "@/lib/console/ui";
+import type { ConsoleEvent, ConsoleProject } from "@/lib/console/types";
+import { NOT_ANSWERING, keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, sidebarShortcut, type Appearance, type SettingsSection } from "@/lib/console/ui";
 import { inOrder } from "@/lib/console/polled";
 import { pickProject, pickTab } from "@/lib/console/view-state";
 import type { ProjectView, WorkerView, needsView, projectsView, templatesView, treeView } from "@/lib/console/views";
@@ -43,6 +43,8 @@ import styles from "./console.module.css";
 // among them.
 
 const COLLAPSED_KEY = "console-tree-collapsed";
+/** A window with no events yet: one array, so its transcript is not rebuilt. */
+const NO_EVENTS: ConsoleEvent[] = [];
 /** The sidebar folded away on this device. */
 const SIDEBAR_KEY = "console-sidebar";
 const APPEARANCE_KEY = "console-appearance";
@@ -167,6 +169,8 @@ export default function ConsoleApp() {
     try {
       const data = await api<Versioned<ListView>>(undefined, listVersion.current ? `?version=${listVersion.current}` : "");
       if (!latest()) return;
+      // The Console answers again: that line goes by itself.
+      setError((e) => (e === NOT_ANSWERING ? null : e));
       setWorker((w) => keepIfSame(w, data.worker));
       // Unchanged since the last answer: nothing to render.
       if (data.unchanged) return;
@@ -587,7 +591,11 @@ export default function ConsoleApp() {
                       // queued message is withdrawn without touching it.
                       a.kind === "codex" && (a.status === "working" || a.status === "needs_you") ? Math.max(0, view.codexRunning - 1) : 0
                     }
-                    events={events.get(a.id) ?? []}
+                    events={events.byAgent.get(a.id)?.list ?? NO_EVENTS}
+                    earlier={events.byAgent.get(a.id)?.earlier ?? null}
+                    prepends={events.byAgent.get(a.id)?.prepends ?? 0}
+                    loading={!events.loaded}
+                    onEarlier={() => events.showEarlier(a.id)}
                     maximized={maximized === a.id}
                     onMaximize={() => setMaximized(maximized === a.id ? null : a.id)}
                     onChanges={() => setChangesFor(a.id)}

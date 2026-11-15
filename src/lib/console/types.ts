@@ -2,6 +2,7 @@
 // Browser-safe: no Node imports.
 
 import type { AgentKind, ConsoleEffort } from "./agents.ts";
+import type { MergeAsk } from "./merge.ts";
 
 /** A project's source. */
 export type ProjectSource = "folder" | "none" | "github";
@@ -284,12 +285,16 @@ export interface ConsoleCommit {
 export interface ConsoleJob {
   id: number;
   agentId: string;
-  kind: "push";
+  /** A push of the agent's branch, or the merge of a pull request the
+   * owner approved for it. */
+  kind: "push" | "merge";
   state: "queued" | "running" | "done" | "failed";
   message: string | null;
   url: string | null;
   /** Who pushed and what the pull request should say. */
   request: { by: "agent" | "owner"; title?: string; body?: string; review?: boolean } | null;
+  /** A merge: the pull request and the commit the owner approved. */
+  merge: MergeAsk | null;
   createdAt: number;
 }
 

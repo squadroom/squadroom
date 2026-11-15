@@ -5,9 +5,19 @@ import { followStream, parseSseFrames, type SseFrame } from "../src/lib/console/
 import { transcript, type Block } from "../src/lib/console/transcript.ts";
 import type { ConsoleEvent } from "../src/lib/console/types.ts";
 import {
+  NOT_ANSWERING,
+  notAnswering,
+  shownCommits,
+  shownPatch,
   EVENT_BYTES_MAX,
   EVENTS_MAX,
   appendEvent,
+  applyFrames,
+  earlierState,
+  emptyWindow,
+  newEventStream,
+  prependEvents,
+  streamCursor,
   archiveReady,
   cleanupSelection,
   elapsed,
@@ -42,14 +52,14 @@ import {
 test("SSE frames: data lines joined, the event name, the start comment, the unfinished rest kept", () => {
   const { frames, rest } = parseSseFrames('retry: 1000\n\n: start 41\ndata: {"id":42}\n\nevent: tree\ndata: [1,\ndata: 2]\n\n: ping\n\ndata: {"id"');
   assert.deepEqual(frames, [
-    { event: null, data: "", start: null },
-    { event: null, data: '{"id":42}', start: 41 },
-    { event: "tree", data: "[1,\n2]", start: null },
-    { event: null, data: "", start: null },
+    { event: null, data: "", start: null, history: null },
+    { event: null, data: '{"id":42}', start: 41, history: null },
+    { event: "tree", data: "[1,\n2]", start: null, history: null },
+    { event: null, data: "", start: null, history: null },
   ]);
   assert.equal(rest, 'data: {"id"');
   // The rest completes with the next chunk.
-  assert.deepEqual(parseSseFrames(`${rest}:43}\n\n`).frames, [{ event: null, data: '{"id":43}', start: null }]);
+  assert.deepEqual(parseSseFrames(`${rest}:43}\n\n`).frames, [{ event: null, data: '{"id":43}', start: null, history: null }]);
   assert.deepEqual(parseSseFrames("data: half"), { frames: [], rest: "data: half" });
 });
 
@@ -261,7 +271,7 @@ const event = (id: number, turnId: number, kind: ConsoleEvent["kind"], text: str
 const size = (body: unknown) => new TextEncoder().encode(JSON.stringify(body)).length;
 
 test("a window's events: one turn's streamed text merges, counted in UTF-8 bytes", () => {
-  const own: EventWindow = { list: [], sizes: [], bytes: 0 };
+  const own: EventWindow = emptyWindow();
   appendEvent(own, event(1, 1, "text", "Hé"));
   appendEvent(own, event(2, 1, "text", "llo"));
   appendEvent(own, event(3, 1, "thinking", "hm"));
@@ -279,11 +289,11 @@ test("a window's events: one turn's streamed text merges, counted in UTF-8 bytes
 });
 
 test("a window's events are bounded: the oldest go, and very long text keeps its latest part", () => {
-  const own: EventWindow = { list: [], sizes: [], bytes: 0 };
+  const own: EventWindow = emptyWindow();
   for (let i = 1; i <= EVENTS_MAX + 5; i++) appendEvent(own, event(i, i, "text", "x"));
   assert.equal(own.list.length, EVENTS_MAX);
   assert.equal(own.list[0].id, 6);
-  const long: EventWindow = { list: [], sizes: [], bytes: 0 };
+  const long: EventWindow = emptyWindow();
   appendEvent(long, event(1, 1, "text", "a".repeat(EVENT_BYTES_MAX / 4)));
   appendEvent(long, event(2, 1, "text", "b"));
   const text = (long.list[0].body as { text: string }).text;
@@ -291,6 +301,88 @@ test("a window's events are bounded: the oldest go, and very long text keeps its
   assert.ok(text.endsWith("b"));
   assert.equal(text.length, 2 + EVENT_BYTES_MAX / 8);
   assert.equal(long.bytes, size({ text }));
+});
+
+test("SSE frames: the history line names the windows with earlier messages", () => {
+  assert.deepEqual(parseSseFrames(': history ["a","b"]\n\n').frames, [{ event: null, data: "", start: null, history: ["a", "b"] }]);
+  assert.deepEqual(parseSseFrames(": history []\n\n").frames[0].history, []);
+});
+
+test("earlier messages go above a window's own, its newest kept, and say when the start is here", () => {
+  const own = emptyWindow();
+  for (const e of [event(10, 3, "text", "a"), event(11, 3, "text", "b"), event(12, 4, "owner", "c")]) appendEvent(own, e);
+  assert.deepEqual(own.firsts, [10, 12]);
+  assert.equal(earlierState(own), null);
+  own.earlier = true;
+  assert.equal(earlierState(own), "more");
+  // The slice's last text joins the window's first (one turn's stream).
+  const next = prependEvents(own, [event(7, 2, "owner", "x"), event(9, 3, "text", "_")], false);
+  assert.deepEqual(next.list.map((e) => (e.body as { text: string }).text), ["x", "_ab", "c"]);
+  assert.deepEqual(next.firsts, [7, 9, 12]);
+  assert.equal(earlierState(next), "start");
+  assert.equal(earlierState(prependEvents(own, [event(9, 1, "owner", "y")], true)), "more");
+  // A slice that does not fit loses its oldest part, never the newest.
+  const many = Array.from({ length: EVENTS_MAX }, (_, i) => event(i + 1, i + 1, "owner", "z"));
+  const full = prependEvents(next, many, true);
+  assert.equal(full.list.length, EVENTS_MAX);
+  assert.equal(full.list.at(-1)!.id, 12);
+  assert.equal(earlierState(full), "full");
+});
+
+test("earlier text of one turn that would pass its length limit is left out, never cutting what is shown", () => {
+  const cap = EVENT_BYTES_MAX / 4;
+  const own = emptyWindow();
+  appendEvent(own, event(50, 7, "text", "t".repeat(140_000)));
+  own.earlier = true;
+  // A page of the same turn's earlier text that fits joins it.
+  const once = prependEvents(own, [event(40, 7, "text", "p".repeat(280_000))], true);
+  assert.equal((once.list[0].body as { text: string }).text.length, 420_000);
+  assert.deepEqual(once.firsts, [40]);
+  assert.equal(earlierState(once), "more");
+  assert.equal(once.prepends, 1);
+  // The next would pass the limit: nothing is cut, the window is full and
+  // its first id stays the oldest shown.
+  const twice = prependEvents(once, [event(30, 6, "owner", "ask"), event(31, 7, "text", "q".repeat(280_000))], false);
+  assert.equal((twice.list[0].body as { text: string }).text.length, 420_000);
+  assert.ok((twice.list[0].body as { text: string }).text.startsWith("p"));
+  assert.deepEqual(twice.firsts, [40]);
+  assert.equal(earlierState(twice), "full");
+  assert.equal(twice.prepends, 2);
+  // Within the slice too: its newest part that fits is kept.
+  const fresh = emptyWindow();
+  appendEvent(fresh, event(90, 9, "owner", "next"));
+  const split = prependEvents(fresh, [event(80, 8, "text", "a".repeat(cap)), event(81, 8, "text", "b".repeat(10)), event(85, 8, "owner", "x")], false);
+  assert.deepEqual(split.firsts, [81, 85, 90]);
+  assert.equal((split.list[0].body as { text: string }).text, "b".repeat(10));
+  assert.equal(earlierState(split), "full");
+});
+
+const frame = (f: Partial<SseFrame>): SseFrame => ({ event: null, data: "", start: null, history: null, ...f });
+const data = (id: number, agentId: string) => frame({ data: JSON.stringify({ ...event(id, id, "owner", `m${id}`), agentId }) });
+
+test("the live stream's cursor: a history cut short is asked for again, then resumes after the newest", () => {
+  const s = newEventStream();
+  assert.equal(streamCursor(s), null);
+  // The first stream ends part-way through its history (the newest unsent).
+  applyFrames(s, [frame({ start: 50 }), data(40, "a"), data(41, "b")]);
+  assert.equal(s.loaded, false);
+  assert.equal(streamCursor(s), null, "a resume would never send the rest of the history");
+  // The next fresh stream replaces what the unfinished one began.
+  const again = applyFrames(s, [frame({ start: 52 }), data(41, "b"), data(45, "a"), data(50, "a"), frame({ history: ["a"] })]);
+  assert.equal(again.cleared, true);
+  assert.deepEqual([...again.touched].sort(), ["a", "b"]);
+  assert.equal(s.loaded, true);
+  assert.deepEqual(s.byAgent.get("a")!.list.map((e) => e.id), [45, 50]);
+  assert.equal(earlierState(s.byAgent.get("a")!), "more");
+  assert.equal(earlierState(s.byAgent.get("b")!), null);
+  // Its history held nothing newer than its start: resume from the start.
+  assert.equal(streamCursor(s), 52);
+  // A resumed stream keeps the windows and skips what it already has.
+  const resumed = applyFrames(s, [frame({ start: 52 }), data(50, "a"), data(53, "b")]);
+  assert.equal(resumed.cleared, false);
+  assert.deepEqual(s.byAgent.get("b")!.list.map((e) => e.id), [41, 53]);
+  assert.equal(resumed.status, true);
+  assert.equal(streamCursor(s), 53);
 });
 
 test("a pasted image's file name", () => {
@@ -427,4 +519,37 @@ test("tool rows: a run keeps its key while it grows, so the page keeps it open o
   assert.deepEqual(lines(three), ["text", "3 steps: 1 Read, 1 Edit, 1 Grep · 1 failed · 1 running"]);
   assert.equal(one[1].key, three[1].key);
   assert.equal(three[1].key, "steps-2");
+});
+
+test("the changes view shows the newest 30 turns until all are asked for", () => {
+  const commits = Array.from({ length: 98 }, (_, i) => 98 - i);
+  const first = shownCommits(commits, false);
+  assert.deepEqual([first.shown.length, first.shown[0], first.shown.at(-1), first.hidden], [30, 98, 69, 68]);
+  assert.deepEqual([shownCommits(commits, true).shown.length, shownCommits(commits, true).hidden], [98, 0]);
+  // A list that fits is whole, with nothing to ask for.
+  assert.deepEqual(shownCommits(commits.slice(0, 30), false), { shown: commits.slice(0, 30), hidden: 0 });
+});
+
+test("a very long opened patch is cut at a line end until the rest is asked for", () => {
+  const patch = "+line\n".repeat(50_000);
+  const cut = shownPatch(patch, false);
+  assert.ok(cut.text.length <= 100_000 && cut.text.endsWith("+line"));
+  assert.equal(cut.text.length + cut.rest, patch.length);
+  assert.deepEqual(shownPatch(patch, true), { text: patch, rest: 0 });
+  assert.deepEqual(shownPatch("+a\n+b", false), { text: "+a\n+b", rest: 0 });
+  // One endless line is cut at the limit.
+  assert.deepEqual(shownPatch("x".repeat(30), false, 10), { text: "x".repeat(10), rest: 20 });
+});
+
+test("a request that never reached the Console is told apart from the Console's own errors", () => {
+  // What fetch rejects with in Safari, Chrome and Firefox, and when cut off.
+  for (const message of ["Load failed", "Failed to fetch", "NetworkError when attempting to fetch resource."]) assert.equal(notAnswering({ error: new TypeError(message) }), true);
+  for (const name of ["AbortError", "TimeoutError"]) assert.equal(notAnswering({ error: Object.assign(new Error("cut off"), { name }) }), true);
+  // The Console's own words, and the owner's Cancel, are not.
+  assert.equal(notAnswering({ error: new Error("That agent does not exist.") }), false);
+  assert.equal(notAnswering({ error: Object.assign(new Error("Cancelled."), { name: "Cancelled" }) }), false);
+  assert.equal(notAnswering({ error: "Load failed" }), false);
+  // What stands in front of a stopped Console answers 502, 503 or 504.
+  assert.deepEqual([502, 503, 504, 500, 404, 409].map((status) => notAnswering({ status })), [true, true, true, false, false, false]);
+  assert.match(NOT_ANSWERING, /^The Console is not answering\. It may be restarting; this page will catch up by itself\.$/);
 });

@@ -8,7 +8,7 @@ import { taskLine } from "@/lib/console/tasks";
 import { transcript } from "@/lib/console/transcript";
 import { STATUS_TEXT } from "@/lib/console/tree";
 import { PERMISSION_LABELS, type AgentStatus, type ConsoleEvent } from "@/lib/console/types";
-import { elapsed, fileLinks, pastedName, plural, transcriptRows } from "@/lib/console/ui";
+import { elapsed, fileLinks, pastedName, plural, transcriptRows, type Earlier } from "@/lib/console/ui";
 import { atEnd } from "@/lib/console/view-state";
 import type { Run } from "./api";
 import BlockView, { StepsView } from "./BlockView";
@@ -18,6 +18,7 @@ import KindBadge from "./KindBadge";
 import { MenuButton } from "./Menu";
 import { agentMenu, modelMenu } from "@/lib/console/menus";
 import { useComposer } from "./useComposer";
+import ApproveGate from "./ApproveGate";
 import styles from "./console.module.css";
 
 /** What a window's status pill says: the tree's words, and Closed. */
@@ -29,6 +30,10 @@ export default function AgentWindow({
   agent,
   otherCodexRunning,
   events,
+  earlier,
+  prepends,
+  loading,
+  onEarlier,
   maximized,
   onMaximize,
   onChanges,
@@ -39,6 +44,14 @@ export default function AgentWindow({
   agent: AgentView;
   otherCodexRunning: number;
   events: ConsoleEvent[];
+  /** What the top of its transcript says about earlier messages. */
+  earlier: Earlier;
+  /** Earlier slices put in so far; each keeps the reader's place. */
+  prepends: number;
+  /** The project's history has not all arrived yet. */
+  loading: boolean;
+  /** Reads its next earlier slice. */
+  onEarlier: () => Promise<void>;
   maximized: boolean;
   onMaximize: () => void;
   onChanges: () => void;
@@ -89,19 +102,44 @@ export default function AgentWindow({
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
+  // Earlier messages put above keep what the reader sees where it was.
+  // The distance from the bottom is noted after every scroll, render and
+  // resize, so the one noted last is the reader's place just
+  // before the render that brings the slice; only that render restores it.
+  const fromBottom = useRef(0);
+  const note = () => {
+    const el = scroller.current;
+    if (el) fromBottom.current = el.scrollHeight - el.scrollTop;
+  };
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
     following.current = atEnd(el.scrollHeight, el.scrollTop, el.clientHeight);
     setShowLatest(!following.current);
+    note();
   };
+  const [earlierBusy, setEarlierBusy] = useState(false);
+  const [earlierError, setEarlierError] = useState<string | null>(null);
+  const showEarlier = () => {
+    setEarlierBusy(true);
+    setEarlierError(null);
+    onEarlier()
+      .catch((e: unknown) => setEarlierError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setEarlierBusy(false));
+  };
+  const prependsSeen = useRef(prepends);
   useLayoutEffect(() => {
-    if (following.current) toEnd();
-  }, [blocks, toEnd]);
+    const el = scroller.current;
+    if (el && prepends !== prependsSeen.current) el.scrollTop = el.scrollHeight - fromBottom.current;
+    else if (following.current) toEnd();
+    prependsSeen.current = prepends;
+    note();
+  }, [blocks, prepends, toEnd]);
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (following.current) toEnd();
+      note();
     });
     if (scroller.current) observer.observe(scroller.current);
     if (body.current) observer.observe(body.current);
@@ -290,6 +328,13 @@ export default function AgentWindow({
           </MenuButton>
         </span>
       </header>
+      {/* The approve gate where a step waits for it: one tap,
+          without opening Changes. */}
+      {agent.approval && (
+        <div className={styles.helpers}>
+          <ApproveGate key={`${agent.approval.head}/${agent.approval.current?.reviewerId ?? ""}`} agentId={agent.id} approval={agent.approval} run={run} />
+        </div>
+      )}
       {agent.helpers.shown.length > 0 && (
         <div className={styles.helpers} aria-label={`${agent.name}'s helpers`}>
           {agent.helpers.shown.map((h) => (
@@ -331,7 +376,16 @@ export default function AgentWindow({
       <div className={styles.transcriptArea}>
         <div className={styles.transcript} ref={scroller} onScroll={onScroll}>
           <div className={styles.transcriptBody} ref={body}>
-            {blocks.length === 0 && <p className={styles.hint}>{agent.role ? agent.role : "Send this agent a message to start."}</p>}
+            {blocks.length === 0 && (
+              <p className={styles.hint}>{loading ? "Loading its conversation…" : agent.role ? agent.role : "Send this agent a message to start."}</p>
+            )}
+            {earlier === "more" && (
+              <button className={styles.earlier} onClick={showEarlier} disabled={earlierBusy}>
+                {earlierBusy ? "Loading earlier messages…" : "Show earlier messages"}
+              </button>
+            )}
+            {earlier === "full" && <p className={styles.hint}>Earlier messages are not kept on this page. Search finds them.</p>}
+            {earlierError && <p className={styles.errorLine}>{earlierError}</p>}
             {rows.map((r, i) =>
               r.type === "steps" ? (
                 <StepsView key={r.key} row={r} onLink={onLink} onOpenFile={openFile} />

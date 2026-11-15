@@ -13,7 +13,7 @@ const outcome = (r: Row): Outcome => ({ id: r.id as number, kind: r.kind as stri
 // backups; and the owner's e-mail queue.
 export const upkeep = {
   /** At the worker's start, what an earlier worker was running: pushes,
-   * cleanups, checks and uploads fail visibly, file reads are read again,
+   * merges, cleanups, checks and uploads fail visibly, file reads are read again,
    * and image calls are interrupted (they stay charged and are never
    * resubmitted: their job may have run). Returns how many image calls,
    * and the staged copies no upload needs any more, for removal. */
@@ -23,6 +23,9 @@ export const upkeep = {
       const restarted = (what: string) => `The Console worker restarted during this ${what}`;
       const fail = (table: string, set: string, ...args: SQLInputValue[]) => this.run(`UPDATE ${table} SET state = 'failed', ${set} WHERE state = 'running'`, ...args);
       const staged = this.all("SELECT staged FROM console_uploads WHERE state IN ('running', 'queued') AND staged != ''").map((r) => r.staged as string);
+      // A merge GitHub may or may not have made: the owner and the agent
+      // are told to look.
+      this.failEarlierMerges(epoch);
       fail("console_jobs", "message = ?, ended_at = ?", `${restarted("push")}. Push again.`, now);
       fail("console_cleanups", "result = ?", JSON.stringify({ message: `${restarted("cleanup")}. Run it again.` }));
       fail("console_checks", "result = ?", JSON.stringify({ note: `${restarted("check")}. Check again.`, checkedAt: now }));

@@ -236,27 +236,37 @@ export const turns = {
   lastEventId(this: ConsoleStore, projectId: string): number {
     return (this.get("SELECT MAX(id) AS id FROM console_events WHERE project_id = ?", projectId)?.id as number | null) ?? 0;
   },
-  /** A fresh view's history: each agent's latest `perAgent` events up to
-   * `upTo`, oldest first, so one busy window never pushes a quiet one's
-   * transcript out. */
-  agentTails(this: ConsoleStore, projectId: string, perAgent: number, upTo: number, perAgentBytes = Number.MAX_SAFE_INTEGER): ConsoleEvent[] {
-    // Newest first per open agent, by rows and by the bytes of their
-    // bodies, each read through the (agent_id, id) index and stopped at its
-    // bound, so a long history is never scanned whole. The newest event is
-    // always kept.
+  /** One agent's events before `before`: its latest `limit`, and at most
+   * `bytes` of their bodies, oldest first. Read through the
+   * (agent_id, id) index and stopped at its bound, so a long history is
+   * never scanned whole. The newest of them is always kept. `more`: earlier
+   * events exist. */
+  agentEvents(this: ConsoleStore, agentId: string, before: number, limit: number, bytes: number): { events: ConsoleEvent[]; more: boolean } {
     const rows: Record<string, unknown>[] = [];
-    const tail = this.db.prepare("SELECT *, length(CAST(body AS BLOB)) AS size FROM console_events WHERE agent_id = ? AND id <= ? ORDER BY id DESC LIMIT ?");
-    for (const a of this.all("SELECT id FROM console_agents WHERE project_id = ? AND state <> 'closed'", projectId)) {
-      let bytes = 0;
-      let kept = 0;
-      for (const r of tail.all(a.id as string, upTo, perAgent)) {
-        bytes += r.size as number;
-        if (kept > 0 && bytes > perAgentBytes) break;
-        rows.push(r);
-        kept++;
+    let size = 0;
+    let more = false;
+    for (const r of this.all("SELECT *, length(CAST(body AS BLOB)) AS size FROM console_events WHERE agent_id = ? AND id < ? ORDER BY id DESC LIMIT ?", agentId, before, limit + 1)) {
+      size += r.size as number;
+      if (rows.length === limit || (rows.length > 0 && size > bytes)) {
+        more = true;
+        break;
       }
+      rows.push(r);
     }
-    return rows.sort((x, y) => (x.id as number) - (y.id as number)).map(event);
+    return { events: rows.reverse().map(event), more };
+  },
+  /** A fresh view's history: each open agent's latest `perAgent` events up
+   * to `upTo`, oldest first, so one busy window never pushes a quiet one's
+   * transcript out. `cut`: the agents with earlier events than these. */
+  agentTails(this: ConsoleStore, projectId: string, perAgent: number, upTo: number, perAgentBytes = Number.MAX_SAFE_INTEGER): { events: ConsoleEvent[]; cut: string[] } {
+    const events: ConsoleEvent[] = [];
+    const cut: string[] = [];
+    for (const a of this.all("SELECT id FROM console_agents WHERE project_id = ? AND state <> 'closed'", projectId)) {
+      const tail = this.agentEvents(a.id as string, upTo + 1, perAgent, perAgentBytes);
+      events.push(...tail.events);
+      if (tail.more) cut.push(a.id as string);
+    }
+    return { events: events.sort((x, y) => x.id - y.id), cut };
   },
   /** One of the agent's turns is running or waiting for the owner. */
   working(this: ConsoleStore, agentId: string): boolean {

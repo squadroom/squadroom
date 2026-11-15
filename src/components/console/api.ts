@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { reload } from "@/components/shared/FreshCode";
 import { oneAtATime } from "@/lib/console/busy";
+import { NOT_ANSWERING, notAnswering } from "@/lib/console/ui";
 import type { FileView } from "@/lib/console/agent-files";
 import type { ConsoleCommand } from "@/lib/console/commands";
 import type { WorkerView } from "@/lib/console/views";
@@ -27,6 +28,10 @@ export async function api<T = unknown>(body?: ConsoleCommand, query = "", confir
     headers: { "x-workspace-request": "1", ...(body ? { "Content-Type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
     cache: "no-store",
+  }).catch((error) => {
+    // The request never reached the Console (it is restarting, or the
+    // network is gone): one plain line, not the browser's.
+    throw notAnswering({ error }) ? new Error(NOT_ANSWERING) : error;
   });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401 && data.signIn) reload("/login");
@@ -37,7 +42,8 @@ export async function api<T = unknown>(body?: ConsoleCommand, query = "", confir
     if (await confirmCode()) return api<T>(body, query, true);
     throw new CancelledError();
   }
-  if (!response.ok) throw new Error(data.error ?? `The Console did not answer (${response.status}).`);
+  if (!response.ok)
+    throw new Error(data.error ?? (notAnswering({ status: response.status }) ? NOT_ANSWERING : `The Console did not answer (${response.status}).`));
   return data as T;
 }
 

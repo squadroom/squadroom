@@ -138,12 +138,19 @@ export default function NeedsTray({
       {needs.notices.map((n) => (
         <div key={`n${n.id}`} className={styles.need}>
           <p>
-            <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : "note"}
+            <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : n.kind === "merge" ? "asks to merge" : "note"}
           </p>
           <p className={styles.needText}>{n.text}</p>
+          {n.merge && (
+            <p>
+              <a href={n.merge.url} target="_blank" rel="noreferrer">
+                View pull request #{n.merge.number}
+              </a>
+            </p>
+          )}
           {n.warning && <p className={styles.warning}>{n.warning}</p>}
           <div className={styles.dialogButtons}>
-            {show(n.agentId, n.proposal ? led : undefined)}
+            {show(n.agentId, n.proposal || n.merge ? led : undefined)}
             {n.proposal ? (
               <>
                 {act("Decline", { action: "decideProposal", noticeId: n.id, decision: "decline" }, false, "Do not create it; its agent is told")}
@@ -151,6 +158,12 @@ export default function NeedsTray({
                   Edit…
                 </button>
                 {act("Create", { action: "decideProposal", noticeId: n.id, decision: "create" }, true, "Create the tab and its team as proposed")}
+              </>
+            ) : n.merge ? (
+              <>
+                {/* Each merge is the owner's: no "Always". */}
+                {act("Deny", { action: "decideMerge", noticeId: n.id, decision: "deny" }, false, "Do not merge it; its agent is told")}
+                {act("Approve", { action: "decideMerge", noticeId: n.id, decision: "approve" }, true, "Squash and merge it on GitHub now, if it is still as shown here (the Console checks again first)")}
               </>
             ) : (
               act("Dismiss", { action: "dismissNotice", noticeId: n.id }, true)

@@ -6,6 +6,7 @@ import { consoleKeysFile, consoleLogFile } from "@/lib/console/config";
 import { readLog } from "@/lib/console/log";
 import { overviewView } from "@/lib/console/overview";
 import { reportData, runReport } from "@/lib/console/report";
+import { EARLIER_BYTES, EARLIER_EVENTS } from "@/lib/console/ui";
 import { Redactor } from "@/lib/console/redact";
 import { serverSettings } from "@/config/server-env";
 
@@ -81,6 +82,16 @@ export async function GET(request: Request) {
     // Search over the stored, redacted conversations.
     const search = params.get("search");
     if (search !== null) return consoleJson(searchView(store, search.slice(0, 200)));
+    // A window's earlier messages: one agent's events before the oldest
+    // the page holds, a bounded slice.
+    const earlier = params.get("events");
+    if (earlier) {
+      const agent = store.agent(earlier);
+      if (!agent || agent.state === "closed" || !store.project(agent.projectId)) return consoleJson({ error: "That agent does not exist." }, 404);
+      const before = Number(params.get("before"));
+      if (!Number.isSafeInteger(before) || before < 1) return consoleJson({ error: "Say which message to read before." }, 400);
+      return consoleJson(store.agentEvents(agent.id, before, EARLIER_EVENTS, EARLIER_BYTES));
+    }
     const changes = params.get("changes");
     if (changes) {
       // The dialog's list, every 3 seconds; one commit's patch, or the

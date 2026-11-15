@@ -29,6 +29,7 @@ import { needs } from "./worker/needs.ts";
 import { refreshes } from "./worker/refreshes.ts";
 import { sessions } from "./worker/sessions.ts";
 import { teamGit } from "./worker/team-git.ts";
+import { merging } from "./worker/merge.ts";
 import { teamTools } from "./worker/team.ts";
 import { turns } from "./worker/turns.ts";
 import { consoleMirrorsDir } from "./config.ts";
@@ -733,7 +734,7 @@ export class ConsoleWorker {
 }
 
 // The area methods, each module's `this` the worker.
-type Areas = typeof sessions & typeof turns & typeof teamTools & typeof teamGit & typeof refreshes & typeof holds & typeof needs & typeof jobs & typeof images;
+type Areas = typeof sessions & typeof turns & typeof teamTools & typeof teamGit & typeof merging & typeof refreshes & typeof holds & typeof needs & typeof jobs & typeof images;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
 export interface ConsoleWorker extends Areas {}
-Object.assign(ConsoleWorker.prototype, sessions, turns, teamTools, teamGit, refreshes, holds, needs, jobs, images);
+Object.assign(ConsoleWorker.prototype, sessions, turns, teamTools, teamGit, merging, refreshes, holds, needs, jobs, images);

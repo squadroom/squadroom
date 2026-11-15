@@ -242,8 +242,12 @@ export const teamTools = {
         return this.teamPrReply(call);
       case "team_checks":
         return this.teamChecks(call);
+      case "team_project":
+        return this.teamProject(call);
       case "team_push":
         return this.teamPush(call);
+      case "team_merge":
+        return this.teamMerge(call);
     }
     throw new TeamError(`Unknown tool: ${name}`);
   },

@@ -240,6 +240,11 @@ export class Clone {
         return { sha, parents };
       });
   }
+  /** How many commits `to` has that `from` lacks (uncapped). */
+  async countBetween(from: string, to: string): Promise<number> {
+    const r = await this.git(["rev-list", "--count", `${from}..${to}`], "Counting commits", 4096);
+    return Number(r.stdout.trim());
+  }
   /** Every path that differs between two commits (uncapped). */
   async diffPaths(from: string, to: string): Promise<string[]> {
     const r = await this.gitAll(["diff", "--no-renames", "--name-only", "-z", from, to], "Comparing commits", 16 * 1024 * 1024);
