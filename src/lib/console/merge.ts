@@ -24,6 +24,8 @@ export interface PullState {
   /** `owner/name` of the repository the branch is in; null when it is gone. */
   headRepo: string | null;
   baseRef: string;
+  /** The commit GitHub made on the base branch, once it is merged. */
+  mergeCommit: string | null;
 }
 
 /** What the owner approves, kept with the Needs you item and then with the
@@ -42,6 +44,9 @@ export interface MergeAsk {
   /** One line on its checks, and one on its review when GitHub gave it. */
   checks: string;
   review: string | null;
+  /** Other agents of the project that asked for the same commit while this
+   * request waited: they are told the outcome too. */
+  alsoAsked?: string[];
 }
 
 type Job = { id: number; run: string; name: string; status: string; conclusion: string | null };
@@ -158,6 +163,11 @@ export const deniedNote = (number: number) =>
   `The owner did not approve merging pull request #${number}, so it was not merged. Do not ask for it again until the owner tells you to.`;
 /** The owner's Needs you note when an approved merge did not go through. */
 export const notMergedNotice = (number: number, reason: string) => `Pull request #${number} was not merged after your approval. ${reason}`;
+
+/** GitHub's answer to the merge never arrived and the pull request could
+ * not be read again afterwards: it may or may not be merged. */
+export const mergeUncertain = (number: number, reason: string) =>
+  `It is not known whether GitHub merged pull request #${number}: its answer did not arrive (${reason}). Look at the pull request on GitHub (an agent: team_pr); if it is still open, the agent asks again with team_merge.`;
 
 /** The worker restarted while it was asking GitHub (for both). */
 export const mergeUnknown = (number: number) =>

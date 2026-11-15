@@ -19,12 +19,24 @@ export const merges = {
   askMerge(this: ConsoleStore, epoch: number, r: { turnId: number; agentId: string; projectId: string; key: string; text: string; merge: MergeAsk }): string {
     return this.callOnce(epoch, { turnId: r.turnId, agentId: r.agentId, key: r.key, tool: "team_merge", summary: `team_merge pull request #${r.merge.number}` }, () => {
       const inProject = "agent_id IN (SELECT id FROM console_agents WHERE project_id = ?)";
-      const running = this.all(`SELECT request FROM console_jobs WHERE kind = 'merge' AND state IN ('queued', 'running') AND ${inProject}`, r.projectId);
-      if (running.some((j) => (JSON.parse(j.request as string) as MergeAsk).number === r.merge.number)) return mergeRunning(r.merge.number);
-      for (const n of this.all(`SELECT id, data FROM console_notices WHERE kind = 'merge' AND dismissed = 0 AND ${inProject}`, r.projectId)) {
+      // Another agent asking for the same merge is told its outcome too.
+      const joined = (owner: string, ask: MergeAsk) =>
+        owner === r.agentId || ask.alsoAsked?.includes(r.agentId) ? null : JSON.stringify({ ...ask, alsoAsked: [...(ask.alsoAsked ?? []), r.agentId] });
+      for (const j of this.all(`SELECT id, agent_id, request FROM console_jobs WHERE kind = 'merge' AND state IN ('queued', 'running') AND ${inProject}`, r.projectId)) {
+        const ask = JSON.parse(j.request as string) as MergeAsk;
+        if (ask.number !== r.merge.number) continue;
+        const data = joined(j.agent_id as string, ask);
+        if (data) this.run("UPDATE console_jobs SET request = ? WHERE id = ?", data, j.id as number);
+        return mergeRunning(r.merge.number);
+      }
+      for (const n of this.all(`SELECT id, agent_id, data FROM console_notices WHERE kind = 'merge' AND dismissed = 0 AND ${inProject}`, r.projectId)) {
         const open = JSON.parse(n.data as string) as MergeAsk;
         if (open.number !== r.merge.number) continue;
-        if (open.sha === r.merge.sha) return mergeWaiting(open);
+        if (open.sha === r.merge.sha) {
+          const data = joined(n.agent_id as string, open);
+          if (data) this.run("UPDATE console_notices SET data = ? WHERE id = ?", data, n.id as number);
+          return mergeWaiting(open);
+        }
         this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", n.id as number);
       }
       const data = JSON.stringify(r.merge);
@@ -44,7 +56,8 @@ export const merges = {
       this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", noticeId);
       const agentId = n.agent_id as string;
       if (!approve) {
-        this.addMergeNews(agentId, deniedNote((JSON.parse(n.data as string) as MergeAsk).number));
+        const ask = JSON.parse(n.data as string) as MergeAsk;
+        for (const id of new Set([agentId, ...(ask.alsoAsked ?? [])])) this.addMergeNews(id, deniedNote(ask.number));
         return null;
       }
       return this.job(this.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'merge', 'queued', ?, ?)", agentId, n.data as string, this.now()))!;
@@ -96,10 +109,10 @@ export const merges = {
   failEarlierMerges(this: ConsoleStore, epoch: number) {
     this.transaction(() => {
       for (const row of this.all("SELECT id, agent_id, request FROM console_jobs WHERE kind = 'merge' AND state = 'running'")) {
-        const { number } = JSON.parse(row.request as string) as MergeAsk;
+        const { number, alsoAsked } = JSON.parse(row.request as string) as MergeAsk;
         const agentId = row.agent_id as string;
         this.run("UPDATE console_jobs SET state = 'failed', message = ?, ended_at = ? WHERE id = ?", mergeUnknown(number), this.now(), row.id as number);
-        this.addMergeNews(agentId, mergeUnknown(number));
+        for (const id of new Set([agentId, ...(alsoAsked ?? [])])) this.addMergeNews(id, mergeUnknown(number));
         if (this.agent(agentId)) this.run("INSERT INTO console_notices (agent_id, text, created_at) VALUES (?, ?, ?)", agentId, mergeUnknown(number), this.now());
       }
     }, epoch);

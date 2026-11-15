@@ -2,7 +2,7 @@ import { chmodSync, closeSync, constants, fstatSync, mkdirSync, openSync, readSy
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Clone, STORED_OBJECTS } from "./clone.ts";
-import { CONSOLE_BRANCH, consoleBranch, GitError } from "./git.ts";
+import { CONSOLE_BRANCH, consoleBranch, GitError, MergeUncertainError } from "./git.ts";
 import {
   checkGitHub,
   commentOnPullRequest,
@@ -684,7 +684,12 @@ export class Repos {
     const read = await readChecks(repo, pr.headSha, gh);
     // Names are masked whole before anything shortens them.
     const jobs = read.jobs.map((j) => ({ ...j, run: this.o.redactor.text(j.run), name: this.o.redactor.text(j.name) }));
-    const failing = checksRefusal(number, pr.headSha, jobs, read.incomplete) ?? (pr.mergeableState === "unstable" ? unstableRefusal(number) : null);
+    // A workflow with no job read (queued, or ended before it made one)
+    // counts as well: its jobs alone would read as no checks at all.
+    const runs = read.runs
+      .map((run) => ({ id: run.id, run: this.o.redactor.text(run.name), name: "workflow", status: run.status, conclusion: run.conclusion }))
+      .filter((run) => !jobs.some((j) => j.run === run.run));
+    const failing = checksRefusal(number, pr.headSha, [...jobs, ...runs], read.incomplete) ?? (pr.mergeableState === "unstable" ? unstableRefusal(number) : null);
     if (failing) throw new GitError(failing);
     return { pr, author, jobs };
   }
@@ -732,7 +737,16 @@ export class Repos {
     const gh = this.github(this.token(project.id));
     const { author } = await this.mergeable(project, ask.number, gh, ask.sha);
     if (author.id !== ask.authorId) throw new GitError(notConsole(ask.number));
-    return (await mergePullRequest(project.repo!, ask.number, { sha: ask.sha, title: mergeCommitTitle(ask.title, ask.number) }, gh)).sha;
+    try {
+      return (await mergePullRequest(project.repo!, ask.number, { sha: ask.sha, title: mergeCommitTitle(ask.title, ask.number) }, gh)).sha;
+    } catch (error) {
+      // GitHub may have merged it even though its answer did not arrive:
+      // the pull request as it is now says which.
+      const now = await readPullState(project.repo!, ask.number, gh).catch(() => undefined);
+      if (now?.merged && now.headSha === ask.sha && now.mergeCommit) return now.mergeCommit;
+      if (now === undefined) throw new MergeUncertainError(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 
   /** Push branch: the agent's `console/` branch, from a bundle in its

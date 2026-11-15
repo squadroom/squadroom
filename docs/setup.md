@@ -520,7 +520,8 @@ Things to know while using it:
   you were shown. If the branch moved or a check changed in the meantime,
   nothing is merged, and you and the agent are told why. The branch is not
   deleted. The agent's window gets a line saying it was merged, the agent
-  is told at the start of its next turn, and the project's other editing
+  (and any other agent that asked for the same merge) is told at the start
+  of its next turn, and the project's other editing
   agents hear that the base branch has new commits. After a merge, an
   agent should start its next work with `team_pull` of the base branch.
 - **A window's history.** When you open a project, each window loads only

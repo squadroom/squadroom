@@ -347,7 +347,8 @@ agent asks, the worker reads the pull request (`readPullState`): it must be
 open, not a draft, from the `console/` branch of an editing agent of the
 same project in the project's own repository, into the base branch, with
 no conflicts, every check finished and passed (skipped counts as passed,
-and so does having no checks) and nothing in the agent's folder that is not
+and so does having no checks; a workflow that is queued and has no job yet
+counts as running) and nothing in the agent's folder that is not
 pushed. While GitHub has not yet worked out whether it can merge, it is
 asked again up to five times, and the last answer must still name the same
 agent's branch and base. A refusal goes back to the agent with what to do;
@@ -358,7 +359,12 @@ The job checks everything again and calls GitHub's merge endpoint with
 `merge_method: squash` and `sha` set to the commit the owner saw, so GitHub
 refuses if the head moved. The result is a line in the asking agent's and
 the branch's agent's windows, a note at the start of their next turn, and a
-note in Needs you when it did not go through. The base branch's new commit
+note in Needs you when it did not go through. Another agent that asks for
+the same commit while the request waits is added to it and told the
+outcome too. If GitHub's answer to the merge call is lost, the worker reads
+the pull request again: merged means merged, and if it cannot be read the
+agents and the owner are told the outcome is not known, never that nothing
+was merged. The base branch's new commit
 is recorded at once, so other editing agents hear that it moved. A merge
 job a restart finds running fails with a note to look on GitHub, since it
 may or may not have merged. No branch is deleted.

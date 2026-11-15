@@ -410,6 +410,7 @@ export async function readPullState(repo: string, number: number, gh: GitHubApi)
     headSha: head.sha,
     headRepo: typeof head.repo?.full_name === "string" ? head.repo.full_name : null,
     baseRef: base.ref,
+    mergeCommit: p.merged === true && typeof p.merge_commit_sha === "string" ? p.merge_commit_sha : null,
   };
 }
 
@@ -484,7 +485,7 @@ export async function readChecks(
   repo: string,
   sha: string,
   gh: GitHubApi,
-): Promise<{ jobs: CheckJob[]; incomplete: boolean }> {
+): Promise<{ jobs: CheckJob[]; incomplete: boolean; runs: CheckRun[] }> {
   const read = await readRuns(repo, sha, gh);
   let incomplete = read.incomplete;
   const jobs: CheckJob[] = [];
@@ -512,7 +513,7 @@ export async function readChecks(
       }
     }
   }
-  return { jobs, incomplete };
+  return { jobs, incomplete, runs: read.runs };
 }
 
 /** The end of one job's log: at most `maxBytes` of it are ever held (the

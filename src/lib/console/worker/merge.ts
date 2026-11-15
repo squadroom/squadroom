@@ -1,4 +1,5 @@
-import { mergeAskText, mergedLine, mergedNote, mergeFailure, notMergedLine, notMergedNote, notMergedNotice } from "../merge.ts";
+import { MergeUncertainError } from "../git.ts";
+import { mergeAskText, mergedLine, mergedNote, mergeFailure, mergeUncertain, notMergedLine, notMergedNote, notMergedNotice } from "../merge.ts";
 import { errorMessage as message } from "../session.ts";
 import { TeamError } from "../team.ts";
 import type { ConsoleJob } from "../types.ts";
@@ -51,7 +52,9 @@ export const merging = {
     const ask = job.merge!;
     const asker = this.store.agent(job.agentId);
     const project = asker ? this.store.project(asker.projectId) : undefined;
-    const own = ask.authorId === job.agentId;
+    // Everyone who asked for it, and the agent whose branch it is.
+    const askers = [...new Set([job.agentId, ...(ask.alsoAsked ?? [])])];
+    const windows = [...new Set([...askers, ask.authorId])];
     return (async () => {
       if (!asker || !project) throw new Error("The agent that asked for this merge no longer exists.");
       return this.repos.merge(ask, project);
@@ -62,11 +65,11 @@ export const merging = {
             merged: commit,
             message: mergedLine(ask, commit),
             url: ask.url,
-            windows: [job.agentId, ask.authorId],
-            news: [
-              { agentId: job.agentId, text: mergedNote(ask, commit, own, null) },
-              ...(own ? [] : [{ agentId: ask.authorId, text: mergedNote(ask, commit, true, asker?.name ?? "a teammate") }]),
-            ],
+            windows,
+            news: windows.map((id) => ({
+              agentId: id,
+              text: mergedNote(ask, commit, id === ask.authorId, id === ask.authorId && !askers.includes(id) ? (asker?.name ?? "a teammate") : null),
+            })),
             notice: null,
           }),
         ),
@@ -74,13 +77,15 @@ export const merging = {
       .catch((error: unknown) =>
         this.safe(() => {
           const reason = mergeFailure(this.redactor.shorten(this.redactor.text(message(error)), MERGE_FAILURE_CHARS));
+          // Not known either way: nobody is told that nothing was merged.
+          const uncertain = error instanceof MergeUncertainError ? mergeUncertain(ask.number, reason) : null;
           this.store.finishMerge(epoch, job.id, {
             merged: null,
-            message: notMergedLine(ask.number, reason),
+            message: uncertain ?? notMergedLine(ask.number, reason),
             url: ask.url,
-            windows: [job.agentId, ask.authorId],
-            news: [{ agentId: job.agentId, text: notMergedNote(ask.number, reason) }],
-            notice: notMergedNotice(ask.number, reason),
+            windows,
+            news: askers.map((agentId) => ({ agentId, text: uncertain ?? notMergedNote(ask.number, reason) })),
+            notice: uncertain ?? notMergedNotice(ask.number, reason),
           });
         }),
       );

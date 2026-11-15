@@ -46,15 +46,27 @@ const RULESET = {
   current_user_can_bypass: "never",
 };
 
-type Pull = { number: number; head: string; base: string; title: string; body: string; state: string; merged: boolean; draft: boolean; mergeable: boolean | null; mergeable_state: string; repo: string; sha?: string };
+type Pull = { number: number; head: string; base: string; title: string; body: string; state: string; merged: boolean; draft: boolean; mergeable: boolean | null; mergeable_state: string; repo: string; sha?: string; mergeCommit?: string };
 /** Fake GitHub: pull requests, their checks, and a merge that squashes. */
 function github(bare: string, work: string) {
   const pulls: Pull[] = [];
   const jobs: { id: number; sha: string; name: string; status: string; conclusion: string | null }[] = [];
   const merges: { number: number; body: Record<string, unknown> }[] = [];
   /** `computing`: how many reads of a pull request still answer that GitHub has not worked out whether it can be merged.
-   * `retarget`: the base branch the pull request is moved to right after its next read. */
-  const state = { refuse: null as { status: number; message: string } | null, runSha: "", comments: [] as { author: string; body: string }[], threads: 0, computing: 0, retarget: null as string | null };
+   * `retarget`: the base branch the pull request is moved to right after its next read.
+   * `queuedRun`: a commit with a workflow that is queued and has no jobs yet.
+   * `dropMerge`: the merge's answer never arrives, after merging ("merged") or with the pull request unreadable from then on ("unknown"). */
+  const state = {
+    refuse: null as { status: number; message: string } | null,
+    runSha: "",
+    comments: [] as { author: string; body: string }[],
+    threads: 0,
+    computing: 0,
+    retarget: null as string | null,
+    queuedRun: null as string | null,
+    dropMerge: null as "merged" | "unknown" | null,
+    unreadable: false,
+  };
   const headOf = (p: Pull) => p.sha ?? git(bare, "rev-parse", `refs/heads/${p.head}`);
   const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input));
@@ -85,12 +97,14 @@ function github(bare: string, work: string) {
         return json({});
       }
       if (!one[2]) {
+        if (state.unreadable) return json({ message: "Server Error" }, 500);
         const read = {
           number: pr.number,
           html_url: `https://github.com/owner/repo/pull/${pr.number}`,
           title: pr.title,
           state: pr.state,
           merged: pr.merged,
+          merge_commit_sha: pr.mergeCommit ?? null,
           draft: pr.draft,
           ...(state.computing-- > 0 ? { mergeable: null, mergeable_state: "unknown" } : { mergeable: pr.mergeable, mergeable_state: pr.mergeable_state }),
           head: { ref: pr.head, sha: headOf(pr), repo: { full_name: pr.repo } },
@@ -103,6 +117,10 @@ function github(bare: string, work: string) {
       const body = JSON.parse(String(init.body)) as { merge_method: string; sha: string; commit_title: string };
       merges.push({ number: pr.number, body });
       if (state.refuse) return json({ message: state.refuse.message }, state.refuse.status);
+      if (state.dropMerge === "unknown") {
+        state.unreadable = true;
+        throw new TypeError("fetch failed");
+      }
       if (body.sha !== headOf(pr)) return json({ message: "Head branch was modified. Review and try the merge again." }, 409);
       try {
         git(work, "fetch", "--quiet", bare, "main");
@@ -118,13 +136,23 @@ function github(bare: string, work: string) {
       }
       pr.state = "closed";
       pr.merged = true;
+      pr.mergeCommit = git(work, "rev-parse", "HEAD");
+      if (state.dropMerge === "merged") throw new TypeError("fetch failed");
       return json({ sha: git(work, "rev-parse", "HEAD"), merged: true, message: "Pull Request successfully merged" });
     }
     if (path.startsWith("/repos/owner/repo/actions/")) {
       if (path.endsWith("/actions/runs")) {
         state.runSha = url.searchParams.get("head_sha")!;
-        return json({ workflow_runs: jobs.some((j) => j.sha === state.runSha) ? [{ id: 9, name: "CI" }] : [] });
+        const ran = jobs.filter((j) => j.sha === state.runSha);
+        const done = ran.every((j) => j.status === "completed");
+        return json({
+          workflow_runs: [
+            ...(ran.length ? [{ id: 9, name: "CI", status: done ? "completed" : "in_progress", conclusion: !done ? null : ran.some((j) => j.conclusion === "failure") ? "failure" : "success" }] : []),
+            ...(state.queuedRun === state.runSha ? [{ id: 10, name: "Deploy", status: "queued", conclusion: null }] : []),
+          ],
+        });
       }
+      if (path.endsWith("/actions/runs/10/jobs")) return json({ jobs: [] });
       if (path.endsWith("/actions/runs/9/jobs")) return json({ jobs: jobs.filter((j) => j.sha === state.runSha) });
     }
     if (/^\/repos\/owner\/repo\/issues\/\d+\/comments$/.test(path)) return json({ id: 1 }, 201);
@@ -159,7 +187,7 @@ function github(bare: string, work: string) {
   return { fetcher, pulls, jobs, merges, state, headOf };
 }
 
-const PULL: PullState = { number: 7, url: "u", title: "T", state: "open", merged: false, draft: false, mergeable: true, mergeableState: "clean", headRef: "console/a-b", headSha: "a".repeat(40), headRepo: "owner/repo", baseRef: "main" };
+const PULL: PullState = { number: 7, url: "u", title: "T", state: "open", merged: false, draft: false, mergeable: true, mergeableState: "clean", headRef: "console/a-b", headSha: "a".repeat(40), headRepo: "owner/repo", baseRef: "main", mergeCommit: null };
 const job = (name: string, status: string, conclusion: string | null) => ({ id: 1, run: "CI", name, status, conclusion });
 
 test("what blocks a merge, in plain words: the pull request's state, then its checks", () => {
@@ -432,12 +460,41 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   gh.pulls.find((p) => p.number === theirs.number)!.base = "main";
   await echo(lead.id, "noted");
 
+  // A workflow that is queued and has made no job yet is a check still
+  // running: refused before the owner is asked.
+  gh.state.queuedRun = now;
+  assert.match(await merge(lead.id, { pull_request: theirs.number }), new RegExp(`^team_merge: error: Pull request #${theirs.number}'s checks have not all passed for ${now.slice(0, 8)} \\(still running: Deploy / workflow\\)`));
+  gh.state.queuedRun = null;
+  assert.equal(items().length, 0);
+
+  // GitHub's answer to the merge never arrives and the pull request cannot
+  // be read again: nobody is told that nothing was merged.
+  assert.match(await merge(lead.id, { pull_request: theirs.number }), /^team_merge: Asked the owner/);
+  gh.state.dropMerge = "unknown";
+  const lost = await approve();
+  assert.deepEqual([lost.job.state, lost.asked], ["failed", true]);
+  assert.match(lost.job.message!, new RegExp(`^It is not known whether GitHub merged pull request #${theirs.number}`));
+  assert.doesNotMatch(await echo(lead.id, "noted"), /Nothing was merged/);
+  [gh.state.dropMerge, gh.state.unreadable] = [null, false];
+
+  // The branch's agent asks for the same commit the Lead already asked for:
+  // one item, and both are told the owner's answer.
+  assert.match(await merge(lead.id, { pull_request: theirs.number }), /^team_merge: Asked the owner/);
+  assert.match(await merge(builder.id), /^team_merge: Pull request #\d+ at commit [0-9a-f]{8} is already waiting for the owner/);
+  assert.equal(items().length, 1);
+  runCommand(h.store, { action: "decideMerge", noticeId: items()[0].id, decision: "deny" });
+  for (const id of [lead.id, builder.id]) assert.match(await echo(id, "so"), new RegExp(`^echo: The owner did not approve merging pull request #${theirs.number}`));
+
   // Approved and merged: the branch's own agent is told too, and by whom.
   // GitHub has not worked out yet whether it can be merged (its base just
   // moved): the worker asks again instead of failing an approved merge.
+  // GitHub's answer to the merge itself is lost, but the pull request read
+  // again shows it merged, so it counts as merged.
   assert.match(await merge(lead.id, { pull_request: theirs.number }), /^team_merge: Asked the owner/);
   gh.state.computing = 1;
+  gh.state.dropMerge = "merged";
   const done = await approve();
+  gh.state.dropMerge = null;
   assert.equal(done.job.state, "done", done.job.message ?? "");
   assert.deepEqual(gh.merges.at(-1), { number: theirs.number, body: { merge_method: "squash", sha: now, commit_title: `Add the feature (#${theirs.number})` } });
   const top = git(bare, "rev-parse", "refs/heads/main");

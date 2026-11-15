@@ -12,6 +12,9 @@ export class GitError extends Error {
     this.name = "GitError";
   }
 }
+/** A merge call that failed without saying whether GitHub merged, when the
+ * pull request could not be read again to find out. */
+export class MergeUncertainError extends GitError {}
 
 /** `owner/name` from a GitHub URL or slug; null when it is not one. */
 export function parseRepo(input: unknown): string | null {
