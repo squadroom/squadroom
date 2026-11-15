@@ -433,6 +433,8 @@ const NEEDS_ACTIONS_READ =
 /** One job of a GitHub Actions run for a commit. */
 export interface CheckJob {
   id: number;
+  /** The GitHub Actions run (workflow) it belongs to. */
+  runId: number;
   run: string;
   name: string;
   /** queued, in_progress, completed, … as GitHub says it. */
@@ -499,6 +501,7 @@ export async function readChecks(
         if (typeof j.id !== "number") continue;
         jobs.push({
           id: j.id,
+          runId: run.id,
           run: run.name,
           name: typeof j.name === "string" ? j.name : "",
           status: typeof j.status === "string" ? j.status : "",

@@ -687,8 +687,8 @@ export class Repos {
     // A workflow with no job read (queued, or ended before it made one)
     // counts as well: its jobs alone would read as no checks at all.
     const runs = read.runs
-      .map((run) => ({ id: run.id, run: this.o.redactor.text(run.name), name: "workflow", status: run.status, conclusion: run.conclusion }))
-      .filter((run) => !jobs.some((j) => j.run === run.run));
+      .filter((run) => !read.jobs.some((j) => j.runId === run.id))
+      .map((run) => ({ id: run.id, run: this.o.redactor.text(run.name), name: "workflow", status: run.status, conclusion: run.conclusion }));
     const failing = checksRefusal(number, pr.headSha, [...jobs, ...runs], read.incomplete) ?? (pr.mergeableState === "unstable" ? unstableRefusal(number) : null);
     if (failing) throw new GitError(failing);
     return { pr, author, jobs };

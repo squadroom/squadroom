@@ -10,6 +10,7 @@ import { needNotices } from "../src/lib/console/notify.ts";
 import { teamToolsFor } from "../src/lib/console/team-tools.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
 import { harness } from "./helpers/console-harness.ts";
+import { ConsoleStore } from "../src/lib/console/store.ts";
 
 // team_merge: an agent asks for its pull request to be merged (team_merge), the owner approves it in Needs you, and the worker
 // asks GitHub to squash-merge it at the commit the owner saw. "GitHub" is a
@@ -148,7 +149,8 @@ function github(bare: string, work: string) {
         return json({
           workflow_runs: [
             ...(ran.length ? [{ id: 9, name: "CI", status: done ? "completed" : "in_progress", conclusion: !done ? null : ran.some((j) => j.conclusion === "failure") ? "failure" : "success" }] : []),
-            ...(state.queuedRun === state.runSha ? [{ id: 10, name: "Deploy", status: "queued", conclusion: null }] : []),
+            // Queued under the same name as the run that already passed.
+            ...(state.queuedRun === state.runSha ? [{ id: 10, name: "CI", status: "queued", conclusion: null }] : []),
           ],
         });
       }
@@ -463,7 +465,7 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   // A workflow that is queued and has made no job yet is a check still
   // running: refused before the owner is asked.
   gh.state.queuedRun = now;
-  assert.match(await merge(lead.id, { pull_request: theirs.number }), new RegExp(`^team_merge: error: Pull request #${theirs.number}'s checks have not all passed for ${now.slice(0, 8)} \\(still running: Deploy / workflow\\)`));
+  assert.match(await merge(lead.id, { pull_request: theirs.number }), new RegExp(`^team_merge: error: Pull request #${theirs.number}'s checks have not all passed for ${now.slice(0, 8)} \\(still running: CI / workflow\\)`));
   gh.state.queuedRun = null;
   assert.equal(items().length, 0);
 
@@ -517,4 +519,18 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   const answered = h.store.events(other.id, 0, 10_000).filter((e) => e.agentId === stranger.id && e.kind === "text").map((e) => (e.body as { text: string }).text);
   assert.equal(answered.at(-1), `team_merge: error: Pull request #${second.number} is not one the Console opened for an agent of this project, so it cannot be merged from here.`);
   assert.equal(items().length, 0);
+});
+
+test("an agent that joins a merge while it runs is told its outcome", (t) => {
+  const store = new ConsoleStore(":memory:");
+  t.after(() => store.close());
+  const project = store.createProject("P", "folder");
+  const tab = store.tabs(project.id)[0];
+  const make = (name: string) => store.createAgent({ tabId: tab.id, name, role: "", kind: "claude-code", model: "haiku", effort: null, permission: "edit" });
+  const [lead, builder] = [make("Lead"), make("Builder")];
+  const epoch = store.takeLease("w", Date.now())!;
+  const ask = { number: 7, url: "u", title: "T", branch: "console/x", base: "main", sha: "a".repeat(40), authorId: lead.id, authorName: "Lead", checks: "", review: null, alsoAsked: [builder.id] };
+  const id = store.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'merge', 'running', ?, 0)", lead.id, JSON.stringify(ask));
+  store.finishMerge(epoch, id, { merged: null, message: "not merged", url: null, windows: [lead.id], news: [{ agentId: lead.id, text: "Not merged." }], notice: null });
+  assert.deepEqual(store.mergeNews(builder.id), ["Not merged."]);
 });

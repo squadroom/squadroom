@@ -93,7 +93,12 @@ export const merges = {
   ) {
     this.transaction(() => {
       this.run("UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", r.merged ? "done" : "failed", r.message, r.url, r.merged, this.now(), id);
-      const asker = this.job(id)?.agentId;
+      const job = this.job(id);
+      const asker = job?.agentId;
+      // Agents that joined while the merge ran are told what the asker is.
+      const askerNews = r.news.find((n) => n.agentId === asker);
+      const joined = (job?.merge?.alsoAsked ?? []).filter((a) => !r.windows.includes(a));
+      if (askerNews) r = { ...r, windows: [...r.windows, ...joined], news: [...r.news, ...joined.map((agentId) => ({ agentId, text: askerNews.text }))] };
       for (const agentId of new Set(r.windows)) {
         const a = this.agent(agentId);
         if (a) this.insertEvent(0, a, "push", { text: r.message, url: r.url }, this.now());
