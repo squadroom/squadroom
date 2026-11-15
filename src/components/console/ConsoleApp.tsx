@@ -7,7 +7,7 @@ import { gridShape } from "@/lib/console/transcript";
 import { addMenu, projectMenu, tabMenu, type MenuContext } from "@/lib/console/menus";
 import { focusTarget, readCollapsed, toggle, writeCollapsed, type TreeProject } from "@/lib/console/tree";
 import type { ConsoleProject } from "@/lib/console/types";
-import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, type Appearance, type SettingsSection } from "@/lib/console/ui";
+import { keepIfSame, needCount, pauseBanner, readAppearance, settingsFromHash, settingsHash, sidebarShortcut, type Appearance, type SettingsSection } from "@/lib/console/ui";
 import { inOrder } from "@/lib/console/polled";
 import { pickProject, pickTab } from "@/lib/console/view-state";
 import type { ProjectView, WorkerView, needsView, projectsView, templatesView, treeView } from "@/lib/console/views";
@@ -141,6 +141,18 @@ export default function ConsoleApp() {
     setSidebarHidden(hidden);
     remember(SIDEBAR_KEY, hidden ? "hidden" : null);
   };
+  // Its shortcut, on a wide screen: the phone has the drawer.
+  useEffect(() => {
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    const onKey = (e: KeyboardEvent) => {
+      if (!sidebarShortcut(e, mac) || window.matchMedia("(max-width: 760px)").matches) return;
+      e.preventDefault();
+      setSidebarHidden(!sidebarHidden);
+      remember(SIDEBAR_KEY, sidebarHidden ? null : "hidden");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarHidden]);
 
   // Polls and the reload after a command can overlap: an answer older than
   // one already applied is dropped, so Needs you (and its notifications)
@@ -398,14 +410,7 @@ export default function ConsoleApp() {
   return (
     <div className={styles.console} data-appearance={appearance === "system" ? undefined : appearance}>
       <aside className={styles.sidebar} hidden={sidebarHidden}>
-        <div className={styles.brand}>
-          {logo}
-          <span className={styles.brandEnd}>
-            <button className={styles.iconButton} onClick={() => foldSidebar(true)} aria-label="Hide the sidebar" title="Hide the sidebar">
-              <Icon name="sidebar" />
-            </button>
-          </span>
-        </div>
+        <div className={styles.brand}>{logo}</div>
         {navigation}
       </aside>
       {drawer && (
@@ -436,7 +441,8 @@ export default function ConsoleApp() {
             if (name && view) void runAndList({ action: "rename", target: "project", id: view.project.id, name });
           }}
           onDrawer={() => setDrawer(true)}
-          onShowSidebar={sidebarHidden ? () => foldSidebar(false) : null}
+          sidebarHidden={sidebarHidden}
+          onSidebar={() => foldSidebar(!sidebarHidden)}
           needs={needCount(needs)}
           needsOpen={needsOpen}
           onNeeds={() => setNeedsOpen((open) => !open)}

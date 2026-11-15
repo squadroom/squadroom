@@ -112,7 +112,10 @@ export default function AgentWindow({
   // handlers stay stable while the agent and its folder do, so the memoized
   // text blocks skip re-rendering their Markdown on every poll.
   const openFile = useCallback((path: string) => onOpenFile(agent.id, path), [onOpenFile, agent.id]);
-  const onLink = useMemo(() => fileLinks((href) => resolveAgentPath(agent.folder, href), openFile), [agent.folder, openFile]);
+  const resolve = useCallback((href: string) => resolveAgentPath(agent.folder, href), [agent.folder]);
+  const onLink = useMemo(() => fileLinks(resolve, openFile), [resolve, openFile]);
+  // Its own image files show in place in its replies.
+  const images = useMemo(() => ({ agentId: agent.id, resolve }), [agent.id, resolve]);
   // Queued-message controls: the one whose Delete waits for a
   // second click (the one being edited is the composer's).
   const [deleting, setDeleting] = useState<number | null>(null);
@@ -334,7 +337,7 @@ export default function AgentWindow({
                 <StepsView key={r.key} row={r} onLink={onLink} onOpenFile={openFile} />
               ) : (
                 // The last text of a running turn is still streaming.
-                <BlockView key={r.key} block={r} live={working && i === rows.length - 1} onLink={onLink} onOpenFile={openFile} />
+                <BlockView key={r.key} block={r} live={working && i === rows.length - 1} onLink={onLink} images={images} onOpenFile={openFile} />
               ),
             )}
           </div>

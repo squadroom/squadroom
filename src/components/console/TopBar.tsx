@@ -17,7 +17,8 @@ export default function TopBar({
   onProjectMenuOpened,
   onProjectRenamed,
   onDrawer,
-  onShowSidebar,
+  sidebarHidden,
+  onSidebar,
   needs,
   needsOpen,
   onNeeds,
@@ -33,8 +34,10 @@ export default function TopBar({
   onProjectMenuOpened: () => void;
   onProjectRenamed: (name: string | null) => void;
   onDrawer: () => void;
-  /** Brings back the sidebar folded away on a wide screen. */
-  onShowSidebar: (() => void) | null;
+  /** The wide screen's sidebar, folded away or not, and its one toggle;
+   * also Cmd+B, or Ctrl+B off a Mac. */
+  sidebarHidden: boolean;
+  onSidebar: () => void;
   needs: number;
   needsOpen: boolean;
   onNeeds: () => void;
@@ -63,11 +66,15 @@ export default function TopBar({
     .join("\n");
   return (
     <header className={styles.topbar}>
-      {onShowSidebar && (
-        <button className={`${styles.iconButton} ${styles.wideScreenOnly}`} onClick={onShowSidebar} aria-label="Show the sidebar" title="Show the sidebar">
-          <Icon name="sidebar" />
-        </button>
-      )}
+      <button
+        className={`${styles.iconButton} ${styles.wideScreenOnly}`}
+        onClick={onSidebar}
+        aria-pressed={!sidebarHidden}
+        aria-label="Sidebar"
+        title={sidebarHidden ? "Show the sidebar" : "Hide the sidebar"}
+      >
+        <Icon name="sidebar" />
+      </button>
       <button className={`${styles.iconButton} ${styles.phoneOnly}`} onClick={onDrawer} aria-label="Projects and agents" title="Projects and agents">
         <Icon name="menu" />
       </button>

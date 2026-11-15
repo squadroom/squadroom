@@ -347,6 +347,41 @@ What Squadroom protects against, and the limits it accepts, are in
   growing one is re-rendered without highlighting, and the whole reply is
   rendered once when the turn ends. On a 53 KB reply this took the render
   work from about 9.5 s to 0.65 s, and the slowest update from 99 ms to 8 ms.
+- **Maths, diagrams and images.** The Console's Markdown
+  (`RichMarkdown.tsx`) adds three things to the shared renderer. Maths
+  (`$…$`, `$$…$$`) is drawn by KaTeX through `remark-math` and
+  `rehype-katex`, with `trust` off; its styles and fonts are part of the
+  build. Before parsing, `proseDollars` (`src/lib/console/rich.ts`) puts a
+  backslash before every `$` that does not open or close a formula, so
+  "$5 and $10" stays text; code, autolinks and bare web addresses are left
+  alone. A `mermaid` code block is drawn as a diagram (`Diagram.tsx`):
+  Mermaid is loaded when a diagram first comes on screen, runs with
+  `securityLevel: "strict"`, and draws again when light or dark changes.
+  While a reply streams, a diagram is drawn once its piece is finished. A
+  Markdown image or link to an image file in the agent's own folder shows
+  in place (`AgentImage.tsx`): the worker reads it as it reads a file for
+  the file panel, the page shows it as a `data:` image, and it is held
+  only while it is on screen.
+- **The file panel's previews.** An SVG file is shown as an `<img>`, so
+  nothing in it runs and it loads no other file. An HTML file opens as its
+  source. **Preview** builds one document from it
+  (`previewDocument` in `src/lib/console/preview.ts`): the style sheets,
+  scripts, images, fonts and media it names by a relative path in the
+  same agent's folder are read like any file in the panel and put into the
+  page (at most 60 files and 8 MB together), and links that ask the
+  browser to look up or connect to an address ahead of time are removed.
+  The page then reads the result with the browser's own parser
+  (`cleanDocument` in `src/components/console/preview.client.ts`) and
+  removes from the parsed tree what a text scan could miss: hint links,
+  `<meta http-equiv>`, `<base>`, embedded frames and objects, `ping` and
+  form `action` attributes, where a link to another site goes, and, with
+  scripts off, every script, `on…` attribute and `javascript:` address. A
+  page this check cannot settle is not shown. The document goes into a
+  `srcdoc` frame with an empty `sandbox` and a policy with
+  `script-src 'none'`; **Run scripts** shows it again with
+  `sandbox="allow-scripts"` and inline scripts allowed, and is off again
+  for every file opened. What was left out is listed under the preview. A
+  module script's `import` of another file is not loaded.
 - **Changes loads patches when opened.** The Changes dialog polls every 3
   seconds for the commit list and the branch's file summary alone; a
   commit's patch is fetched once, when you open it, and the branch's whole
@@ -366,7 +401,9 @@ What Squadroom protects against, and the limits it accepts, are in
   dropped (`src/lib/console/polled.ts`).
 - **Keyboard.** Dialogs, the fresh-code dialog and the phone's drawer keep
   Tab inside them, close on Escape and give focus back on close
-  (`useDialogFocus`); the file panel takes focus and gives it back. On Settings, Escape in a text field only
+  (`useDialogFocus`); the file panel takes focus and gives it back.
+  **Cmd+B** (Ctrl+B off a Mac) hides and shows the sidebar on a wide
+  screen, as the button at the left of the top bar does. On Settings, Escape in a text field only
   leaves the field, and Escape elsewhere asks first if something was typed
   since the last button press (`src/lib/console/focus.ts`).
 

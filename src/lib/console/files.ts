@@ -39,6 +39,21 @@ export function fileKind(name: string): { kind: FileKind; language: string | nul
   return { kind: "other", language: null, mime: null };
 }
 
+/** What the file panel can show of a text file besides its source:
+ * an SVG as a picture, an HTML file in a sealed frame. */
+export function previewKind(name: string): "svg" | "html" | null {
+  const e = ext(name);
+  return e === "svg" || e === "html" ? e : null;
+}
+
+/** The image in the agent's folder a link or Markdown image points at, as
+ * `resolve` finds it; null for anything else (a web address, another kind
+ * of file, a path outside the folder). */
+export function imagePath(resolve: (href: string) => string | null, href: string): string | null {
+  const path = resolve(href);
+  return path && fileKind(path).kind === "image" ? path : null;
+}
+
 /**
  * A link or path an agent wrote, as a path relative to its folder; null
  * when it is not a file in that folder (a web link, a path elsewhere, `..`).

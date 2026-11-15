@@ -399,7 +399,37 @@ Things to know while using it:
   they are now, committed or not, Markdown documents first, with a filter
   by name. A file opens in the panel beside the conversation, and **Files**
   in the panel goes back to the list. Ignored files are not listed, and at
-  most 2,000 are.
+  most 2,000 are. Markdown is drawn, with maths and `mermaid` diagrams
+  (**Source** shows the text), code is highlighted, images show, and
+  anything else downloads.
+  - **An SVG file** shows as a picture, with **Source** for its text. As
+    a picture, nothing in it runs and it loads no other file.
+  - **An HTML file** opens as its source. **Preview** shows the page in a
+    sandboxed frame with its scripts off: its styles, images and fonts
+    show, and nothing in it runs. **Run scripts**, there while the
+    preview is open, shows it again with its scripts running; the button
+    then reads **Scripts on**, and a click turns them off. Scripts are
+    off again for every file you open. Style sheets, scripts, images,
+    fonts and media the page names by a relative path in the same agent's
+    folder are included; nothing is loaded from the internet. A line
+    under the preview says whether scripts are on and lists what was left
+    out: a missing file, one over the size limits (60 files and 8 MB
+    together), an embedded frame, a link that asks the browser to look up
+    or connect to another address, or a module script's imports of other
+    files. Before you click Run scripts on a page you don't trust, read
+    [the threat model](threat-model.md).
+- **Maths, diagrams and images in a reply.** `$…$` and `$$…$$` are drawn
+  as maths; a dollar amount ("$5 and $10") stays text, and a formula that
+  does not parse shows its source. A code block with the language
+  `mermaid` is drawn as a diagram once its paragraph has finished
+  streaming; one that does not parse stays a code block. A Markdown image
+  or a link to an image file (png, jpg, jpeg, gif, webp) in the agent's
+  own folder shows in place; click it to open it in the file panel. Any
+  other image address is shown as text. Images in a Markdown file opened
+  in the file panel are not shown in place.
+- **The sidebar.** The button at the left of the top bar hides and shows
+  it on a wide screen, as does **Cmd+B** (**Ctrl+B** off a Mac). This
+  device remembers which. The phone has the ☰ drawer instead.
 - **The model chip** (a window's header) opens a list of the agent's
   models and thinking levels. A choice is saved at once and closes the
   list; a new model starts at its default thinking level. Its AI (Claude

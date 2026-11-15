@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { reload } from "@/components/shared/FreshCode";
 import { oneAtATime } from "@/lib/console/busy";
+import type { FileView } from "@/lib/console/agent-files";
 import type { ConsoleCommand } from "@/lib/console/commands";
 import type { WorkerView } from "@/lib/console/views";
 
@@ -105,6 +106,22 @@ export async function awaitJob<T>(
     if (answer && job.settled(answer)) return answer;
   }
   return null;
+}
+
+/** A read from an agent's folder, done by the worker as the agent (the
+ * file panel, an image in the conversation): asked for, then polled until
+ * the worker answers or the request expires (15 min). A busy or stopped
+ * worker shows as waiting (`slow`), not as failed. Null when it gave up. */
+export async function readAgent(body: ConsoleCommand, job: { alive?: () => boolean; slow?: () => void } = {}): Promise<FileView | null> {
+  const { readId } = await api<{ readId: number }>(body);
+  const read = await awaitJob<{ state: string; result: unknown }>(`?fileRead=${readId}`, {
+    delay: (i) => (i === 0 ? 150 : i < 60 ? 400 : 2000),
+    limitMs: 15 * 60_000,
+    alive: job.alive,
+    slow: job.slow && { at: 60, then: job.slow },
+    settled: (read) => read.state === "done",
+  });
+  return read ? (read.result as FileView) : null;
 }
 
 /** Calls `read` on the next tick, then every `ms` (null: once), until the
