@@ -83,7 +83,9 @@ only restates one of them is not a new finding.
   ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
   e-mailed code (and are refused when mail is off), so a cookie alone
   cannot raise limits, change keys, grant permanent permissions, drop
-  Ask me first or switch an agent's Network to Auto. When the owner has set a Console-wide monthly limit, it
+  Ask me first or switch an agent's Network to Auto. Switching Ask me
+  first off also allows what that agent has waiting in Needs you for that
+  reason alone, and nothing else that waits there. When the owner has set a Console-wide monthly limit, it
   caps every tab, new ones too, and raising, removing or resetting it is
   weighty.
 - **Runaway spend.** Paid keys must have a provider-side cap, which is the

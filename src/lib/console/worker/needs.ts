@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { McpBackend, ToolResult } from "../../shared/mcp.ts";
 import { AcpDriver } from "../acp-session.ts";
-import { decide, inside, NETWORK_AUTO, networkRequest, realInside, type Decision } from "../permissions.ts";
+import { ASK_FIRST_REASON, decide, inside, NETWORK_AUTO, networkRequest, realInside, type Decision } from "../permissions.ts";
 import { truncateBytes } from "../redact.ts";
 import { errorMessage as message } from "../session.ts";
 import { claimCovers } from "../claims.ts";
@@ -98,6 +98,9 @@ export const needs = {
     // The owner's switch to Auto may have landed between the check above
     // and this request: it is allowed as the switch allows the others.
     if (autoReason()) this.safe(() => this.store.allowWaitingNetwork(this.epoch!, rt.agent.id));
+    // The same for Ask me first switched off in that moment (the store
+    // allows only what was asked for that reason alone).
+    if (policy.reason.startsWith(ASK_FIRST_REASON)) this.safe(() => this.store.allowWaitingAskFirst(this.epoch!, rt.agent.id));
     const answer = await new Promise<OwnerAnswer>((resolve) =>
       this.waits.set(id, { rt, turnId: t.id, ruleKey: decision.ruleKey ?? null, resolve }),
     );
@@ -248,7 +251,9 @@ export const needs = {
         }
         // A tab with steps: writes only to the current step's files.
         const stepped = this.store.tabSteps(rt.agent.tabId);
-        const agent = { ...rt.agent, stepFiles: currentStepFiles(stepped) };
+        // Ask me first as it is set now, not as the turn started: switched
+        // off, a running turn stops asking at once.
+        const agent = { ...rt.agent, askFirst: this.store.agent(rt.agent.id)?.askFirst ?? rt.agent.askFirst, stepFiles: currentStepFiles(stepped) };
         const answer = await this.permit(rt, tool, a.input, this.claimed(rt.agent, tool, a.input) ?? decide(tool, a.input, agent, this.options.realInside ?? realInside));
         return text(answer.allow ? { behavior: "allow", updatedInput: a.input ?? {} } : { behavior: "deny", message: answer.reason });
       },

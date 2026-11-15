@@ -42,8 +42,8 @@ When a team has an Orchestrator you give it the goal, and it reports back
 to you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one
 tray, **Needs you**, which covers every project: network requests,
-questions, pushes, notes agents leave for you (`team_report`) and paused
-tabs. The **Team** panel shows every message between a tab's agents, and
+questions, pushes, a push that failed (with the reason), notes agents
+leave for you (`team_report`) and paused tabs. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 

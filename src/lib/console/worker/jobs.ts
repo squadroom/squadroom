@@ -5,6 +5,7 @@ import { listAgentFiles, placeUpload, readAgentFile } from "../agent-files.ts";
 import { FOLDER_LISTING } from "../files.ts";
 import { runCleanup, scanCleanup, type CleanupOptions } from "../cleanup.ts";
 import { probeConnection } from "../connections.ts";
+import { PUSH_FAILURE_CHARS, pushFailedNotice } from "../push-failure.ts";
 import { loadCredentials } from "../redact.ts";
 import { errorMessage as message } from "../session.ts";
 import type { ConsoleStore, TurnRow } from "../store.ts";
@@ -52,7 +53,10 @@ export const jobs = {
       .catch((error: unknown) =>
         this.safe(() => {
           const text = this.redactor.text(message(error));
-          this.store.finishJob(epoch, job.id, "failed", text);
+          // The owner's Needs you item and the agent's next turn say why;
+          // nothing is pushed again by itself.
+          const branch = this.store.agentBase(job.agentId).branch;
+          this.store.failPush(epoch, job.id, text, pushFailedNotice(branch, this.redactor.shorten(text, PUSH_FAILURE_CHARS)));
           if (this.store.agent(job.agentId)) this.store.addAgentEvent(epoch, job.agentId, "push", { text: `Push failed: ${text}`, url: null });
         }),
       ),

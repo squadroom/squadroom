@@ -225,6 +225,24 @@ test("Ask me first on a Claude window: its next turn restarts the process with t
   assert.equal(h.said(lead.id).at(-1), "decision: deny");
   // The window shows the switch.
   assert.equal(projectView(h.store, h.project.id)!.agents.find((a) => a.id === lead.id)!.askFirst, true);
+  // Switched off while a turn waits: what it asked is allowed at once,
+  // and the same turn is not asked again.
+  const waiting = h.send(lead.id, "approve d.txt");
+  await h.until(() => needsView(h.store).requests.some((r) => r.agentId === lead.id), "asked a third time");
+  run(h, { action: "setAskFirst", agentId: lead.id, on: false });
+  assert.equal(needsView(h.store).requests.filter((r) => r.agentId === lead.id).length, 0);
+  await h.ended(waiting);
+  assert.equal(h.said(lead.id).at(-1), "decision: allow");
+  run(h, { action: "setAskFirst", agentId: lead.id, on: true });
+  // Another kind's request whose words only look like Ask me first is
+  // asked for its own reason: the switch leaves it waiting.
+  const other = h.store.createAgent({ tabId: h.tab.id, name: "Other", role: "", kind: "opencode", model: "openai/gpt-5.6-luna", effort: null, permission: "edit", askFirst: false });
+  h.store.run(
+    "INSERT INTO console_requests (turn_id, agent_id, kind, tool, summary, input, rule_key, state, decided_by, reason, created_at, decided_at) VALUES (0, ?, 'permission', 'other', 'x', '{}', NULL, 'open', NULL, 'Ask me first: search for an answer', 0, NULL)",
+    other.id,
+  );
+  run(h, { action: "setAskFirst", agentId: other.id, on: false });
+  assert.equal(needsView(h.store).requests.filter((r) => r.agentId === other.id).length, 1);
   // Closed agents cannot be switched.
   run(h, { action: "close", agentId: lead.id });
   assert.throws(() => run(h, { action: "setAskFirst", agentId: lead.id, on: false }), /closed/);
