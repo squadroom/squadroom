@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ConsoleStore } from "../src/lib/console/store.ts";
 import { runCommand } from "../src/lib/console/commands.ts";
-import { changesView } from "../src/lib/console/views.ts";
+import { changesView, projectView } from "../src/lib/console/views.ts";
 import { approvalLine } from "../src/lib/console/ui.ts";
 
 // The approve gate: the owner approves one commit of an
@@ -128,4 +128,31 @@ test("a review of one commit never counts for the next one still on its way to t
   assert.throws(() => approve(B, reviewer), /not reviewed/);
   turn(reviewer)();
   approve(B, reviewer);
+});
+
+test("the gate is in the agent's window where a step waits for it, without the branch's patch", () => {
+  const { store, epoch, author, reviewer, turn, approve } = setup();
+  const tabId = store.agent(author)!.tabId;
+  const inWindow = (id: string) => projectView(store, store.agent(id)!.projectId)!.agents.find((a) => a.id === id)!.approval;
+  store.setDiff(epoch, author, { base: "0".repeat(40), head: A, stat: "", patch: "PATCH-OF-THE-BRANCH" });
+  // Approvals decide nothing in a tab without steps: Changes keeps the gate.
+  assert.equal(inWindow(author), null);
+  store.setTabSteps(tabId, [{ name: "Draft", files: ["docs/**"] }, { name: "Build", files: ["src/**"] }]);
+  const gate = inWindow(author)!;
+  assert.deepEqual([gate.head, gate.current, gate.reviewNeeded, gate.reviewers.map((r) => r.reviewed)], [A, null, true, [false]]);
+  assert.deepEqual(gate, changesView(store, author)!.approval);
+  // Only an editing agent's, and the project's poll carries no patch.
+  assert.equal(inWindow(reviewer), null);
+  assert.ok(!JSON.stringify(projectView(store, store.agent(author)!.projectId)).includes("PATCH-OF-THE-BRANCH"));
+  // Approved after the review, it stays (Withdraw approval); a later commit shows again as cancelled.
+  store.queueRefresh(epoch, author, A);
+  store.refreshApplied(epoch, store.pendingRefreshes()[0].id, reviewer, { id: author, name: "Dev" }, A, true);
+  turn(reviewer)();
+  approve(A, reviewer);
+  assert.equal(inWindow(author)!.current!.current, true);
+  store.setDiff(epoch, author, { base: "0".repeat(40), head: B, stat: "", patch: "" });
+  assert.match(approvalLine(inWindow(author)!), /cancelled by a later commit \(bbbbbbb\)/);
+  // A branch with no commits of its own has nothing to approve.
+  store.setDiff(epoch, author, { base: B, head: B, stat: "", patch: "" });
+  assert.equal(inWindow(author), null);
 });

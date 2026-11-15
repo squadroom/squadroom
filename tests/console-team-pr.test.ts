@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
-import { CHECKS_CHARS, JOB_LOG_CHARS, checksText, cleanComment, codexState, jobLogText, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
+import { CHECKS_CHARS, JOB_LOG_CHARS, checksSummary, checksText, cleanComment, codexState, jobLogText, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
 import { readChecks, readJobLog } from "../src/lib/console/github-api.ts";
 import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 import { resendNote } from "../src/lib/console/team.ts";
+import { teamProjectText, type ProjectAgent } from "../src/lib/console/team-project.ts";
 import { needNotices } from "../src/lib/console/notify.ts";
 import { pushFailedNote, pushFailedNotice, pushHint } from "../src/lib/console/push-failure.ts";
 
@@ -51,7 +52,7 @@ function github() {
   const threads: { id: string; pr: number; resolved: boolean; path: string; line: number; comments: { author: string; body: string }[] }[] = [];
   const comments: { pr: number; author: string; body: string }[] = [];
   /** The pull request's head on "GitHub"; a resolve that fails once. */
-  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null, actions: true, user: null as { id: number; login: string } | null };
+  const state = { head: "b149db344f31750d3d7ec0c8e19df27ec48bd3bd", failResolve: false, pageSize: 1, commentPage: 2, holdReply: null as Promise<void> | null, actions: true, user: null as { id: number; login: string } | null, bare: null as string | null, branchError: null as string | null };
   /** GitHub Actions: jobs by the commit they ran for, and their logs. */
   const jobs: { id: number; sha: string; name: string; status: string; conclusion: string | null; log: string }[] = [];
   const fetcher = (async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -75,7 +76,11 @@ function github() {
     }
     if (path.startsWith("/repos/owner/repo/actions/")) {
       if (!state.actions) return json({ message: "Resource not accessible by personal access token" }, 403);
-      if (path.endsWith("/actions/runs")) return json({ workflow_runs: jobs.some((j) => j.sha === url.searchParams.get("head_sha")) ? [{ id: 9, name: "CI" }] : [] });
+      if (path.endsWith("/actions/runs")) {
+        const ran = jobs.filter((j) => j.sha === url.searchParams.get("head_sha"));
+        const done = ran.every((j) => j.status === "completed");
+        return json({ workflow_runs: ran.length ? [{ id: 9, name: "CI", status: done ? "completed" : "in_progress", conclusion: !done ? null : ran.some((j) => j.conclusion === "failure") ? "failure" : "success" }] : [] });
+      }
       if (path.endsWith("/actions/runs/9/jobs")) return json({ jobs: jobs.filter((j) => j.sha === state.head) });
       const log = /\/actions\/jobs\/(\d+)\/logs$/.exec(path);
       const job = log && jobs.find((j) => j.id === Number(log[1]));
@@ -89,6 +94,31 @@ function github() {
     if (path === "/graphql") {
       const { query, variables } = JSON.parse(String(init.body)) as { query: string; variables: Record<string, unknown> };
       const author = (c: { author: string }) => ({ login: c.author.replace(/\[bot\]$/, ""), __typename: /\[bot\]$/.test(c.author) ? "Bot" : "User" });
+      if (query.includes("pullRequests(headRefName")) {
+        // Several branches at once (team_project): each one's commit in the
+        // "GitHub" repository and its pull request.
+        const repository: Record<string, unknown> = {};
+        const errors: { message: string; path: string[] }[] = [];
+        for (const [, i, branch] of query.matchAll(/r(\d+): ref\(qualifiedName: "refs\/heads\/([^"]+)"\)/g)) {
+          if (branch === state.branchError) {
+            // A field error under this branch only, beside the others' data.
+            repository[`r${i}`] = null;
+            repository[`p${i}`] = null;
+            errors.push({ message: "Something went wrong", path: ["repository", `p${i}`] });
+            continue;
+          }
+          let oid: string | null = null;
+          try {
+            oid = git(state.bare!, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
+          } catch {
+            /* GitHub has no such branch. */
+          }
+          const pr = pulls.find((p) => p.head === branch && p.base === variables.base);
+          repository[`r${i}`] = oid ? { target: { oid } } : null;
+          repository[`p${i}`] = { nodes: pr ? [{ number: pr.number, url: `https://github.com/owner/repo/pull/${pr.number}`, state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: oid }] : [] };
+        }
+        return json({ data: { repository }, ...(errors.length ? { errors } : {}) });
+      }
       if (!query.includes("reviewThreads") && query.includes("pullRequest(number") && query.includes("comments(first: 100")) {
         // The conversation, oldest first, a page at a time.
         const pr = pulls.find((p) => p.number === variables.number);
@@ -862,4 +892,151 @@ test("a failed push is put in Needs you with the reason and told to the agent on
   assert.equal(await echo("sixth"), "echo: sixth");
   gh.state.head = git(h.store.agent(lead.id)!.folder, "rev-parse", "HEAD");
   assert.match(await echo(call("team_pr")), /^team_pr: Pull request #100 \(open\)/);
+});
+
+// team_project: a Lead should not have to ask the owner to look on GitHub
+// for another tab's branch.
+
+test("the project's state as text: one or two lines an agent, what GitHub has against the folder, and what could not be read", () => {
+  assert.equal(checksSummary([]), "checks: none started");
+  const run = (name: string, status: string, conclusion: string | null) => ({ name, status, conclusion });
+  assert.equal(
+    checksSummary([run("Lint", "completed", "success"), run("Docs", "completed", "skipped"), run("Build", "completed", "success"), run("Checks", "completed", "failure")]),
+    "checks: 3 passed, 1 failed (Checks)",
+  );
+  assert.equal(checksSummary([run("CI", "in_progress", null), run("Deploy", "completed", "cancelled")], true), "checks: 1 still running, 1 without a result (GitHub has more than were read)");
+
+  const now = 1_000_000_000;
+  const agent = (over: Partial<ProjectAgent>): ProjectAgent => ({ name: "Builder", you: false, kind: "Claude Code", access: "Code edit", status: "idle", branch: "console/a1-builder", head: "a".repeat(40), ...over });
+  const pr = { number: 7, url: "https://github.com/o/r/pull/7", state: "OPEN", draft: false, mergeable: "MERGEABLE" };
+  const text = (agents: ProjectAgent[], over: Record<string, unknown> = {}) =>
+    teamProjectText({ name: "web-app", repo: "o/r", baseBranch: "main", baseTip: "c".repeat(40), githubError: null, now, tabs: [{ name: "library-platform", yours: false, paused: false, agents }], ...over });
+  const line = (a: Partial<ProjectAgent>, over: Record<string, unknown> = {}) => text([agent(a)], over).split("\n")[4];
+  const all = text([
+    agent({ push: { state: "done", at: now - 5 * 60_000 }, github: { head: "b".repeat(40), unpushed: 3, pr, checks: "checks: 3 passed, 1 failed (Checks)" } }),
+    agent({ name: "Reviewer", access: "Code analysis", status: "needs you", branch: null, head: null }),
+  ]);
+  assert.equal(
+    all,
+    [
+      'Project "web-app": GitHub o/r, base branch main.',
+      "",
+      'Tab "library-platform"',
+      "- Builder: Claude Code, Code edit, idle; branch console/a1-builder at aaaaaaaa.",
+      "  Last push (5 min ago): pushed. GitHub has it at bbbbbbbb: 3 commits not pushed yet. Pull request #7 (open, no conflicts): https://github.com/o/r/pull/7 — checks: 3 passed, 1 failed (Checks).",
+      "- Reviewer: Claude Code, Code analysis, needs you; no branch of its own.",
+      "",
+      "main on GitHub: cccccccc, as the Console last saw it.",
+    ].join("\n"),
+  );
+  // Never pushed; a failed push with its reason; a push still waiting.
+  assert.equal(line({ push: null, github: { head: null, unpushed: null, pr: null } }), "  Never pushed. GitHub does not have this branch. No pull request.");
+  assert.equal(line({ push: { state: "failed", at: now - 3 * 3_600_000, reason: "GitHub refused." }, github: { head: null, unpushed: null, pr: null } }), "  Last push (3 h ago): failed: GitHub refused. GitHub does not have this branch. No pull request.");
+  assert.match(line({ push: { state: "queued", at: now }, github: { head: "a".repeat(40), unpushed: null, pr: null } }), /^  A push is waiting to run\. GitHub has it at aaaaaaaa, the same commit\. No pull request\.$/);
+  // A merged pull request whose branch GitHub deleted has no checks line; a
+  // draft with conflicts says both; checks that could not be read say so.
+  assert.match(line({ push: { state: "done", at: now }, github: { head: null, unpushed: null, pr: { ...pr, state: "MERGED" }, checks: null } }), /GitHub does not have this branch\. Pull request #7 \(merged\): https:\/\/github\.com\/o\/r\/pull\/7$/);
+  assert.match(line({ github: { head: "b".repeat(40), unpushed: null, pr: { ...pr, draft: true, mergeable: "CONFLICTING" }, checks: null } }), /GitHub has it at bbbbbbbb, not the folder's commit\. Pull request #7 \(open, draft, conflicts with main\): \S+ — checks: could not be read\.$/);
+  // One agent's branch not read; GitHub not read at all (the records stay).
+  assert.equal(line({ push: { state: "done", at: now }, github: null }), "  Last push (just now): pushed. Its branch on GitHub could not be read.");
+  const down = text([agent({ push: { state: "done", at: now - 3 * 86_400_000 } })], { githubError: "GitHub could not be reached." });
+  assert.match(down, /^Project "web-app": GitHub o\/r, base branch main\. GitHub could not be read now \(GitHub could not be reached\.\); what follows is what the Console has recorded\.\n/);
+  assert.equal(down.split("\n")[4], "  Last push (3 days ago): pushed.");
+  // A project without GitHub: tabs, agents and branches only.
+  assert.equal(
+    teamProjectText({ name: "Notes", repo: null, baseBranch: "main", baseTip: null, githubError: null, now, tabs: [{ name: "Main", yours: true, paused: true, agents: [agent({ you: true, status: "working" })] }, { name: "Empty", yours: false, paused: false, agents: [] }] }),
+    'Project "Notes": its files stay on this Mac (no GitHub, so no pushes or pull requests).\n\nTab "Main" (your tab) (paused)\n- Builder (you): Claude Code, Code edit, working; branch console/a1-builder at aaaaaaaa.\n\nTab "Empty"\n- no open agents',
+  );
+});
+
+test("team_project shows an agent of one tab where the other tabs' branches, pushes, pull requests and checks stand, and nothing of another project", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  gh.state.bare = bare;
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const tab = (name: string) => (runCommand(h.store, { action: "createTab", projectId: h.project.id, name }).tab as { id: string }).id;
+  const agent = (tabId: string, name: string, permission = "edit") =>
+    (runCommand(h.store, { action: "createAgent", tabId, name, kind: "claude-code", model: "haiku", permission }).agent as { id: string }).id;
+  const [library, calendar] = [tab("library-platform"), tab("calendar-rules")];
+  const lead = h.agent("Lead", "look").id;
+  const builder = agent(library, "Builder");
+  const reviewer = agent(library, "Reviewer", "look");
+  const other = agent(calendar, "Builder");
+  // Another project, which nothing here may show.
+  const elsewhere = runCommand(h.store, { action: "createProject", name: "Secret plans", source: "folder" }).project as { id: string };
+  const stranger = agent(h.store.tabs(elsewhere.id)[0].id, "Stranger");
+  await h.ready(lead, builder, reviewer, other, stranger);
+  for (const id of [builder, other]) writeFileSync(join(h.store.agent(id)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  const branch = (id: string) => h.store.agentBase(id).branch!;
+  const push = async (id: string, state: "done" | "failed") => {
+    const job = h.store.queuePush(id).id;
+    await h.until(() => h.store.job(job)!.state !== "queued" && h.store.job(job)!.state !== "running", "the push ends");
+    assert.equal(h.store.job(job)!.state, state, h.store.job(job)!.message ?? "");
+  };
+  // One Builder's push goes through and opens its pull request, whose check
+  // fails; it then commits once more. The other Builder's push is refused.
+  await h.ended(h.send(builder, "write fix.txt"));
+  await push(builder, "done");
+  const pushed = git(h.store.agent(builder)!.folder, "rev-parse", "HEAD");
+  gh.jobs.push({ id: 41, sha: pushed, name: "test", status: "completed", conclusion: "failure", log: "" });
+  gh.state.head = pushed;
+  await h.ended(h.send(builder, "write more.txt"));
+  await h.until(() => h.store.diff(builder)?.head !== pushed, "the second commit");
+  const hook = join(bare, "hooks", "pre-receive");
+  writeFileSync(hook, "#!/bin/sh\necho 'refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope' >&2\nexit 1\n");
+  chmodSync(hook, 0o755);
+  await h.ended(h.send(other, "write rules.txt"));
+  await push(other, "failed");
+  runCommand(h.store, { action: "pause", scope: "tab", id: calendar });
+
+  await h.ended(h.send(lead, call("team_project")));
+  const read = h.said(lead).at(-1)!;
+  const head = (id: string) => h.store.diff(id)!.head.slice(0, 8);
+  assert.equal(
+    read.replace(/\(\d+ min ago\)/g, "(just now)"),
+    [
+      'team_project: Project "Demo": GitHub owner/repo, base branch main.',
+      "",
+      `Tab "${h.tab.name}" (your tab)`,
+      "- Lead (you): Claude Code, Code analysis, working; no branch of its own.",
+      "",
+      'Tab "library-platform"',
+      `- Builder: Claude Code, Code edit, idle; branch ${branch(builder)} at ${head(builder)}.`,
+      `  Last push (just now): pushed. GitHub has it at ${pushed.slice(0, 8)}: 1 commit not pushed yet. Pull request #100 (open, no conflicts): https://github.com/owner/repo/pull/100 — checks: 1 failed (CI).`,
+      "- Reviewer: Claude Code, Code analysis, idle; no branch of its own.",
+      "",
+      'Tab "calendar-rules" (paused)',
+      `- Builder: Claude Code, Code edit, idle; branch ${branch(other)} at ${head(other)}.`,
+      `  Last push (just now): failed: ${WORKFLOW_HINT} GitHub does not have this branch. No pull request.`,
+      "",
+      `main on GitHub: ${git(bare, "rev-parse", "main").slice(0, 8)}, as the Console last saw it.`,
+    ].join("\n"),
+  );
+  assert.doesNotMatch(read, /Stranger|Secret plans/);
+  // Checks that cannot be read are said so; the rest is as before.
+  gh.state.actions = false;
+  await h.ended(h.send(lead, call("team_project")));
+  assert.match(h.said(lead).at(-1)!, /pull\/100 — checks: could not be read\.\n/);
+  // An error GitHub reports for one branch hides that branch only.
+  gh.state.actions = true;
+  gh.state.branchError = branch(other);
+  await h.ended(h.send(lead, call("team_project")));
+  const partial = h.said(lead).at(-1)!;
+  assert.match(partial, /pull\/100 — checks: 1 failed \(CI\)\.\n/);
+  assert.match(partial, /Its branch on GitHub could not be read\./);
+  assert.doesNotMatch(partial, /GitHub could not be read now/);
+  gh.state.branchError = null;
+  // An agent of the other project sees its own project only.
+  await h.ended(h.send(stranger, call("team_project")));
+  const theirs = h.store.events(elsewhere.id, 0, 1_000).filter((e) => e.kind === "text").map((e) => (e.body as { text: string }).text).at(-1)!;
+  assert.match(theirs, /^team_project: Project "Secret plans": its files stay on this Mac[^\n]*\n\nTab "[^"]+" \(your tab\)\n- Stranger \(you\): Claude Code, Code edit, working; branch console\/\S+ at [0-9a-f]{8}\.$/);
+  assert.doesNotMatch(theirs, /Builder|Lead|owner\/repo/);
+  // Nothing was written on GitHub by reading.
+  assert.equal(gh.pulls.length, 1);
 });

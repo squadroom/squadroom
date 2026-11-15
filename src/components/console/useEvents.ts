@@ -1,32 +1,43 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TreeProject } from "@/lib/console/tree";
 import type { ConsoleEvent } from "@/lib/console/types";
-import { appendEvent, type EventWindow } from "@/lib/console/ui";
+import { applyFrames, earlierState, newEventStream, prependEvents, streamCursor, type Earlier } from "@/lib/console/ui";
 import { followStream } from "@/lib/console/sse";
 import { reload } from "@/components/shared/FreshCode";
+import { api } from "./api";
 
-const EMPTY = new Map<string, ConsoleEvent[]>();
+/** One window's events as the page shows them, and what its top says about
+ * earlier messages. */
+export interface WindowEvents {
+  list: ConsoleEvent[];
+  earlier: Earlier;
+  /** Earlier slices put in so far: the window keeps the reader's place
+   * across each. */
+  prepends: number;
+}
+const EMPTY = new Map<string, WindowEvents>();
 
-/** A project's live events per window, resumed after the last id seen. */
+/** A project's live events per window, resumed after the last id seen.
+ * `loaded`: the stream's history has all arrived. `showEarlier` reads one
+ * window's next earlier slice. */
 export function useEvents(projectId: string | null, onStatus: () => void) {
-  const [events, setEvents] = useState<{ projectId: string | null; byAgent: Map<string, ConsoleEvent[]> }>({
+  const [events, setEvents] = useState<{ projectId: string | null; byAgent: Map<string, WindowEvents>; loaded: boolean }>({
     projectId: null,
     byAgent: new Map(),
+    loaded: false,
   });
   const statusRef = useRef(onStatus);
   useEffect(() => {
     statusRef.current = onStatus;
   }, [onStatus]);
+  const earlierRef = useRef<((agentId: string) => Promise<void>) | null>(null);
   useEffect(() => {
     if (!projectId) return;
     let stopped = false;
-    let last: number | null = null;
-    /** Where the first stream began: its history held only open windows. */
-    let startAt: number | null = null;
-    // Each window's events, bounded. Only the windows that changed get a new
-    // array, so the others' transcripts are not rebuilt.
-    const byAgent = new Map<string, EventWindow>();
-    let shown = new Map<string, ConsoleEvent[]>();
+    // Each window's events, bounded. Only the windows that
+    // changed get a new array, so the others' transcripts are not rebuilt.
+    const stream = newEventStream();
+    let shown = new Map<string, WindowEvents>();
     const touched = new Set<string>();
     let pending = false;
     const publish = () => {
@@ -36,45 +47,54 @@ export function useEvents(projectId: string | null, onStatus: () => void) {
         pending = false;
         if (stopped) return;
         const next = new Map(shown);
-        for (const id of touched) next.set(id, byAgent.get(id)!.list.slice());
+        for (const id of touched) {
+          const own = stream.byAgent.get(id);
+          if (own) next.set(id, { list: own.list.slice(), earlier: earlierState(own), prepends: own.prepends ?? 0 });
+        }
         touched.clear();
         shown = next;
-        setEvents({ projectId, byAgent: next });
+        setEvents({ projectId, byAgent: next, loaded: stream.loaded });
       }, 80);
+    };
+    earlierRef.current = async (agentId) => {
+      const before = stream.byAgent.get(agentId)?.firsts[0];
+      if (before === undefined) return;
+      const slice = (await api(undefined, `?events=${encodeURIComponent(agentId)}&before=${before}`)) as { events: ConsoleEvent[]; more: boolean };
+      // Unless the window changed underneath (a history sent again).
+      const own = stream.byAgent.get(agentId);
+      if (stopped || !own || own.firsts[0] !== before) return;
+      stream.byAgent.set(agentId, prependEvents(own, slice.events, slice.more));
+      touched.add(agentId);
+      publish();
     };
     const stop = followStream(
       () => {
-        const from = last === null && startAt === null ? null : Math.max(last ?? 0, startAt ?? 0);
+        const from = streamCursor(stream);
         return `/api/console/events?project=${encodeURIComponent(projectId)}${from !== null ? `&after=${from}` : ""}`;
       },
       (frames) => {
-        let status = false;
-        for (const frame of frames) {
-          // A fresh stream names where it starts: resuming from there
-          // never re-sends what its history left out (closed agents').
-          if (frame.start !== null) startAt = Math.max(startAt ?? 0, frame.start);
-          if (!frame.data) continue;
-          const event = JSON.parse(frame.data) as ConsoleEvent;
-          if (last !== null && event.id <= last) continue;
-          last = event.id;
-          const own = byAgent.get(event.agentId) ?? { list: [], sizes: [], bytes: 0 };
-          byAgent.set(event.agentId, own);
-          touched.add(event.agentId);
-          appendEvent(own, event);
-          if (event.kind === "status" || event.kind === "owner" || event.kind === "steer") status = true;
+        const applied = applyFrames(stream, frames);
+        if (applied.cleared) {
+          // A fresh history replaces the windows an unfinished one began.
+          shown = new Map();
+          touched.clear();
         }
+        for (const id of applied.touched) touched.add(id);
         publish();
-        if (status) statusRef.current();
+        if (applied.status) statusRef.current();
       },
       () => reload("/login"),
     );
     return () => {
       stopped = true;
+      earlierRef.current = null;
       stop();
     };
   }, [projectId]);
+  const showEarlier = useCallback((agentId: string) => earlierRef.current?.(agentId) ?? Promise.resolve(), []);
   // A different project's stream shows nothing until its own events arrive.
-  return events.projectId === projectId ? events.byAgent : EMPTY;
+  const own = events.projectId === projectId;
+  return { byAgent: own ? events.byAgent : EMPTY, loaded: own && events.loaded, showEarlier };
 }
 
 /** The navigation tree, kept current by its own live stream. */

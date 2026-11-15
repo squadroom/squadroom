@@ -14,6 +14,7 @@ import { projectView } from "../src/lib/console/views.ts";
 import { transcript, gridShape } from "../src/lib/console/transcript.ts";
 import { agentModel, reportsExpectedModel } from "../src/lib/console/agents.ts";
 import type { EventBody, EventKind } from "../src/lib/console/types.ts";
+import { HISTORY_BYTES, HISTORY_EVENTS } from "../src/lib/console/ui.ts";
 
 // -2: the Console's store, redaction, output bounds, permission
 // policy and owner commands. Pure: no agent, no network.
@@ -754,4 +755,42 @@ test("a tab held for untrusted usage starts no turn, even while its pause is lif
   assert.equal(store.turn(turn.id)!.status, "queued");
   store.run("UPDATE console_tabs SET usage_hold = NULL WHERE id = ?", tab.id);
   assert.equal(store.startTurn(epoch, turn.id), true);
+});
+
+// A fresh view sends a short recent part of each window; earlier
+// messages are read a bounded slice at a time.
+test("a window's first history is short, and earlier slices page back to the start", (t) => {
+  const store = new ConsoleStore(":memory:");
+  t.after(() => store.close());
+  const project = store.createProject("P", "folder");
+  const tab = store.tabs(project.id)[0];
+  const make = (name: string) => store.createAgent({ tabId: tab.id, name, role: "", kind: "opencode", model: "openai/gpt-5.6-luna", effort: null, permission: "look" });
+  const lead = make("Lead");
+  const quiet = make("Quiet");
+  const epoch = store.takeLease("w", Date.now())!;
+  const leadTurn = store.queueTurn(lead.id, "go").id;
+  for (let i = 0; i < HISTORY_EVENTS * 3; i++) store.addEvent(epoch, leadTurn, "text", { text: `part ${i}` });
+  store.addEvent(epoch, store.queueTurn(quiet.id, "hi").id, "text", { text: "hello" });
+  const upTo = store.lastEventId(project.id);
+  const first = store.agentTails(project.id, HISTORY_EVENTS, upTo, HISTORY_BYTES);
+  const leads = first.events.filter((e) => e.agentId === lead.id);
+  assert.equal(leads.length, HISTORY_EVENTS);
+  assert.ok(first.events.some((e) => e.agentId === quiet.id), "a busy window never pushes a quiet one out");
+  assert.deepEqual(first.cut, [lead.id]);
+  assert.deepEqual(first.events.map((e) => e.id), first.events.map((e) => e.id).sort((a, b) => a - b));
+  // Nothing after the stream's start is in its history.
+  assert.equal(store.agentTails(project.id, HISTORY_EVENTS, leads[0].id - 1, HISTORY_BYTES).events.at(-1)!.id < leads[0].id, true);
+  // The byte bound keeps the newest event even when it alone is over.
+  const big = store.agentTails(project.id, HISTORY_EVENTS, upTo, 1);
+  assert.equal(big.events.filter((e) => e.agentId === lead.id).length, 1);
+  assert.equal(big.events.find((e) => e.agentId === lead.id)!.id, leads.at(-1)!.id);
+  // Earlier slices: before the oldest held, newest-adjacent, until the start.
+  const all = store.events(project.id, 0, 10_000).filter((e) => e.agentId === lead.id).map((e) => e.id);
+  const page = store.agentEvents(lead.id, leads[0].id, HISTORY_EVENTS, HISTORY_BYTES);
+  assert.deepEqual(page.events.map((e) => e.id), all.slice(all.length - 2 * HISTORY_EVENTS, all.length - HISTORY_EVENTS));
+  assert.equal(page.more, true);
+  const last = store.agentEvents(lead.id, page.events[0].id, 1000, HISTORY_BYTES * 10);
+  assert.deepEqual(last.events.map((e) => e.id), all.slice(0, all.length - 2 * HISTORY_EVENTS));
+  assert.equal(last.more, false);
+  assert.deepEqual(store.agentEvents(lead.id, all[0], 10, 1000), { events: [], more: false });
 });

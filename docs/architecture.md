@@ -202,7 +202,8 @@ The worker runs a loopback MCP server; each agent session gets a bearer
 token for it, revoked when the session ends. Through it, agents in one tab
 call the team tools (`team_send`, `team_ask`, `team_reply`, `team_read`,
 `team_pull`, `team_diff`, `team_claim`, `team_hold`, `team_push`,
-`team_pr`, `team_checks`, `team_report`, `team_propose_tab`, …). Messages
+`team_pr`, `team_checks`, `team_merge`, `team_project`, `team_report`,
+`team_propose_tab`, …). Messages
 are queued in the store and delivered together as one prompt when the
 recipient is free; nobody waits inside a tool call. Routes forward a
 finished turn's reply automatically. In a GitHub project, `team_pull` with
@@ -331,6 +332,43 @@ the last 24,000 characters shown, redacted as a whole before any line is
 chosen. The token needs **Actions: Read-only** for this; without it the
 tool says so.
 
+`team_project` reads, for every open editing agent of the caller's project
+that has a branch (at most 40), where that branch stands on GitHub: one
+GraphQL request for every branch and its newest pull request into the base
+branch (`readBranches` in `github-api.ts`), then one request per open pull
+request for its GitHub Actions runs (`readRuns`). A GraphQL error under one
+branch's fields hides that branch only. Commits the folder has that GitHub
+lacks are counted in the agent's clone (`Clone.countBetween`). The text is
+built by `team-project.ts` (pure) and redacted. Nothing is written, and no
+other project is read.
+
+`team_merge` is the one way the Console changes a base branch. When the
+agent asks, the worker reads the pull request (`readPullState`): it must be
+open, not a draft, from the `console/` branch of an editing agent of the
+same project in the project's own repository, into the base branch, with
+no conflicts, every check finished and passed (skipped counts as passed,
+and so does having no checks; a workflow that is queued and has no job yet
+counts as running) and nothing in the agent's folder that is not
+pushed. While GitHub has not yet worked out whether it can merge, it is
+asked again up to five times, and the last answer must still name the same
+agent's branch and base. A refusal goes back to the agent with what to do;
+otherwise a notice of kind `merge` goes into Needs you with what was read
+(`src/lib/console/merge.ts`, pure, holds the texts and checks). **Approve**
+queues a job of kind `merge` in the push queue, so it never overlaps a push.
+The job checks everything again and calls GitHub's merge endpoint with
+`merge_method: squash` and `sha` set to the commit the owner saw, so GitHub
+refuses if the head moved. The result is a line in the asking agent's and
+the branch's agent's windows, a note at the start of their next turn, and a
+note in Needs you when it did not go through. Another agent that asks for
+the same commit while the request waits is added to it and told the
+outcome too. If GitHub's answer to the merge call is lost, the worker reads
+the pull request again: merged means merged, and if it cannot be read the
+agents and the owner are told the outcome is not known, never that nothing
+was merged. The base branch's new commit
+is recorded at once, so other editing agents hear that it moved. A merge
+job a restart finds running fails with a note to look on GitHub, since it
+may or may not have merged. No branch is deleted.
+
 ## Sign-in
 
 Step 1 is your own GitHub OAuth app; only the configured numeric account ID
@@ -406,7 +444,25 @@ What Squadroom protects against, and the limits it accepts, are in
 - **Changes loads patches when opened.** The Changes dialog polls every 3
   seconds for the commit list and the branch's file summary alone; a
   commit's patch is fetched once, when you open it, and the branch's whole
-  patch while you have it open (again when the branch changes).
+  patch while you have it open (again when the branch changes). Patches
+  over 100,000 characters are cut at a line end until **Show the rest**,
+  and more than 30 commits show the newest 30 until **Show all**. The
+  approve gate (`ApproveGate.tsx`) is also in an editing agent's window in
+  a tab with steps, from the project view, which reads the branch's
+  summary without its patch (`diffSummary`).
+- **A short first history.** A fresh live stream sends each open window
+  its latest 80 events, at most 150 KB of them, then a `: history` line
+  naming the windows that have earlier events. The page asks for earlier
+  ones a slice at a time (`GET /api/console?events=<agent>&before=<id>`,
+  200 events or 300 KB) and puts them above, keeping the reader's place.
+  Until the history line has arrived, a stream that ends is followed by a
+  fresh one rather than a resume (`streamCursor`, `applyFrames` in
+  `src/lib/console/ui.ts`), so a cut-off history never leaves a window
+  blank.
+- **Not answering.** A request that never reaches the web server (fetch
+  rejects, or a proxy answers 502, 503 or 504) shows "The Console is not
+  answering…" instead of the browser's words, and the line clears at the
+  next answered poll (`notAnswering` in `ui.ts`).
 - **Teammates' messages look different.** In an agent's window, a message
   from a teammate sits on the agent's side with its own border and
   background, so it never looks like yours.

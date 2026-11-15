@@ -129,7 +129,11 @@ export const turns = {
     // for the same push again blindly.
     const pushNews = this.store.failedPush(rt.agent.id, true);
     const pushNote = pushNews ? `${pushFailedNote(this.redactor.shorten(pushNews.text, PUSH_FAILURE_CHARS))}\n\n` : "";
-    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${baseNote}${pushNote}${t.prompt}`;
+    // A merge it asked for, or of its own pull request: what
+    // came of it, said once.
+    const mergeNews = this.store.mergeNews(rt.agent.id);
+    const mergedNote = mergeNews.length ? `${mergeNews.join("\n\n")}\n\n` : "";
+    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${mergedNote}${baseNote}${pushNote}${t.prompt}`;
     // Recorded only once the client has accepted the turn (which an
     // unacknowledged start proves later, or never).
     let spent = false;
@@ -145,6 +149,7 @@ export const turns = {
       if (uploads.length) this.safe(() => this.store.markDelivered(this.epoch!, uploads.map((u) => u.id), t.id));
       if (baseNews) this.safe(() => this.store.baseTold(this.epoch!, rt.agent.id, baseNews));
       if (pushNews) this.safe(() => this.store.pushTold(this.epoch!, rt.agent.id, pushNews.job));
+      if (mergeNews.length) this.safe(() => this.store.mergeTold(this.epoch!, rt.agent.id, mergeNews.length));
     };
     const session = this.ensureSession(rt);
     // Before the paid request is handed over: the durable mark must succeed,

@@ -4,6 +4,7 @@ import type { CleanupItem } from "./cleanup.ts";
 import type { ArchiveImpact, TimelineEntry } from "./views.ts";
 import type { NeedsLike } from "./notify.ts";
 import type { Overview } from "./overview.ts";
+import type { SseFrame } from "./sse.ts";
 import type { Block } from "./transcript.ts";
 import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, turnLimits, type ConsoleEvent, type ConsoleProject, type ConsoleTab } from "./types.ts";
 
@@ -198,18 +199,37 @@ export const timelineLine = (e: Pick<TimelineEntry, "from" | "to" | "kind">) =>
 /** One window's events kept on the page. */
 export const EVENTS_MAX = 2000;
 export const EVENT_BYTES_MAX = 2 * 1024 * 1024;
+/** What a fresh view is sent of each window's conversation: its
+ * latest events, a screen or two, by count and by the bytes of their
+ * bodies. Earlier ones are read on demand, a slice at a time. */
+export const HISTORY_EVENTS = 80;
+export const HISTORY_BYTES = 150 * 1024;
+export const EARLIER_EVENTS = 200;
+export const EARLIER_BYTES = 300 * 1024;
 export interface EventWindow {
   list: ConsoleEvent[];
   sizes: number[];
+  /** Each entry's first event id (merged text holds several events). */
+  firsts: number[];
   bytes: number;
+  /** The store holds earlier events than these; false once the start of
+   * the conversation is here; unset when it was never cut. */
+  earlier?: boolean;
+  /** Earlier events were asked for and did not fit in the window's budget. */
+  full?: boolean;
+  /** How many earlier slices were put in (the page keeps the reader's
+   * place across each). */
+  prepends?: number;
 }
+export const emptyWindow = (): EventWindow => ({ list: [], sizes: [], firsts: [], bytes: 0 });
 const utf8 = new TextEncoder();
 
 /** Adds an event to a window's list, bounded: streamed text of one turn is
  * merged as it arrives, and the oldest go once the window holds more than
  * EVENTS_MAX events or EVENT_BYTES_MAX bytes (counted as UTF-8, not
- * string length). */
-export function appendEvent(own: EventWindow, event: ConsoleEvent): void {
+ * string length).
+ * `first`: the entry's first event id, when it is already a merged one. */
+export function appendEvent(own: EventWindow, event: ConsoleEvent, first = event.id): void {
   const prev = own.list.at(-1);
   const size = utf8.encode(JSON.stringify(event.body)).length;
   if (prev && prev.turnId === event.turnId && prev.kind === event.kind && (event.kind === "text" || event.kind === "thinking")) {
@@ -224,12 +244,119 @@ export function appendEvent(own: EventWindow, event: ConsoleEvent): void {
   } else {
     own.list.push(event);
     own.sizes.push(size);
+    own.firsts.push(first);
   }
   own.bytes += size;
   while (own.list.length > 1 && (own.list.length > EVENTS_MAX || own.bytes > EVENT_BYTES_MAX)) {
     own.list.shift();
+    own.firsts.shift();
     own.bytes -= own.sizes.shift()!;
+    own.earlier = true;
   }
+}
+
+/** A window with an earlier slice of its conversation put before what it
+ * holds. `more`: the store has events before the slice. The
+ * same bounds apply, so a slice that does not fit loses its oldest part
+ * (never the newest messages) and the window is `full`. That includes one
+ * turn's text, which is merged into one entry and kept under its length
+ * limit: the slice's oldest part of it is left out rather than cut, so text
+ * already shown never goes and the window's first event id is never one
+ * whose text is not shown. `prepends` counts the slices put in. */
+export function prependEvents(own: EventWindow, slice: ConsoleEvent[], more: boolean): EventWindow {
+  // From the newest back, the length of the run of one turn's text each
+  // event would join; the first that takes a run past the limit, and all
+  // before it, are left out.
+  const merges = (a: ConsoleEvent, b: ConsoleEvent | undefined) =>
+    !!b && b.turnId === a.turnId && b.kind === a.kind && (a.kind === "text" || a.kind === "thinking");
+  const length = (e: ConsoleEvent) => (e.kind === "text" || e.kind === "thinking" ? (e.body as { text: string }).text.length : 0);
+  let from = slice.length;
+  let after: ConsoleEvent | undefined = own.list[0];
+  let run = after ? length(after) : 0;
+  for (let i = slice.length - 1; i >= 0; i--) {
+    const e = slice[i];
+    run = merges(e, after) ? run + length(e) : length(e);
+    if (run > EVENT_BYTES_MAX / 4) break;
+    from = i;
+    after = e;
+  }
+  const next = emptyWindow();
+  for (const e of slice.slice(from)) appendEvent(next, e);
+  own.list.forEach((e, i) => appendEvent(next, e, own.firsts[i]));
+  next.full = next.earlier === true || from > 0;
+  next.earlier ??= more;
+  next.prepends = (own.prepends ?? 0) + 1;
+  return next;
+}
+
+/** What the top of a window says about earlier messages:
+ * "more" offers them, "start" is the start of the conversation, "full" is
+ * as far back as the page keeps; null when nothing was ever cut. */
+export type Earlier = "more" | "start" | "full" | null;
+export const earlierState = (own: Pick<EventWindow, "earlier" | "full">): Earlier =>
+  own.full ? "full" : own.earlier === undefined ? null : own.earlier ? "more" : "start";
+
+/** A project's live events as the page holds them across its streams
+ *. `last`: the newest event id seen. `startAt`: where the
+ * first stream began (its history held only open windows, so a resume never
+ * goes back before it). `loaded`: a history's closing line came; until it
+ * has, a stream that ended may have left part of the history unsent (its
+ * newest messages, sent last), and a resume would never send it. */
+export interface EventStream {
+  byAgent: Map<string, EventWindow>;
+  last: number | null;
+  startAt: number | null;
+  loaded: boolean;
+  /** The current stream was asked for as a fresh view. */
+  fresh: boolean;
+}
+export const newEventStream = (): EventStream => ({ byAgent: new Map(), last: null, startAt: null, loaded: false, fresh: true });
+
+/** Where the next stream starts: null asks for a fresh view (history
+ * again), until one history has arrived whole; then after the newest id
+ * seen, never before the first stream's start. */
+export function streamCursor(s: EventStream): number | null {
+  s.fresh = !s.loaded;
+  return s.fresh ? null : Math.max(s.last ?? 0, s.startAt ?? 0);
+}
+
+/** Applies a stream's frames. `touched`: the windows that changed;
+ * `cleared`: a fresh history replaced what an unfinished one left; `status`:
+ * an event that changes what the project view shows came. */
+export function applyFrames(s: EventStream, frames: SseFrame[]): { touched: Set<string>; cleared: boolean; status: boolean } {
+  const touched = new Set<string>();
+  let cleared = false;
+  let status = false;
+  for (const frame of frames) {
+    if (frame.start !== null) {
+      if (s.fresh) {
+        s.byAgent.clear();
+        s.last = null;
+        s.startAt = null;
+        cleared = true;
+        touched.clear();
+      }
+      s.startAt = Math.max(s.startAt ?? 0, frame.start);
+    }
+    if (frame.history) {
+      s.loaded = true;
+      for (const id of frame.history) {
+        const own = s.byAgent.get(id);
+        if (own) own.earlier = true;
+        touched.add(id);
+      }
+    }
+    if (!frame.data) continue;
+    const event = JSON.parse(frame.data) as ConsoleEvent;
+    if (s.last !== null && event.id <= s.last) continue;
+    s.last = event.id;
+    const own = s.byAgent.get(event.agentId) ?? emptyWindow();
+    s.byAgent.set(event.agentId, own);
+    touched.add(event.agentId);
+    appendEvent(own, event);
+    if (event.kind === "status" || event.kind === "owner" || event.kind === "steer") status = true;
+  }
+  return { touched, cleared, status };
 }
 
 /** A pasted image's file name (`pasted-<time>[-<n>].<ext>`). */
@@ -327,4 +454,38 @@ export function workerStatus(w: { online: boolean; pausedAll: string | null } | 
 export function kindInitials(label: string): string {
   const words = label.split(/\s+/).filter(Boolean);
   return words.length > 1 ? `${words[0][0]}${words[1][0]}`.toUpperCase() : `${(words[0] ?? "?")[0].toUpperCase()}${(words[0] ?? "")[1] ?? ""}`;
+}
+
+/** The changes view's turns, newest first: the newest 30 until
+ * the owner asks for all of them. */
+export const COMMITS_SHOWN = 30;
+export function shownCommits<T>(commits: T[], all: boolean, limit = COMMITS_SHOWN): { shown: T[]; hidden: number } {
+  const shown = all ? commits : commits.slice(0, limit);
+  return { shown, hidden: commits.length - shown.length };
+}
+
+/** An opened patch: its first 100,000 characters, cut at a line
+ * end, until the owner asks for the rest. */
+export const PATCH_SHOWN = 100_000;
+export function shownPatch(patch: string, all: boolean, limit = PATCH_SHOWN): { text: string; rest: number } {
+  if (all || patch.length <= limit) return { text: patch, rest: 0 };
+  const line = patch.lastIndexOf("\n", limit);
+  const text = patch.slice(0, line > 0 ? line : limit);
+  return { text, rest: patch.length - text.length };
+}
+
+/** Shown in place of the browser's own words when a request does not reach
+ * the Console; the page clears it at its next answer. */
+export const NOT_ANSWERING = "The Console is not answering. It may be restarting; this page will catch up by itself.";
+
+/** A request failed before the Console answered: fetch itself rejected
+ * (a TypeError in every browser: "Load failed", "Failed to fetch",
+ * "NetworkError when attempting to fetch resource."; an AbortError or
+ * TimeoutError when it was cut off), or what stands in front of the Console
+ * answered for it (502, 503 or 504, read only where the answer carries no
+ * error of the Console's own). */
+export function notAnswering(failure: { error: unknown } | { status: number }): boolean {
+  if ("status" in failure) return [502, 503, 504].includes(failure.status);
+  const e = failure.error;
+  return e instanceof TypeError || (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError"));
 }

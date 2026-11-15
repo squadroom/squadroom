@@ -218,7 +218,7 @@ export function StepsDialog({ tab, run, onClose }: { tab: ProjectView["tabs"][nu
         Step {steps.index + 1} of {steps.steps.length}: {step?.name}
       </h3>
       <p className={styles.hint}>
-        Its editing agents may change only {step?.files.join(", ")}. Moving forward needs each editing agent&apos;s current commit approved in Changes (after a
+        Its editing agents may change only {step?.files.join(", ")}. Moving forward needs each editing agent&apos;s current commit approved, in its window or in Changes (after a
         reviewer&apos;s review, when the tab has a reviewer). An agent with no changes has nothing to approve.
       </p>
       <p>

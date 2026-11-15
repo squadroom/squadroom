@@ -3,6 +3,7 @@ import type { ConsoleStore } from "../store.ts";
 import { claimsOverlap, holdCycle } from "../claims.ts";
 import { HoldCycleError, REPORT_MAX, REPORTS_PER_TURN, SHARE_MAX, TeamError, type ToolCall } from "../team.ts";
 import type { Proposal } from "../team-setup.ts";
+import type { MergeAsk } from "../merge.ts";
 import { safeCut, tab } from "./rows.ts";
 
 /** A Needs you item an agent or the Console made: a note, a team_report,
@@ -12,9 +13,11 @@ export interface Notice {
   agentId: string;
   agentName: string;
   projectId: string;
-  kind: "note" | "report" | "proposal";
+  kind: "note" | "report" | "proposal" | "merge";
   text: string;
   proposal: Proposal | null;
+  /** A pull request an agent asks to have merged. */
+  merge: MergeAsk | null;
   createdAt: number;
 }
 
@@ -311,14 +314,16 @@ export const team = {
       agentId: r.agent_id as string,
       agentName: r.agent_name as string,
       projectId: r.project_id as string,
-      kind: r.kind === "report" || r.kind === "proposal" ? r.kind : "note",
+      kind: r.kind === "report" || r.kind === "proposal" || r.kind === "merge" ? r.kind : "note",
       text: r.text as string,
       proposal: r.kind === "proposal" ? (JSON.parse(r.data as string) as Proposal) : null,
+      merge: r.kind === "merge" ? (JSON.parse(r.data as string) as MergeAsk) : null,
       createdAt: r.created_at as number,
     }));
   },
   dismissNotice(this: ConsoleStore, id: number): boolean {
-    // A proposal is answered (Create or Decline), so its agent is told.
-    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0 AND kind <> 'proposal'", id) === 1;
+    // A proposal is answered (Create or Decline), so its agent is told; a
+    // merge request too (Approve or Deny).
+    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0 AND kind NOT IN ('proposal', 'merge')", id) === 1;
   },
 };

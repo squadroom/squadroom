@@ -144,11 +144,13 @@ export const request = (r: Row): ConsoleRequest => ({
 export const job = (r: Row): ConsoleJob => ({
   id: r.id as number,
   agentId: r.agent_id as string,
-  kind: "push",
+  kind: r.kind === "merge" ? "merge" : "push",
   state: r.state as ConsoleJob["state"],
   message: (r.message as string | null) ?? null,
   url: (r.url as string | null) ?? null,
-  request: json(r.request) as ConsoleJob["request"],
+  // A merge job's request is the pull request it merges.
+  request: r.kind === "merge" ? null : (json(r.request) as ConsoleJob["request"]),
+  merge: r.kind === "merge" ? (json(r.request) as ConsoleJob["merge"]) : null,
   createdAt: r.created_at as number,
 });
 export const event = (r: Row): ConsoleEvent => ({

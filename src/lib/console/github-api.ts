@@ -1,4 +1,5 @@
 import { CONSOLE_BRANCH, GitError } from "./git.ts";
+import type { PullState } from "./merge.ts";
 
 // The Console's GitHub client: the checks a repository must pass, pull
 // requests and their review threads (the worker only, with the owner's
@@ -76,7 +77,7 @@ export async function checkGitHub(repo: string, base: string, gh: GitHubApi) {
 // ── Pull requests ─────────────────────────────────────────────
 
 /** One GitHub API call with the owner's token (the worker only). */
-async function githubCall(gh: GitHubApi, method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
+async function githubCall(gh: GitHubApi, method: "GET" | "POST" | "PATCH" | "PUT", path: string, body?: unknown): Promise<{ status: number; json: unknown }> {
   let response: Response;
   try {
     response = await (gh.fetch ?? fetch)(`${gh.url ?? GITHUB_API}${path}`, {
@@ -141,12 +142,20 @@ export async function openPullRequest(
 
 /** A GitHub GraphQL call (review threads: their state, replies, resolving). */
 async function githubGraphql(gh: GitHubApi, query: string, variables: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const { data, errors } = await githubGraphqlPartial(gh, query, variables);
+  if (errors.length) throw new GitError(`GitHub answered 200: ${String(errors[0].message ?? "").slice(0, 200)}.`);
+  return data;
+}
+type GraphqlError = { message?: string; path?: (string | number)[] };
+/** A GraphQL call whose field errors come back beside the data GitHub did
+ * read (team_project: one branch's error hides only that branch). */
+async function githubGraphqlPartial(gh: GitHubApi, query: string, variables: Record<string, unknown>): Promise<{ data: Record<string, unknown>; errors: GraphqlError[] }> {
   const r = await githubCall(gh, "POST", "/graphql", { query, variables });
   if (r.status === 401 || r.status === 403) throw new GitError(NEEDS_PR_WRITE);
-  const json = r.json as { data?: Record<string, unknown>; errors?: { message?: string }[] } | null;
-  if (r.status !== 200 || !json?.data || json.errors?.length)
+  const json = r.json as { data?: Record<string, unknown> | null; errors?: GraphqlError[] } | null;
+  if (r.status !== 200 || !json?.data)
     throw new GitError(`GitHub answered ${r.status}${json?.errors?.[0]?.message ? `: ${json.errors[0].message.slice(0, 200)}` : ""}.`);
-  return json.data;
+  return { data: json.data, errors: json.errors ?? [] };
 }
 
 /** One review thread on a pull request (team_pr). */
@@ -184,6 +193,58 @@ export async function findPullRequest(repo: string, branch: string, base: string
   if (found.status !== 200) throw new GitError(`GitHub answered ${found.status} when looking for the pull request.`);
   const open = Array.isArray(found.json) ? (found.json[0] as { number?: unknown; html_url?: unknown } | undefined) : undefined;
   return open && typeof open.number === "number" && typeof open.html_url === "string" ? { number: open.number, url: open.html_url } : null;
+}
+
+/** Where a console/ branch stands on GitHub (team_project). */
+export interface BranchOnGitHub {
+  /** GitHub's commit of the branch; null when it has no such branch. */
+  head: string | null;
+  /** Its newest pull request into the base branch, open or not. */
+  pr: { number: number; url: string; state: string; draft: boolean; mergeable: string; headSha: string } | null;
+}
+/** The most branches one readBranches asks about. */
+export const BRANCHES_MAX = 40;
+
+/** Several console/ branches and each one's newest pull request into
+ * `base` (read only), in one request; a branch GitHub reported an error
+ * for is missing from the result. A pull request is found by its
+ * branch's name, so a merged one whose branch GitHub deleted is still read. */
+export async function readBranches(repo: string, base: string, branches: string[], gh: GitHubApi): Promise<Map<string, BranchOnGitHub>> {
+  const out = new Map<string, BranchOnGitHub>();
+  if (!branches.length) return out;
+  const bad = branches.find((b) => !CONSOLE_BRANCH.test(b));
+  if (bad || branches.length > BRANCHES_MAX) throw new GitError(bad ? `Only console/ branches are read here, not ${bad}.` : `At most ${BRANCHES_MAX} branches are read at once.`);
+  const [owner, name] = repo.split("/");
+  // A branch's name is only [a-z0-9-/] (CONSOLE_BRANCH), so it is written
+  // into the query as it is.
+  const parts = branches.map(
+    (b, i) =>
+      `r${i}: ref(qualifiedName: "refs/heads/${b}") { target { oid } } p${i}: pullRequests(headRefName: "${b}", baseRefName: $base, first: 1, orderBy: { field: CREATED_AT, direction: DESC }) { nodes { number url state isDraft mergeable headRefOid } }`,
+  );
+  const { data, errors } = await githubGraphqlPartial(gh, `query($owner: String!, $name: String!, $base: String!) { repository(owner: $owner, name: $name) { ${parts.join(" ")} } }`, { owner, name, base });
+  const got = data.repository as Record<string, unknown> | null;
+  if (!got) throw new GitError(`The repository ${repo} was not found, or the GitHub token cannot see it.`);
+  // An error under one branch's fields leaves that branch out (shown as not
+  // read); an error GitHub does not place under a branch fails the read.
+  const failed = new Set<number>();
+  for (const e of errors) {
+    const alias = e.path?.[0] === "repository" ? /^[rp](\d+)$/.exec(String(e.path[1] ?? "")) : null;
+    if (!alias) throw new GitError(`GitHub answered 200: ${String(e.message ?? "").slice(0, 200)}.`);
+    failed.add(Number(alias[1]));
+  }
+  branches.forEach((b, i) => {
+    if (failed.has(i)) return;
+    const oid = (got[`r${i}`] as { target?: { oid?: unknown } } | null)?.target?.oid;
+    const pr = (got[`p${i}`] as { nodes?: Record<string, unknown>[] } | null)?.nodes?.[0];
+    out.set(b, {
+      head: typeof oid === "string" ? oid : null,
+      pr:
+        pr && typeof pr.number === "number"
+          ? { number: pr.number, url: String(pr.url), state: String(pr.state), draft: pr.isDraft === true, mergeable: String(pr.mergeable ?? ""), headSha: String(pr.headRefOid ?? "") }
+          : null,
+    });
+  });
+  return out;
 }
 
 const THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
@@ -321,6 +382,49 @@ export async function commentOnPullRequest(repo: string, number: number, text: s
   if (r.status !== 201) throw new GitError(`GitHub answered ${r.status} to the comment.`);
 }
 
+// ── Merging a pull request ──────────────────────────────────
+
+/** A pull request as it is on GitHub now, for a merge; null when the
+ * repository has none with that number. */
+export async function readPullState(repo: string, number: number, gh: GitHubApi): Promise<PullState | null> {
+  const r = await githubCall(gh, "GET", `/repos/${repo}/pulls/${number}`);
+  if (r.status === 404) return null;
+  if (r.status === 401 || r.status === 403) throw new GitError(NEEDS_PR_WRITE);
+  const p = r.json as Record<string, unknown> | null;
+  const side = (v: unknown) => (v && typeof v === "object" ? (v as { ref?: unknown; sha?: unknown; repo?: { full_name?: unknown } | null }) : {});
+  const head = side(p?.head);
+  const base = side(p?.base);
+  if (r.status !== 200 || !p || typeof head.ref !== "string" || typeof head.sha !== "string" || typeof base.ref !== "string")
+    throw new GitError(`GitHub answered ${r.status} when reading pull request #${number}.`);
+  return {
+    number,
+    // Shown to the owner as a link: only ever a page of this repository.
+    url: `https://github.com/${repo}/pull/${number}`,
+    title: String(p.title ?? ""),
+    state: String(p.state ?? ""),
+    merged: p.merged === true,
+    draft: p.draft === true,
+    mergeable: typeof p.mergeable === "boolean" ? p.mergeable : null,
+    mergeableState: typeof p.mergeable_state === "string" ? p.mergeable_state : "unknown",
+    headRef: head.ref,
+    headSha: head.sha,
+    headRepo: typeof head.repo?.full_name === "string" ? head.repo.full_name : null,
+    baseRef: base.ref,
+    mergeCommit: p.merged === true && typeof p.merge_commit_sha === "string" ? p.merge_commit_sha : null,
+  };
+}
+
+/** Ask GitHub to squash-merge a pull request, only while its head is still
+ * `sha` (GitHub refuses otherwise). The worker never pushes to the base
+ * branch itself. Returns the commit GitHub made on the base branch. */
+export async function mergePullRequest(repo: string, number: number, merge: { sha: string; title: string }, gh: GitHubApi): Promise<{ sha: string }> {
+  if (!/^[0-9a-f]{40,64}$/.test(merge.sha)) throw new GitError("That is not a commit.");
+  const r = await githubCall(gh, "PUT", `/repos/${repo}/pulls/${number}/merge`, { merge_method: "squash", sha: merge.sha, commit_title: merge.title });
+  const json = r.json as { sha?: unknown; merged?: unknown; message?: unknown } | null;
+  if (r.status === 200 && json?.merged === true && typeof json.sha === "string") return { sha: json.sha };
+  throw new GitError(`GitHub did not merge pull request #${number} (${r.status}${typeof json?.message === "string" ? `: ${json.message.slice(0, 300)}` : ""}).`);
+}
+
 // ── Checks ────────────────────────────────────────────────────
 
 const NEEDS_ACTIONS_READ =
@@ -329,6 +433,8 @@ const NEEDS_ACTIONS_READ =
 /** One job of a GitHub Actions run for a commit. */
 export interface CheckJob {
   id: number;
+  /** The GitHub Actions run (workflow) it belongs to. */
+  runId: number;
   run: string;
   name: string;
   /** queued, in_progress, completed, … as GitHub says it. */
@@ -340,6 +446,39 @@ export interface CheckJob {
 const CHECK_RUNS_MAX = 20;
 const CHECK_JOB_PAGES = 3;
 
+/** One read of a repository's GitHub Actions (needs Actions: Read-only). */
+async function actionsGet(repo: string, path: string, what: string, gh: GitHubApi) {
+  const r = await githubCall(gh, "GET", `/repos/${repo}/actions/${path}`);
+  if (r.status === 401 || r.status === 403 || r.status === 404) throw new GitError(NEEDS_ACTIONS_READ);
+  if (r.status !== 200) throw new GitError(`GitHub answered ${r.status} when reading ${what}.`);
+  return (r.json ?? {}) as { total_count?: unknown; workflow_runs?: unknown; jobs?: unknown };
+}
+const total = (v: unknown, seen: number) => (typeof v === "number" ? v : seen);
+
+/** One GitHub Actions run (a workflow) of a commit. */
+export interface CheckRun {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+/** The GitHub Actions runs of a commit (read only), in one request;
+ * `incomplete` when GitHub has more than are read. */
+export async function readRuns(repo: string, sha: string, gh: GitHubApi): Promise<{ runs: CheckRun[]; incomplete: boolean }> {
+  if (!/^[0-9a-f]{40}$/.test(sha)) throw new GitError("That is not a commit.");
+  const got = await actionsGet(repo, `runs?head_sha=${sha}&per_page=${CHECK_RUNS_MAX}`, "the checks", gh);
+  const list = (Array.isArray(got.workflow_runs) ? got.workflow_runs : []) as Record<string, unknown>[];
+  const runs = list
+    .filter((r) => typeof r.id === "number")
+    .map((r) => ({
+      id: r.id as number,
+      name: typeof r.name === "string" ? r.name : "",
+      status: typeof r.status === "string" ? r.status : "",
+      conclusion: typeof r.conclusion === "string" ? r.conclusion : null,
+    }));
+  return { runs, incomplete: total(got.total_count, list.length) > list.length };
+}
+
 /** The GitHub Actions jobs that ran for a commit (read only): each run's
  * latest attempt. `incomplete` when GitHub has more runs or jobs than are
  * read here, so nobody takes the list for all of them. Needs Actions:
@@ -348,31 +487,22 @@ export async function readChecks(
   repo: string,
   sha: string,
   gh: GitHubApi,
-): Promise<{ jobs: CheckJob[]; incomplete: boolean }> {
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new GitError("That is not a commit.");
-  const get = async (path: string, what: string) => {
-    const r = await githubCall(gh, "GET", `/repos/${repo}/actions/${path}`);
-    if (r.status === 401 || r.status === 403 || r.status === 404) throw new GitError(NEEDS_ACTIONS_READ);
-    if (r.status !== 200) throw new GitError(`GitHub answered ${r.status} when reading ${what}.`);
-    return (r.json ?? {}) as { total_count?: unknown; workflow_runs?: unknown; jobs?: unknown };
-  };
-  const total = (v: unknown, seen: number) => (typeof v === "number" ? v : seen);
-  const runs = await get(`runs?head_sha=${sha}&per_page=${CHECK_RUNS_MAX}`, "the checks");
-  const list = (Array.isArray(runs.workflow_runs) ? runs.workflow_runs : []) as { id?: unknown; name?: unknown }[];
-  let incomplete = total(runs.total_count, list.length) > list.length;
+): Promise<{ jobs: CheckJob[]; incomplete: boolean; runs: CheckRun[] }> {
+  const read = await readRuns(repo, sha, gh);
+  let incomplete = read.incomplete;
   const jobs: CheckJob[] = [];
-  for (const run of list) {
-    if (typeof run.id !== "number") continue;
+  for (const run of read.runs) {
     let seen = 0;
     for (let page = 1; ; page++) {
-      const got = await get(`runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`, "a check's jobs");
+      const got = await actionsGet(repo, `runs/${run.id}/jobs?filter=latest&per_page=100&page=${page}`, "a check's jobs", gh);
       const rows = (Array.isArray(got.jobs) ? got.jobs : []) as Record<string, unknown>[];
       seen += rows.length;
       for (const j of rows) {
         if (typeof j.id !== "number") continue;
         jobs.push({
           id: j.id,
-          run: typeof run.name === "string" ? run.name : "",
+          runId: run.id,
+          run: run.name,
           name: typeof j.name === "string" ? j.name : "",
           status: typeof j.status === "string" ? j.status : "",
           conclusion: typeof j.conclusion === "string" ? j.conclusion : null,
@@ -386,7 +516,7 @@ export async function readChecks(
       }
     }
   }
-  return { jobs, incomplete };
+  return { jobs, incomplete, runs: read.runs };
 }
 
 /** The end of one job's log: at most `maxBytes` of it are ever held (the

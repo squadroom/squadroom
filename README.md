@@ -32,8 +32,11 @@ a teammate's work or, in a GitHub project, the latest base branch from
 GitHub (`team_pull`), claim the files it's about to edit
 (`team_claim`), ask a teammate to hold off (`team_hold`), ask you to push
 its branch and open a pull request (`team_push`), read the review on it
-(`team_pr`), and read the checks GitHub Actions ran on it, with the end of
-a failed job's log (`team_checks`). A message waits until the other agent
+(`team_pr`), read the checks GitHub Actions ran on it, with the end of
+a failed job's log (`team_checks`), and ask you to approve merging it
+(`team_merge`). Any agent can also see where every tab of its project
+stands: each agent's branch, its last push, its pull request and its
+checks (`team_project`). A message waits until the other agent
 finishes its current turn, then arrives as its next prompt. Routes pass one
 agent's finished reply straight to another, for example when the Lead ends
 with "ready for review".
@@ -42,8 +45,8 @@ When a team has an Orchestrator you give it the goal, and it reports back
 to you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one
 tray, **Needs you**, which covers every project: network requests,
-questions, pushes, a push that failed (with the reason), notes agents
-leave for you (`team_report`) and paused tabs. The **Team** panel shows every message between a tab's agents, and
+questions, pushes, merges agents ask for, a push that failed (with the
+reason), notes agents leave for you (`team_report`) and paused tabs. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 
@@ -398,6 +401,9 @@ and how each part works in [docs/architecture.md](docs/architecture.md).
   the agent's last turn, and only after every new object is checked for
   credentials the Console handed out (byte for byte: one encoded some other
   way isn't caught).
+  The base branch changes only when you approve a merge an agent asked
+  for (`team_merge`): GitHub squash-merges that one pull request at the
+  commit you were shown, once its checks have passed.
 - **Credentials are redacted** from everything stored, and paid keys are
   bounded by the provider-side caps you set.
 

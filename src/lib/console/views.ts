@@ -89,7 +89,11 @@ export interface AgentView extends ConsoleAgent {
   /** The base branch's name when GitHub's has commits this agent's branch
    * has not taken in; else null. */
   baseMoved: string | null;
+  /** The approve gate, shown in its window where a step waits for it;
+   * else null. */
+  approval: Approval | null;
 }
+export type Approval = ReturnType<typeof approvalView>;
 export interface TimelineEntry {
   id: number;
   from: string;
@@ -281,6 +285,7 @@ export function projectView(store: ConsoleStore, projectId: string): ProjectView
           summaryWaiting: store.carriedSummary(a.id) !== null,
           taskTools: agentModel(a.kind, a.model)?.taskTools !== false,
           baseMoved: store.baseMoved(a) ? project.baseBranch : null,
+          approval: windowApproval(store, a),
         };
       }),
   };
@@ -378,7 +383,7 @@ export function searchView(store: ConsoleStore, text: string) {
  * but the Orchestrator, which plans. */
 export const stepReviewer = (a: ConsoleAgent) => a.permission === "look" && isOpen(a) && !isOrchestrator(a);
 
-function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType<ConsoleStore["diff"]>) {
+function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType<ConsoleStore["diffSummary"]>) {
   // The head is the shown diff's, so Approve names the commit whose
   // changes the owner sees (read once, not again).
   const head = diff?.head ?? null;
@@ -401,6 +406,15 @@ function approvalView(store: ConsoleStore, agent: ConsoleAgent, diff: ReturnType
   };
 }
 
+/** The approve gate for an agent's window, only where an approval decides
+ * something and there is something to approve: an editing agent in a tab
+ * with steps whose branch has commits. Else null. */
+function windowApproval(store: ConsoleStore, agent: ConsoleAgent) {
+  if (agent.permission !== "edit" || !store.tabSteps(agent.tabId)) return null;
+  const diff = store.diffSummary(agent.id);
+  return diff && diff.head !== diff.base ? approvalView(store, agent, diff) : null;
+}
+
 /** One agent's changes view: each turn's commit and the branch against its
  * base (without their patches, which the dialog asks for when one is
  * opened), and its latest push. */
@@ -408,7 +422,7 @@ export function changesView(store: ConsoleStore, agentId: string) {
   const agent = store.agent(agentId);
   if (!agent) return null;
   const project = store.project(agent.projectId);
-  const diff = store.diff(agentId);
+  const diff = store.diffSummary(agentId);
   return {
     agentId,
     source: project?.source ?? null,
@@ -417,7 +431,7 @@ export function changesView(store: ConsoleStore, agentId: string) {
     branch: store.agentBase(agentId).branch,
     folder: agent.folder,
     commits: store.commits(agentId),
-    diff: diff && { base: diff.base, head: diff.head, stat: diff.stat, files: diff.files, updatedAt: diff.updatedAt },
+    diff,
     push: store.latestJob(agentId) ?? null,
     // The approve gate: its approval, and the tab's Code analysis agents with
     // whether each has reviewed the current head.

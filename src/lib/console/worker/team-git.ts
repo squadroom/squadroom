@@ -1,7 +1,11 @@
 import { pushRequest, pushSummary } from "../pull-request.ts";
-import { PUSH_FAILURE_CHARS, pushFailedNote } from "../push-failure.ts";
+import { agentKind } from "../agents.ts";
+import { BRANCHES_MAX } from "../github-api.ts";
+import { PUSH_FAILURE_CHARS, pushFailedNote, pushHint } from "../push-failure.ts";
 import { errorMessage as message } from "../session.ts";
 import { TeamError } from "../team.ts";
+import { teamProjectText, type AgentOnGitHub, type ProjectAgent } from "../team-project.ts";
+import { agentStatus, PERMISSION_LABELS } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import { REPLY_MAX } from "./shared.ts";
 import { body, write, type TeamCall } from "./team.ts";
@@ -14,7 +18,7 @@ const THREAD = /^[A-Za-z0-9_=-]{4,100}$/;
 
 /** One call at a time per agent (its clone, its approvals): a repeated call
  * waits, then returns the first one's recorded result. */
-function once(w: ConsoleWorker, c: TeamCall, work: () => Promise<string>): Promise<string> {
+export function once(w: ConsoleWorker, c: TeamCall, work: () => Promise<string>): Promise<string> {
   const agentId = c.me.id;
   const next = (w.pulls.get(agentId) ?? Promise.resolve())
     .catch(() => {})
@@ -160,6 +164,60 @@ export const teamGit = {
     } catch (error) {
       throw new TeamError(this.redactor.text(message(error)));
     }
+  },
+
+  /** team_project: every open tab of the caller's project, its open agents
+   * and where their branches stand. Names, states and branch, push, pull
+   * request and check records only; nothing is changed, and no other
+   * project is read. */
+  async teamProject(this: ConsoleWorker, { me }: TeamCall): Promise<string> {
+    const project = this.store.project(me.projectId);
+    if (!project || project.source === "none") throw new TeamError("This project has no files, so there are no branches to show.");
+    const github = project.source === "github";
+    const agents = this.store.agents(project.id).filter((a) => a.state !== "closed");
+    const branch = (id: string) => this.store.agentBase(id).branch;
+    // GitHub is asked about the branches of agents that edit, in one
+    // request (and one per open pull request for its checks).
+    const asked = github ? agents.filter((a) => a.permission === "edit" && a.folder && branch(a.id)).slice(0, BRANCHES_MAX) : [];
+    let onGitHub = new Map<string, AgentOnGitHub>();
+    let githubError: string | null = null;
+    try {
+      if (asked.length) onGitHub = await this.repos.readProjectBranches(project, asked);
+    } catch (error) {
+      githubError = this.redactor.shorten(message(error), 200);
+    }
+    const open = this.store.openTurns();
+    const row = (a: (typeof agents)[number]): ProjectAgent => {
+      const turn = open.find((x) => x.agentId === a.id && x.status !== "queued") ?? open.find((x) => x.agentId === a.id) ?? null;
+      const mine = a.permission === "edit" ? branch(a.id) : null;
+      const job = github && mine ? this.store.latestJob(a.id) : undefined;
+      return {
+        name: a.name,
+        you: a.id === me.id,
+        kind: agentKind(a.kind)?.label ?? a.kind,
+        access: PERMISSION_LABELS[a.permission],
+        status: agentStatus(a, turn).replace(/_/g, " "),
+        branch: mine,
+        head: mine ? (this.store.diffSummary(a.id)?.head ?? this.store.agentBase(a.id).baseCommit) : null,
+        // The plain reason for a known cause, else Git's words.
+        push: job ? { state: job.state, at: job.createdAt, ...(job.state === "failed" ? { reason: pushHint(job.message ?? "")?.text ?? this.redactor.shorten(job.message ?? "", 300) } : {}) } : null,
+        github: onGitHub.get(a.id) ?? null,
+      };
+    };
+    return this.redactor.text(
+      teamProjectText({
+        name: project.name,
+        repo: github ? project.repo : null,
+        baseBranch: project.baseBranch,
+        baseTip: github ? this.store.baseTip(project.id) : null,
+        githubError,
+        tabs: this.store
+          .tabs(project.id)
+          .filter((t) => t.archivedAt === null)
+          .map((t) => ({ name: t.name, yours: t.id === me.tabId, paused: this.store.pausedFor({ projectId: project.id, tabId: t.id }) !== null, agents: agents.filter((a) => a.tabId === t.id).map(row) })),
+        now: Date.now(),
+      }),
+    );
   },
 
   async teamPrReply(this: ConsoleWorker, c: TeamCall): Promise<string> {

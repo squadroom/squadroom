@@ -1,3 +1,4 @@
+import { HISTORY_BYTES, HISTORY_EVENTS } from "@/lib/console/ui";
 import { treeView } from "@/lib/console/views";
 import type { ConsoleEvent } from "@/lib/console/types";
 import { consoleAccess, consoleJson, consoleStore } from "@/lib/console/web";
@@ -7,20 +8,17 @@ export const dynamic = "force-dynamic";
 
 // The live view: server-sent events with a project's events after a given
 // id. A reconnecting page resumes from its last id, so nothing is lost or
-// repeated. With `tree=1` it streams the navigation tree instead. Read
-// only. The page reads it with fetch (EventSource cannot send the
-// Console's request header).
+// repeated. A fresh view starts with a short recent part of each window's
+// conversation (HISTORY_EVENTS, HISTORY_BYTES), then a `: history` line that
+// says it all arrived and which windows have earlier messages; those are
+// read on demand (`?events=` on the Console route). With `tree=1` it
+// streams the navigation tree instead. Read only. The page reads it with
+// fetch (EventSource cannot send the Console's request header).
 
 const POLL_MS = 400;
 const PING_MS = 15_000;
 /** A stream ends after this; the page reconnects from its last id. */
 const LIFETIME_MS = 10 * 60_000;
-/** A fresh view starts with each window's latest events: at most this
- * many, and at most this many bytes of them; older history is the
- * transcript's to load. */
-const PER_AGENT = 1000;
-const PER_AGENT_BYTES = 1024 * 1024;
-
 /** Still signed in: checked on every poll, so signing out (or a session
  * that expired) ends an open stream at once, not at its lifetime. */
 const signedIn = (request: Request) => !consoleAccess(request, "GET").denied;
@@ -100,8 +98,9 @@ export async function GET(request: Request) {
   const resume = params.has("after") && Number.isSafeInteger(given) && given >= 0;
   // A fresh view: every window's own latest events, then everything newer.
   let after = resume ? given : store.lastEventId(projectId);
-  const history = resume ? [] : store.agentTails(projectId, PER_AGENT, after, PER_AGENT_BYTES);
-  return sseResponse(request, `retry: 1000\n: start ${after}\n\n${history.map(eventFrame).join("")}`, POLL_MS, (write) => {
+  const history = resume ? null : store.agentTails(projectId, HISTORY_EVENTS, after, HISTORY_BYTES);
+  const first = history ? `${history.events.map(eventFrame).join("")}: history ${JSON.stringify(history.cut)}\n\n` : "";
+  return sseResponse(request, `retry: 1000\n: start ${after}\n\n${first}`, POLL_MS, (write) => {
     for (let batch = store.events(projectId, after); batch.length; batch = store.events(projectId, after)) {
       for (const event of batch) {
         write(eventFrame(event));

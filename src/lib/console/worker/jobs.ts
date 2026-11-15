@@ -35,7 +35,9 @@ export const jobs = {
       ...[...this.runtimes.values()].filter((rt) => rt.turn || rt.busy).map((rt) => rt.agent.id),
       ...open.filter((t) => t.status !== "queued").map((t) => t.agentId),
     ];
-    one(this, "pushing", (epoch) => this.store.claimJob(epoch, working()), (job, epoch) => (async () => {
+    // A merge the owner approved runs in the same queue, so it
+    // never overlaps a push of the same project.
+    one(this, "pushing", (epoch) => this.store.claimJob(epoch, working()), (job, epoch) => job.kind === "merge" ? this.runMerge(job, epoch) : (async () => {
       const agent = this.store.agent(job.agentId);
       const project = agent ? this.store.project(agent.projectId) : undefined;
       if (!agent || !project) throw new Error("That agent no longer exists.");
