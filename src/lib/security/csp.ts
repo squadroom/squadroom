@@ -15,18 +15,30 @@
 //   inline scripts, and a nonce would need per-request middleware. The
 //   development server also needs 'unsafe-eval' (source maps, hot reload).
 // - style-src 'unsafe-inline': next/font's @font-face and React's style
-//   attributes are inline styles; the fonts themselves are self-hosted,
-//   so font-src stays 'self'.
+//   attributes are inline styles; the fonts themselves are self-hosted.
+// - font-src data: and media-src data: blob:: the file panel's HTML
+//   preview is a `srcdoc` frame, which is held to this policy as well as
+//   its own, and the fonts, audio and video of an agent's page reach it
+//   only as `data:` addresses (preview.ts). A `data:` or `blob:` address
+//   carries its own bytes: nothing is fetched from anywhere.
 // - connect-src in development: the hot-reload WebSocket.
+//
+// frame-src 'none': the page frames no address at all. The file panel's
+// HTML preview is a sandboxed `srcdoc` frame, which is not an address and
+// so still loads; whatever that frame then tries to go to (a link, a
+// redirect, its own `location`) is refused here, so an agent's page cannot
+// fetch anything by leaving.
 
 export function contentSecurityPolicy(dev: boolean): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "font-src 'self'",
+    "font-src 'self' data:",
+    "media-src 'self' data: blob:",
     "img-src 'self' data:",
     `connect-src 'self'${dev ? " ws: wss:" : ""}`,
+    "frame-src 'none'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

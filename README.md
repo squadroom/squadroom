@@ -98,6 +98,19 @@ publishes it. Nothing is pushed until you approve it, and when an agent
 opens a pull request you see its title and description before they are
 posted, unless you chose **Always** for that agent's pushes.
 
+An agent's reply is drawn as Markdown. Maths written as `$…$` or `$$…$$`
+is drawn as maths (a dollar amount such as "$5 and $10" stays text), a
+`mermaid` code block is drawn as a diagram, and an image file in the
+agent's own folder that the reply links to shows in place. Nothing is
+loaded from a web address. The file panel draws Markdown files the same
+way and shows an SVG file as a picture. An HTML file opens as its source;
+**Preview** shows the page with its scripts off, and **Run scripts** shows
+it again with them running. [The threat model](docs/threat-model.md) says
+what such a page can and cannot do.
+
+The button at the left of the top bar hides and shows the sidebar on a
+wide screen, as does **Cmd+B** (**Ctrl+B** off a Mac).
+
 ## Roles
 
 A role is a prompt with a name. It tells the agent what its job is and how
@@ -344,6 +357,13 @@ and how each part works in [docs/architecture.md](docs/architecture.md).
   them; it does allow inline scripts, which Next.js needs, and inline
   styles. Pages also ask
   the browser to keep to https (HSTS) and not to guess content types.
+- **An agent's output cannot make your browser fetch anything.** Replies
+  are drawn without raw HTML, and an image shows only when it is carried
+  inline or is a file in that agent's own folder. An agent's HTML file is
+  shown only when you ask, in a sandboxed frame with no access to the
+  Console and with its scripts off; **Run scripts** is a separate button
+  because a running script can still pass small amounts of the page's own
+  content out through host-name look-ups.
 - **Agents run as a separate macOS user** (`agent`) that cannot read your
   home folder, through a root-owned launcher that passes only the one
   credential an agent needs. The commands Claude Code runs are sandboxed

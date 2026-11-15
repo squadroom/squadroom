@@ -130,6 +130,12 @@ export function fileLinks(resolve: (href: string) => string | null, open: (path:
   };
 }
 
+/** The key that shows or hides the sidebar: Cmd+B on a Mac, Ctrl+B
+ * elsewhere (in a Mac's text box Ctrl+B moves the caret, so it is left
+ * alone). A plain "b" is never it. */
+export const sidebarShortcut = (e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }, mac: boolean) =>
+  e.key.toLowerCase() === "b" && e.metaKey === mac && e.ctrlKey === !mac && !e.altKey && !e.shiftKey;
+
 /** Text as a fenced code block, its fence longer than any backtick run in it. */
 export function fence(text: string, language: string | null | undefined): string {
   const ticks = "`".repeat((text.match(/`+/g) ?? []).reduce((n, t) => Math.max(n, t.length + 1), 3));

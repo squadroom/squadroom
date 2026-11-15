@@ -40,14 +40,42 @@ only restates one of them is not a new finding.
   every other project's folder and teammate's clone, as Codex and ACP
   agents have. An agent's requests to the web server from the same Mac
   are refused like anyone's: loopback is never trusted. Its Markdown is rendered without raw HTML and its images are
-  placeholders unless they are inline (`data:image/…`). The
+  placeholders unless they are inline (`data:image/…`) or a file in its
+  own folder, which the worker reads and the page shows as an inline
+  image. Maths and diagrams are drawn by the page from text (KaTeX with
+  `trust` off, Mermaid in its strict mode). The
   Content-Security-Policy keeps the page to its own address for scripts,
-  styles, fonts, images (plus inline `data:` ones) and requests, and no
+  styles, fonts, images, media (plus inline `data:` ones) and requests,
+  frames no address (`frame-src 'none'`), and no
   other site may frame it. It does allow inline scripts, which Next.js
   needs to start each page, and inline styles, so it is a second line of
   defence: what keeps an agent's output from making your browser call
   out, or call one of Squadroom's own routes with your cookies, is that
   its Markdown is rendered without raw HTML.
+- **An agent's SVG and HTML files in the file panel.** An SVG file is
+  shown as a picture, so nothing in it runs and it loads no other file.
+  An HTML file opens as its source, and is shown as a page only when you
+  click **Preview**:
+  - The page is in a frame with an origin of its own. It cannot read or
+    change the Console page, its cookies or its storage, open a window,
+    send a form, download a file or take the page elsewhere.
+  - Its scripts are off: the frame's sandbox allows nothing, its policy
+    has `script-src 'none'`, and every script, `on…` attribute and
+    `javascript:` address is taken out first.
+  - The frame's policy allows inline styles and `data:` images, fonts and
+    media, and nothing else, so it has no HTTP network. The page's own
+    files are put into it from the same agent's folder, each read as the
+    file panel reads any file: never outside the folder, and with handed
+    credentials masked or refused.
+  - Links that ask the browser to look up or connect to an address ahead
+    of time, embedded frames and objects, `<base>`, `<meta http-equiv>`,
+    `ping` and form targets are removed, and a link to another site goes
+    nowhere. They are looked for twice, in the file's text and in the
+    tree the browser's own parser builds; a page that second check cannot
+    settle is not shown.
+  - In our tests in Chrome, a page shown this way, with scripts off, made
+    no connection and looked up no host name. That is a test result, not
+    a guarantee about every browser.
   The Console's e-mails never carry model-written text.
 - **A stolen session cookie.** Weighty actions
   ([listed in setup.md](setup.md#6-sign-in-settings)) need a fresh
@@ -90,6 +118,34 @@ only restates one of them is not a new finding.
   changes nothing else: file writes,
   reads outside the folder, unknown tools, Ask me first and pushes are
   decided as before.
+- **An HTML preview with Run scripts on.** **Run scripts** is the one
+  place an agent's script runs in your browser, and only when you click
+  it. The script still cannot read the Console (the frame has its own
+  origin: no cookies, storage or page access) and cannot use HTTP
+  (`fetch`, an image or script from a web address and a request to
+  Squadroom itself all fail). It is not sealed, though. A script can make
+  the browser look up or connect to a host name it chooses (by adding a
+  `dns-prefetch` or `preconnect` link while it runs, which Chromium puts
+  under no policy), and WebRTC is not blocked in Chromium. A host name
+  can carry a little data, so the page could pass out small amounts of
+  what it holds: its own HTML and the files from the agent's folder that
+  were put into it. That is why scripts are a separate button, off again
+  for every file you open. If it matters for a project, use **Preview**
+  alone. With scripts on, a page can also use your browser's processor
+  and memory while the preview is open (close the panel to stop it), and
+  it can show whatever the agent wrote, which may look like something it
+  is not.
+- **What an HTML preview leaves out.** A module script's `import` of
+  another file is not loaded, because the frame has no address to find it
+  from. `srcset`, `url()` in a `style` attribute, SVG `<image>` and
+  `<use>`, and files a script fetches for itself are not included either.
+  The line under the preview lists what was left out.
+- **Dollar signs read as maths.** The check that keeps a dollar amount as
+  text reads lines, not the parsed document. A few rare shapes still get
+  a visible backslash before a `$`: an indented (not fenced) code block
+  inside a list item or a blockquote, and a code fence nested in both a
+  blockquote and a list that is never closed. A fenced code block is the
+  safe way to show code with a `$` in it.
 - **Redaction gaps.** Only the values the Console handed out and common key
   shapes are redacted; other secrets an agent prints are stored as printed.
 - **Your Mac's own account.** Anyone who can run code as you, or as root,

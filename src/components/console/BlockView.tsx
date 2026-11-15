@@ -1,9 +1,9 @@
 import { memo, useState } from "react";
-import Markdown from "@/components/shared/Markdown";
 import { formatSize, toolPaths } from "@/lib/console/files";
 import type { Block } from "@/lib/console/transcript";
 import type { StepsRow } from "@/lib/console/ui";
 import { markdownPieces } from "@/lib/shared/markdown-stream";
+import RichMarkdown, { type AgentImages } from "./RichMarkdown";
 import styles from "./console.module.css";
 
 // One block of an agent's transcript: the owner's message, the agent's text
@@ -11,30 +11,34 @@ import styles from "./console.module.css";
 // a status, an error or a note.
 
 /** One finished piece of a streaming reply: rendered once. */
-const Piece = memo(function Piece({ text, onLink, highlight }: { text: string; onLink: (href: string) => boolean; highlight: boolean }) {
+const Piece = memo(function Piece({ text, onLink, highlight, images }: { text: string; onLink: (href: string) => boolean; highlight: boolean; images?: AgentImages }) {
   return (
-    <Markdown onLink={onLink} highlight={highlight}>
+    <RichMarkdown onLink={onLink} highlight={highlight} images={images}>
       {text}
-    </Markdown>
+    </RichMarkdown>
   );
 });
 
 /** An agent's text: its Markdown is parsed and highlighted again only when
  * the text (or the link handler) changes, not on every poll.
  * While it streams (`live`), only its last piece is parsed again on each
- * update, unhighlighted; final, it is rendered whole. */
-const TextBlock = memo(function TextBlock({ text, live, onLink }: { text: string; live: boolean; onLink: (href: string) => boolean }) {
+ * update, unhighlighted; final, it is rendered whole.
+ * A diagram is drawn once its piece is finished, never on each token, and
+ * the agent's own images show in place (`images`). */
+const TextBlock = memo(function TextBlock({ text, live, onLink, images }: { text: string; live: boolean; onLink: (href: string) => boolean; images?: AgentImages }) {
   if (!live)
     return (
       <div className={styles.text}>
-        <Markdown onLink={onLink}>{text}</Markdown>
+        <RichMarkdown onLink={onLink} images={images}>
+          {text}
+        </RichMarkdown>
       </div>
     );
   const pieces = markdownPieces(text);
   return (
     <div className={styles.text}>
       {pieces.map((piece, i) => (
-        <Piece key={i} text={piece} onLink={onLink} highlight={i < pieces.length - 1} />
+        <Piece key={i} text={piece} onLink={onLink} highlight={i < pieces.length - 1} images={images} />
       ))}
     </div>
   );
@@ -69,11 +73,14 @@ export default function BlockView({
   block,
   live = false,
   onLink,
+  images,
   onOpenFile,
 }: {
   block: Block;
   live?: boolean;
   onLink: (href: string) => boolean;
+  /** The agent whose own image files a reply shows in place. */
+  images?: AgentImages;
   onOpenFile: (path: string) => void;
 }) {
   switch (block.type) {
@@ -96,7 +103,7 @@ export default function BlockView({
         </div>
       );
     case "text":
-      return <TextBlock text={block.text} live={live} onLink={onLink} />;
+      return <TextBlock text={block.text} live={live} onLink={onLink} images={images} />;
     case "upload":
       return (
         <p className={styles.statusLine}>

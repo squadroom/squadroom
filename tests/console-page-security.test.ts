@@ -81,8 +81,12 @@ test("an agent's reply rendered as Markdown: raw HTML is text, scripts and handl
 
 test("the Console and sign-in pages carry a Content-Security-Policy, HSTS and nosniff, and send no referrer", () => {
   const production = contentSecurityPolicy(false);
-  for (const directive of ["default-src 'self'", "img-src 'self' data:", "connect-src 'self'", "frame-ancestors 'none'", "font-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'"])
+  for (const directive of ["default-src 'self'", "img-src 'self' data:", "connect-src 'self'", "frame-src 'none'", "frame-ancestors 'none'", "font-src 'self' data:", "media-src 'self' data: blob:", "object-src 'none'", "base-uri 'self'", "form-action 'self'"])
     assert.ok(production.split("; ").includes(directive), directive);
+  // The HTML preview's frame is held to this policy too, so it allows the
+  // inline fonts and media of an agent's page: addresses that carry their
+  // own bytes, never one that is fetched.
+  for (const directive of production.split("; ").filter((d) => /^(font|media|img)-src /.test(d))) assert.doesNotMatch(directive, /https?:|\*|wss?:/, directive);
   assert.doesNotMatch(production, /unsafe-eval|ws:/);
   // Only what the page cannot run without: inline scripts and styles.
   assert.match(production, /script-src 'self' 'unsafe-inline'(;|$)/);

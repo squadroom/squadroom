@@ -6,8 +6,8 @@
 // whole, so anything a cut changed (a loose list's numbering, a reference
 // link defined in another piece) is right in the end. Pure, so it is tested.
 
-const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
-const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
+export const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+export const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 
 /** The pieces, which joined give back `text` exactly. A cut falls after a
  * blank line outside a fence, before a line that starts at the margin (an
