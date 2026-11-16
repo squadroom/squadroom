@@ -29,7 +29,7 @@ test("a tab's run as Markdown: summary, agents, each message and reply, commits 
   const md = runReport(reportData(store, tab.id, clock)!);
   assert.match(md, /^# Site › Main: run report/);
   assert.match(md, /- Turns: 2 \(1 done, 1 failed, 0 interrupted, 0 stopped\)/);
-  assert.match(md, /\| Dev \| Claude Code, Haiku \| Code edit \|/);
+  assert.match(md, /\| Dev \| Claude Code, Haiku 4.5 \| Code edit \|/);
   // A message's own heading stays inside its quotation.
   assert.match(md, /The owner:\n\n> # Fix the build\n> It fails on CI\./);
   assert.match(md, /Dev:\n\n> Fixed: the import path was wrong\./);

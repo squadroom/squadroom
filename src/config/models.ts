@@ -52,6 +52,15 @@ export const MODELS: ModelConfig[] = [
   { id: "deepseek-flash", label: "DeepSeek V4.1 Flash", provider: "deepseek", model: "deepseek-flash", contextTokens: 1_000_000, inputPerMtok: 0.3, outputPerMtok: 1.2, cachedInputPerMtok: 0.006, maxOutputTokens: 16384, offPeakPrices: { inputPerMtok: 0.15, outputPerMtok: 0.6, cachedInputPerMtok: 0.003 } },
   { id: "glm-5.3", label: "GLM-5.3", provider: "zai", model: "glm-5.3", contextTokens: 1_000_000, inputPerMtok: 1.4, outputPerMtok: 4.4, cachedInputPerMtok: 0.26, maxOutputTokens: 16384 },
   { id: "glm-5.3-flash", label: "GLM-5.3-Flash", provider: "zai", model: "glm-5.3-flash", inputPerMtok: 0.15, outputPerMtok: 0.5, cachedInputPerMtok: 0.03, maxOutputTokens: 16384 },
+  // Checked on Anthropic's and OpenAI's pricing pages on 16 November 2026.
+  { id: "claude-fable-5-2", label: "Claude Fable 5.2", provider: "anthropic", model: "claude-fable-5-2", contextTokens: 1_000_000, inputPerMtok: 8, outputPerMtok: 40, cachedInputPerMtok: 0.2, cacheWritePerMtok: 10, longCacheWritePerMtok: 16, maxOutputTokens: 16384 },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", provider: "anthropic", model: "claude-sonnet-5-5", contextTokens: 1_000_000, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.1, cacheWritePerMtok: 2.5, longCacheWritePerMtok: 4, maxOutputTokens: 16384 },
+  // Haiku 5.5: a prompt over 100,000 tokens pays five times every rate.
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", provider: "anthropic", model: "claude-haiku-5-5", contextTokens: 1_000_000, inputPerMtok: 0.1, outputPerMtok: 0.5, cachedInputPerMtok: 0.01, cacheWritePerMtok: 0.125, longCacheWritePerMtok: 0.2, maxOutputTokens: 16384, longContext: { aboveTokens: 100000, inputMultiplier: 5, outputMultiplier: 5 } },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", provider: "openai", model: "gpt-6.1-sol", contextTokens: 1_050_000, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.1, cacheWritePerMtok: 2.5, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
+  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", provider: "openai", model: "gpt-6.1-terra", contextTokens: 1_050_000, inputPerMtok: 1, outputPerMtok: 5, cachedInputPerMtok: 0.05, cacheWritePerMtok: 1.25, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
+  { id: "gpt-6-sol", label: "GPT-6 Sol", provider: "openai", model: "gpt-6-sol", contextTokens: 1_050_000, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.2, cacheWritePerMtok: 2.5, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
+  { id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai", model: "gpt-6-luna", contextTokens: 1_050_000, inputPerMtok: 0.1, outputPerMtok: 0.5, cachedInputPerMtok: 0.01, cacheWritePerMtok: 0.125, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
 ];
 
 export function getModel(id: string): ModelConfig | undefined {

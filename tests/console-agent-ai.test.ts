@@ -20,7 +20,7 @@ test("an agent's model and thinking are changed from its next turn, in the same 
   const flag = (args: string[], name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
   await h.ended(h.send(lead.id, "hello"));
   assert.equal(launches().length, 1);
-  assert.equal(flag(launches()[0], "--model"), "haiku");
+  assert.equal(flag(launches()[0], "--model"), "claude-haiku-4-5");
   const session = h.store.session(lead.id);
   assert.ok(session);
 

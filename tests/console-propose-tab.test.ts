@@ -32,7 +32,7 @@ test("a proposal's arguments become the setup screen's team, with the usual AI a
     ["Checker", "claude-code", "haiku", "look", "reviewer"],
   ]);
   assert.ok(pair.setup.members.every((m) => m.prompt.length > 0));
-  assert.match(proposalText(pair.name, pair.setup), /^A new tab "Research": a pair with Solo \(Claude Code Haiku, Code edit\), Checker \(Claude Code Haiku, Code analysis\)\.\n\nGoal: hello$/);
+  assert.match(proposalText(pair.name, pair.setup), /^A new tab "Research": a pair with Solo \(Claude Code Haiku 4.5, Code edit\), Checker \(Claude Code Haiku 4.5, Code analysis\)\.\n\nGoal: hello$/);
 
   const team = proposalSetup({ name: "Build", goal: "g", orchestrator: { kind: "codex" }, members: [{ name: "A", access: "edit", role: "lead", note: "api" }] }, ctx);
   assert.ok(team.ok);
