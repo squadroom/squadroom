@@ -64,7 +64,7 @@ test("the setup screen refuses what cannot work and warns past the per-login lim
     "X: Codex is off right now; choose Claude Code.",
   ]);
   assert.deepEqual(errors({ members: [member("X", { model: "gpt-5.6-sol" })] }), ["X: Claude Code does not offer that model."]);
-  assert.deepEqual(errors({ members: [member("X", { model: "haiku", effort: "high" })] }), ["X: Haiku does not offer that thinking level."]);
+  assert.deepEqual(errors({ members: [member("X", { model: "haiku", effort: "high" })] }), ["X: Haiku 4.5 does not offer that thinking level."]);
   assert.deepEqual(errors({ members: [member("")] }), ["Member 1: give it a name."]);
   assert.match(errors({ members: Array.from({ length: TEAM_MAX_MEMBERS + 1 }, (_, i) => member(`M${i}`)) })[0], /at most 7 members/);
   assert.deepEqual(errors({ members: [member("X", { note: "n".repeat(121) })] }), ["X: the role note is at most 120 characters."]);

@@ -157,8 +157,12 @@ or API key. Anything over that waits in a queue.
 You can pick any of these when you add an agent or set up a team, and one
 team can mix them.
 
-- **Claude Code**, on your Claude subscription or an Anthropic API key.
-- **Codex**, on your ChatGPT login or an OpenAI API key.
+- **Claude Code**, on your Claude subscription or an Anthropic API key:
+  Haiku 4.5, Haiku 5.5, Sonnet 5, Sonnet 5.5, Opus 5.5, Fable 5.1 or
+  Fable 5.2.
+- **Codex**, on your ChatGPT login or an OpenAI API key: GPT-5.6 Sol,
+  GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Sol, GPT-6 Luna or
+  GPT-5.6 Luna.
 - **Grok Build**, with an xAI API key.
 - **Gemini CLI**, with a Gemini API key.
 - **Kimi Code**, on your Kimi Code membership.

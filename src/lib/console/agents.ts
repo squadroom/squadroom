@@ -130,10 +130,13 @@ const longWrite = (id: string) => ({ cacheWritePerMtok: MODELS.find((m) => m.id 
 const CLAUDE_API_KEY_MODELS: AgentModel[] = [
   // Haiku 4.5's cache rates are not in the catalog: a tenth of input to
   // read, twice input to write (as OpenCode's Haiku entry).
-  apiKeyTwin({ id: "haiku", label: "Haiku", model: "haiku", runs: "claude-haiku-4-5", efforts: [] }, catalog("claude-haiku-4-5", "ANTHROPIC_API_KEY", 128_000, { cachedInputPerMtok: 0.1, cacheWritePerMtok: 2 })),
+  apiKeyTwin({ id: "haiku", label: "Haiku 4.5", model: "claude-haiku-4-5", runs: "claude-haiku-4-5", efforts: [] }, catalog("claude-haiku-4-5", "ANTHROPIC_API_KEY", 128_000, { cachedInputPerMtok: 0.1, cacheWritePerMtok: 2 })),
   apiKeyTwin({ id: "claude-sonnet-5", label: "Sonnet 5", model: "claude-sonnet-5", runs: "claude-sonnet-5", efforts: CLAUDE_EFFORTS, taskTools: false }, catalog("claude-sonnet-5", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-sonnet-5"))),
   apiKeyTwin({ id: "claude-opus-5-5", label: "Opus 5.5", model: "claude-opus-5-5", runs: "claude-opus-5-5", efforts: CLAUDE_EFFORTS, taskTools: false }, catalog("claude-opus-5-5", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-opus-5-5"))),
   apiKeyTwin({ id: "claude-fable-5-1", label: "Fable 5.1", model: "claude-fable-5-1", runs: "claude-fable-5-1", efforts: CLAUDE_EFFORTS, taskTools: false }, catalog("claude-fable-5-1", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-fable-5-1"))),
+  apiKeyTwin({ id: "claude-haiku-5-5", label: "Haiku 5.5", model: "claude-haiku-5-5", runs: "claude-haiku-5-5", efforts: [] }, catalog("claude-haiku-5-5", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-haiku-5-5"))),
+  apiKeyTwin({ id: "claude-sonnet-5-5", label: "Sonnet 5.5", model: "claude-sonnet-5-5", runs: "claude-sonnet-5-5", efforts: CLAUDE_EFFORTS, taskTools: false }, catalog("claude-sonnet-5-5", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-sonnet-5-5"))),
+  apiKeyTwin({ id: "claude-fable-5-2", label: "Fable 5.2", model: "claude-fable-5-2", runs: "claude-fable-5-2", efforts: CLAUDE_EFFORTS, taskTools: false }, catalog("claude-fable-5-2", "ANTHROPIC_API_KEY", 128_000, longWrite("claude-fable-5-2"))),
 ];
 // Codex on an OpenAI API key: its own App Server, signed in with the key and
 // keeping it in memory only, never the agent account's ChatGPT login
@@ -142,6 +145,10 @@ const CLAUDE_API_KEY_MODELS: AgentModel[] = [
 const CODEX_API_KEY_MODELS: AgentModel[] = [
   apiKeyTwin({ id: "gpt-5.6-sol", label: "GPT-5.6 Sol", model: "gpt-5.6-sol", runs: "gpt-5.6-sol", efforts: CODEX_EFFORTS }, catalog("gpt-5.6-sol", "OPENAI_API_KEY", 128_000)),
   apiKeyTwin({ id: "gpt-6-astra", label: "GPT-6 Astra", model: "gpt-6-astra", runs: "gpt-6-astra", efforts: CODEX_EFFORTS }, catalog("gpt-6-astra", "OPENAI_API_KEY", 128_000)),
+  apiKeyTwin({ id: "gpt-6.1-sol", label: "GPT-6.1 Sol", model: "gpt-6.1-sol", runs: "gpt-6.1-sol", efforts: CODEX_EFFORTS }, catalog("gpt-6.1-sol", "OPENAI_API_KEY", 128_000)),
+  apiKeyTwin({ id: "gpt-6.1-terra", label: "GPT-6.1 Terra", model: "gpt-6.1-terra", runs: "gpt-6.1-terra", efforts: CODEX_EFFORTS }, catalog("gpt-6.1-terra", "OPENAI_API_KEY", 128_000)),
+  apiKeyTwin({ id: "gpt-6-sol", label: "GPT-6 Sol", model: "gpt-6-sol", runs: "gpt-6-sol", efforts: CODEX_EFFORTS }, catalog("gpt-6-sol", "OPENAI_API_KEY", 128_000)),
+  apiKeyTwin({ id: "gpt-6-luna", label: "GPT-6 Luna", model: "gpt-6-luna", runs: "gpt-6-luna", efforts: CODEX_EFFORTS }, catalog("gpt-6-luna", "OPENAI_API_KEY", 128_000)),
   apiKeyTwin({ id: "gpt-5.6-luna", label: "GPT-5.6 Luna", model: "gpt-5.6-luna", runs: "gpt-5.6-luna", efforts: CODEX_EFFORTS }, catalog("gpt-5.6-luna", "OPENAI_API_KEY", 128_000)),
 ];
 
@@ -154,17 +161,21 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     credential: "CLAUDE_CODE_OAUTH_TOKEN",
     offered: true,
     models: [
-      // Checked 2026-10-16 on 2.1.282: it runs
-      // claude-haiku-4-5-20251001 for `haiku`.
-      { id: "haiku", label: "Haiku", model: "haiku", runs: "claude-haiku-4-5", efforts: [] },
+      // Haiku 4.5 by its full name: from 2.1.325 the `haiku` alias runs
+      // Haiku 5.5. The id stays, a stable history key.
+      { id: "haiku", label: "Haiku 4.5", model: "claude-haiku-4-5", runs: "claude-haiku-4-5", efforts: [] },
+      { id: "claude-haiku-5-5", label: "Haiku 5.5", model: "claude-haiku-5-5", runs: "claude-haiku-5-5", efforts: [] },
       { id: "claude-sonnet-5", label: "Sonnet 5", model: "claude-sonnet-5", runs: "claude-sonnet-5", efforts: CLAUDE_EFFORTS, taskTools: false },
+      { id: "claude-sonnet-5-5", label: "Sonnet 5.5", model: "claude-sonnet-5-5", runs: "claude-sonnet-5-5", efforts: CLAUDE_EFFORTS, taskTools: false },
       { id: "claude-opus-5-5", label: "Opus 5.5", model: "claude-opus-5-5", runs: "claude-opus-5-5", efforts: CLAUDE_EFFORTS, taskTools: false },
       { id: "claude-fable-5-1", label: "Fable 5.1", model: "claude-fable-5-1", runs: "claude-fable-5-1", efforts: CLAUDE_EFFORTS, taskTools: false },
+      { id: "claude-fable-5-2", label: "Fable 5.2", model: "claude-fable-5-2", runs: "claude-fable-5-2", efforts: CLAUDE_EFFORTS, taskTools: false },
       // The same models on an Anthropic API key.
       ...CLAUDE_API_KEY_MODELS,
     ],
     sources: [
       "Live check 2026-10-16: alias mapping and apiKeySource on 2.1.282",
+      "Claude Code 2.1.325 package (2026-11-16): bundles claude-haiku-5-5, claude-sonnet-5-5 and claude-fable-5-2",
       "src/lib/console/clients.ts: pinned version (installed by scripts/console/setup-agent-user.sh)",
     ],
   },
@@ -176,11 +187,14 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     credential: null,
     accountLogin: true,
     offered: true,
-    // Bundled by 0.155.1 when last checked (GPT-6 Sol was not, so it is not
-    // offered here).
+    // Bundled by 0.169.0.
     models: [
       { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", model: "gpt-5.6-sol", runs: "gpt-5.6-sol", efforts: CODEX_EFFORTS },
       { id: "gpt-6-astra", label: "GPT-6 Astra", model: "gpt-6-astra", runs: "gpt-6-astra", efforts: CODEX_EFFORTS },
+      { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", model: "gpt-6.1-sol", runs: "gpt-6.1-sol", efforts: CODEX_EFFORTS },
+      { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", model: "gpt-6.1-terra", runs: "gpt-6.1-terra", efforts: CODEX_EFFORTS },
+      { id: "gpt-6-sol", label: "GPT-6 Sol", model: "gpt-6-sol", runs: "gpt-6-sol", efforts: CODEX_EFFORTS },
+      { id: "gpt-6-luna", label: "GPT-6 Luna", model: "gpt-6-luna", runs: "gpt-6-luna", efforts: CODEX_EFFORTS },
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", model: "gpt-5.6-luna", runs: "gpt-5.6-luna", efforts: CODEX_EFFORTS },
       // The same models on an OpenAI API key.
       ...CODEX_API_KEY_MODELS,
@@ -188,6 +202,7 @@ export const AGENT_KINDS: AgentKindInfo[] = [
     sources: [
       "Live checks: one App Server per ChatGPT login, threads, approvals, permission profiles",
       "Live check: models bundled by 0.155.1",
+      "Codex 0.169.0 package (2026-11-16): bundles gpt-6-sol, gpt-6-luna, gpt-6.1-sol and gpt-6.1-terra",
     ],
   },
 ];
