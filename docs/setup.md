@@ -387,7 +387,8 @@ Things to know while using it:
   message holds your whole request for that turn. In a GitHub project the
   commit's author is the agent's name with the GitHub no-reply address of
   the account your token belongs to, so GitHub, and a service that deploys
-  from it, takes the commit as yours. In a GitHub project,
+  from it, takes the commit as yours. A commit the agent makes itself with
+  `git commit` carries the same author. In a GitHub project,
   **Push branch** pushes the agent's `console/…` branch, those messages
   included, through your mirror and opens or updates its pull request;
   **Open pull request** asks the agent to write the title and description

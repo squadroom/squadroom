@@ -26,12 +26,8 @@ export const STORED_OBJECTS = ["--no-replace-objects", "-c", "core.useReplaceRef
 
 /** A commit's author: the agent's name, with the owner's GitHub no-reply
  * address when it is known, else an address of the agent's own. */
-const author = (name: string, agentId: string, email: string | null) => [
-  "-c",
-  `user.name=${name.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 60) || "Console agent"}`,
-  "-c",
-  `user.email=${email ?? `${agentId}@console.local`}`,
-];
+const authorName = (name: string) => name.replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 60) || "Console agent";
+const author = (name: string, agentId: string, email: string | null) => ["-c", `user.name=${authorName(name)}`, "-c", `user.email=${email ?? `${agentId}@console.local`}`];
 
 export class Clone {
   readonly folder: string;
@@ -58,6 +54,17 @@ export class Clone {
     const r = await this.git(args, what, maxStdout);
     if (r.truncated) throw new GitError(`${what} failed: too much output to check.`);
     return r;
+  }
+  /** The same author for the agent's own `git commit` (its client runs Git
+   * itself): written to the clone's settings once the owner's no-reply
+   * address is known, so GitHub and the services that deploy from it see
+   * the owner's account, never the computer's `agent@host`. */
+  async setAuthor(name: string) {
+    if (!this.email) return;
+    for (const [key, value] of [["user.name", authorName(name)], ["user.email", this.email]]) {
+      const now = await this.run(["config", "--local", "--get", key], 4096);
+      if (now.stdout.trim() !== value) await this.git(["config", "--local", key, value], "Setting the commit author", 4096);
+    }
   }
   /** Index entries the agent marked skip-worktree or assume-unchanged
    * (which hide a change from status) are unmarked, so every check sees

@@ -280,6 +280,7 @@ export class Repos {
         const base = await clone.createFromBundle(bundle, project.baseBranch, branch);
         // The new folder starts from GitHub's base as it is now.
         this.o.store.setBaseTip(epoch, project.id, base);
+        await this.clone({ folder, projectId: project.id }).setAuthor(agent.name);
         return { folder, branch, base };
       });
     }
@@ -499,6 +500,7 @@ export class Repos {
     await this.commitEmail(project, epoch);
     const clone = this.clone(agent);
     const only = step ? (p: string) => inStep(agent.folder, join(agent.folder, p), step.files) : undefined;
+    await clone.setAuthor(agent.name);
     const sha = await clone.commitTurn(this.o.redactor.text(message), agent.name, agent.id, { unresolved, conflicts: this.o.store.merging(agent.id)?.files, only, since: step?.since });
     // A finished merge (team_pull) is no longer waiting.
     // A merge is finished whoever committed it (the agent may have, with
