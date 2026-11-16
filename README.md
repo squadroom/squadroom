@@ -97,7 +97,10 @@ work one turn at a time in the window's **Changes** view. **Files**, in
 the same menu, lists everything in the agent's folder, Markdown documents
 first, and opens a file beside the conversation. Each commit's
 message holds your whole request for that turn, and pushing the branch
-publishes it. Nothing is pushed until you approve it, and when an agent
+publishes it. In a GitHub project, every commit, including one an agent
+makes itself with `git commit`, carries your GitHub no-reply address as its
+author, so GitHub and a service that deploys from it, such as Vercel, take it
+as yours. Nothing is pushed until you approve it, and when an agent
 opens a pull request you see its title and description before they are
 posted, unless you chose **Always** for that agent's pushes.
 

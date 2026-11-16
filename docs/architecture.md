@@ -124,7 +124,9 @@ month it started too.
   of the account the project's token belongs to (read once from `GET
   /user` and kept; until GitHub has answered, an address of the agent's
   own), so GitHub and services that deploy from it take the commit as
-  yours. The commit message
+  yours. The same name and address are written into the clone's own Git
+  settings, so a commit the agent makes itself with `git commit` carries
+  them too, never the computer's `agent@<host>`. The commit message
   holds your whole request for that turn (redacted), so **Push branch**
   publishes it on GitHub with the branch.
 - **Clients.** Claude Code (one process per window, `--setting-sources ""`

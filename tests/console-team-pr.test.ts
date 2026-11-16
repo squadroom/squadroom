@@ -479,6 +479,9 @@ test("team_pull with the base branch's name brings GitHub's latest base into the
   await h.ended(h.send(lead.id, "write fix-b.txt"));
   await committed("fix-b.txt");
   assert.equal(email(), "Lead <1234567+octo-owner@users.noreply.github.com> / Lead <1234567+octo-owner@users.noreply.github.com>");
+  // The agent's own `git commit` carries the same author.
+  assert.equal(git(folder, "config", "--local", "user.email"), "1234567+octo-owner@users.noreply.github.com");
+  assert.equal(git(folder, "config", "--local", "user.name"), "Lead");
   // Nothing new on GitHub yet.
   await h.ended(h.send(lead.id, call("team_pull", { from: "main" })));
   assert.match(h.said(lead.id).at(-1)!, /^team_pull: Your branch already has main as GitHub has it now\./);
