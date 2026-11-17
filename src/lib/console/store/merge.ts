@@ -3,11 +3,6 @@ import type { ConsoleJob } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { BASE_TIP } from "./git.ts";
 
-/** What an agent is told at the start of its next turn about a merge it
- * asked for, or of its own pull request, by agent: the lines
- * not yet told. A flag. */
-const MERGE_NEWS = "merge-news:";
-
 // team_merge: the request in Needs you (a notice of kind
 // "merge", as a proposed tab is one), the owner's answer, the merge job the
 // worker runs (in the push jobs' queue) and what the agents are told.
@@ -47,8 +42,8 @@ export const merges = {
   },
   /** The owner's answer to a merge request, once: its Needs you item goes.
    * Approved, the merge is queued for the worker, which checks everything
-   * again before it asks GitHub; denied, the asking agent is told at its
-   * next turn. Either works after the asking turn has ended. */
+   * again before it asks GitHub; denied, every agent that asked is told
+   * (as news). Either works after the asking turn has ended. */
   settleMerge(this: ConsoleStore, noticeId: number, approve: boolean): ConsoleJob | null {
     return this.transaction(() => {
       const n = this.get("SELECT agent_id, data FROM console_notices WHERE id = ? AND kind = 'merge' AND dismissed = 0", noticeId);
@@ -57,29 +52,11 @@ export const merges = {
       const agentId = n.agent_id as string;
       if (!approve) {
         const ask = JSON.parse(n.data as string) as MergeAsk;
-        for (const id of new Set([agentId, ...(ask.alsoAsked ?? [])])) this.addMergeNews(id, deniedNote(ask.number));
+        for (const id of new Set([agentId, ...(ask.alsoAsked ?? [])])) this.addNews(id, deniedNote(ask.number));
         return null;
       }
       return this.job(this.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'merge', 'queued', ?, ?)", agentId, n.data as string, this.now()))!;
     });
-  },
-  /** One more line for an agent's next turn (in the caller's transaction);
-   * a closed agent has no next turn. */
-  addMergeNews(this: ConsoleStore, agentId: string, line: string) {
-    const state = this.agent(agentId)?.state;
-    if (!state || state === "closed") return;
-    this.setFlag(MERGE_NEWS + agentId, JSON.stringify([...this.mergeNews(agentId), line]));
-  },
-  mergeNews(this: ConsoleStore, agentId: string): string[] {
-    const flag = this.flag(MERGE_NEWS + agentId);
-    return flag ? (JSON.parse(flag) as string[]) : [];
-  },
-  /** The agent has been told the first `count` lines (later ones are news). */
-  mergeTold(this: ConsoleStore, epoch: number, agentId: string, count: number) {
-    this.transaction(() => {
-      const left = this.mergeNews(agentId).slice(count);
-      this.setFlag(MERGE_NEWS + agentId, left.length ? JSON.stringify(left) : null);
-    }, epoch);
   },
   /** A merge job ended: its record, the line in each window, what each
    * agent is told next, the owner's note when it did not go through and,
@@ -103,7 +80,7 @@ export const merges = {
         const a = this.agent(agentId);
         if (a) this.insertEvent(0, a, "push", { text: r.message, url: r.url }, this.now());
       }
-      for (const n of r.news) this.addMergeNews(n.agentId, n.text);
+      for (const n of r.news) this.addNews(n.agentId, n.text);
       if (r.notice && asker && this.agent(asker)) this.run("INSERT INTO console_notices (agent_id, text, created_at) VALUES (?, ?, ?)", asker, r.notice, this.now());
       const projectId = asker && this.agent(asker)?.projectId;
       if (r.merged && projectId) this.setFlag(BASE_TIP + projectId, r.merged);
@@ -117,7 +94,7 @@ export const merges = {
         const { number, alsoAsked } = JSON.parse(row.request as string) as MergeAsk;
         const agentId = row.agent_id as string;
         this.run("UPDATE console_jobs SET state = 'failed', message = ?, ended_at = ? WHERE id = ?", mergeUnknown(number), this.now(), row.id as number);
-        for (const id of new Set([agentId, ...(alsoAsked ?? [])])) this.addMergeNews(id, mergeUnknown(number));
+        for (const id of new Set([agentId, ...(alsoAsked ?? [])])) this.addNews(id, mergeUnknown(number));
         if (this.agent(agentId)) this.run("INSERT INTO console_notices (agent_id, text, created_at) VALUES (?, ?, ?)", agentId, mergeUnknown(number), this.now());
       }
     }, epoch);

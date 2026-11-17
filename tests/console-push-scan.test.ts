@@ -53,7 +53,10 @@ test("Push branch checks the objects GitHub lacks, not a patch: binary and -diff
     assert.equal(job.state, "failed", `${n}: ${job.message}`);
     assert.match(job.message ?? "", /contains a credential/);
     assert.throws(() => git(bare, "rev-parse", "--verify", "--quiet", `refs/heads/${branch(n)}`), `${n} reached GitHub`);
+    // The refusal wakes the idle agent with the reason.
+    wakes[n] = await h.woken(agents[n].id, wakes[n] ?? 0);
   };
+  const wakes: Partial<Record<(typeof names)[number], number>> = {};
   // A binary blob (NUL bytes) holding the token: no patch shows it.
   commitFiles(folder("Nul"), "archive", { "archive.bin": Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from(TOKEN), Buffer.from([0, 255])]) });
   await refused("Nul");
@@ -202,6 +205,8 @@ test("a worker that never spawned an agent refuses to push a branch holding a pr
     const first = runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } };
     await h.until(() => ["done", "failed"].includes(h.store.job(first.job.id)!.state), "first push");
     assert.equal(h.store.job(first.job.id)!.state, "done", h.store.job(first.job.id)!.message ?? "");
+    // The idle agent is told that it went out.
+    assert.match(h.store.turn(await h.woken(lead.id))!.prompt, /^\[Console\] While you were not working:\n\nPushed /);
     // The project's own key is: refused, in a worker that handed out nothing.
     commitFiles(h.store.agent(lead.id)!.folder, "config", { "config.env": `OPENAI_API_KEY=${OVERRIDE}\n` });
     await recorded(next, h.store, lead.id);

@@ -322,7 +322,7 @@ export function checksText(jobs: Job[], headSha: string, branchHead: string | nu
     failed.length
       ? `Read the end of a failed job's log with team_checks(job: ${failed[0].j.id}).`
       : some("running")
-        ? "Still running: nothing tells you when they end, so look again in a later turn."
+        ? "Still running: the Console tells you when the checks on your latest push finish, so end your turn instead of waiting."
         : some("other")
           ? "Not every check ran to a result (cancelled, or waiting on someone): do not take this as passed."
           : incomplete

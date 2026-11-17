@@ -372,7 +372,13 @@ export const git = {
     this.transaction(() => {
       this.run("UPDATE console_jobs SET state = ?, message = ?, url = ?, head = ?, ended_at = ? WHERE id = ?", state, message, url, head, this.now(), id);
       const agentId = this.job(id)?.agentId;
-      const failed = state === "done" && agentId && this.job(id)?.kind === "push" ? this.pushFailure(agentId) : null;
+      if (state !== "done" || !agentId || this.job(id)?.kind !== "push") return;
+      // The agent hears that it went out, and of GitHub's checks on its
+      // pull request when they finish.
+      this.addNews(agentId, message);
+      const pr = url ? /\/pull\/(\d+)$/.exec(url) : null;
+      if (pr && head) this.watchChecks(agentId, head, Number(pr[1]));
+      const failed = this.pushFailure(agentId);
       if (!failed) return;
       if (failed.notice !== null) this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", failed.notice);
       this.setFlag(PUSH_FAILED + agentId, null);

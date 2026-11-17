@@ -317,10 +317,11 @@ and the reason) and a flag for the agent (`push-failed:<agent>`). The
 texts come from `src/lib/console/push-failure.ts`, which is pure:
 `pushHint` knows a refused workflow file, a branch protection rule or
 ruleset, a token GitHub did not accept and a non-fast-forward rejection,
-and says whether the owner or the agent has to act. The agent's next
-prompt starts with one line from `pushFailedNote`, once, and `team_pr`
-starts with the same line while the failed push is the agent's latest
-job. The same failure again keeps the open note instead of adding one. A
+and says whether the owner or the agent has to act. The agent is told
+one line from `pushFailedNote`, once: at the start of its next prompt, or,
+if it is idle, in a turn the Console starts for it (see "News that wakes
+an idle agent" below). `team_pr` starts with the same line while the
+failed push is the agent's latest job. The same failure again keeps the open note instead of adding one. A
 later push of that agent that goes through dismisses the note and clears
 the flag. Nothing is retried. For a refused push, Git's failure text keeps
 up to four of GitHub's `remote:` lines as well as its last three lines.
@@ -332,7 +333,9 @@ The list is bounded (up to 20 runs, 300 jobs a run, 10,000 characters) and
 says so when GitHub has more. Of a log, only the last 256 KB are held and
 the last 24,000 characters shown, redacted as a whole before any line is
 chosen. The token needs **Actions: Read-only** for this; without it the
-tool says so.
+tool says so. The agent does not have to keep calling it: after a push
+that opens or updates a pull request, the worker waits for GitHub's
+checks on that commit and tells the agent when they finish (see below).
 
 `team_project` reads, for every open editing agent of the caller's project
 that has a branch (at most 40), where that branch stands on GitHub: one
@@ -360,8 +363,8 @@ queues a job of kind `merge` in the push queue, so it never overlaps a push.
 The job checks everything again and calls GitHub's merge endpoint with
 `merge_method: squash` and `sha` set to the commit the owner saw, so GitHub
 refuses if the head moved. The result is a line in the asking agent's and
-the branch's agent's windows, a note at the start of their next turn, and a
-note in Needs you when it did not go through. Another agent that asks for
+the branch's agent's windows, a line of news for each of them (below), and
+a note in Needs you when it did not go through. Another agent that asks for
 the same commit while the request waits is added to it and told the
 outcome too. If GitHub's answer to the merge call is lost, the worker reads
 the pull request again: merged means merged, and if it cannot be read the
@@ -370,6 +373,44 @@ was merged. The base branch's new commit
 is recorded at once, so other editing agents hear that it moved. A merge
 job a restart finds running fails with a note to look on GitHub, since it
 may or may not have merged. No branch is deleted.
+
+### News that wakes an idle agent
+
+Some things happen to an agent while it is not working: a merge it asked
+for, or of its own pull request, ends; its push goes out or fails; GitHub's
+checks on its pushed commit finish. Each becomes a line of news, kept in
+the store under a flag per agent (`merge-news:<agent>`, a name from when it
+held merges only; `src/lib/console/store/news.ts`), next to the failed
+push's own flag. A successful push adds its result line, and when its URL
+names a pull request, the worker also starts watching that commit's checks
+(`checks-watch:<agent>`; a later push replaces the commit watched).
+
+Once a minute, measured from the worker's start, the worker reads the
+GitHub Actions runs of every commit it is watching (`Repos.commitChecks`,
+one request each, redacted). The agent gets one line when every run has
+finished (at least one ran, none is still running, and GitHub did not cut
+the list short); when no run has started after 10 minutes; when runs are
+still going after an hour; or when the checks still cannot be read after
+an hour. A failed read is tried again on the next pass.
+
+On every tick, after mail is delivered, the worker looks for agents that
+have news and nothing else coming (`wakeForNews` in
+`src/lib/console/worker/news.ts`). It skips an agent that has mail, a push
+queued, a check watch still open (the checks' result comes with the rest),
+a turn queued or running, or a runtime still busy, and one that is paused,
+held or in an archived tab. For the rest it queues a turn on the owner's
+side whose text starts `[Console] While you were not working:` and lists
+the news, then asks the agent to carry on or say in one line that there is
+nothing to do. It queues one only if the agent is ready, has no open turn
+and no mail, and its latest turn is not a wake that failed before it was
+sent; such news waits for the agent's next turn instead of failing over
+and over.
+
+News is counted as told only once a turn reaches the agent. Any turn's
+prompt starts with the untold news, so a message that arrives first tells
+it, and a wake still queued with nothing left to tell is withdrawn before
+it starts. A wake's text is rebuilt from the untold news when it starts,
+so nothing is lost or told twice.
 
 ## Sign-in
 

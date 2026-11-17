@@ -138,17 +138,17 @@ export function mergeAskText(ask: MergeAsk, own: boolean): string {
 
 /** What the asking agent is answered. */
 export const mergeAsked = (ask: MergeAsk) =>
-  `Asked the owner to merge pull request #${ask.number} into ${ask.base} (squash), at commit ${short(ask.sha)}. It waits in their Needs you and stays there after your turn ends; this does not wait for the answer. You are told the result at the start of a later turn. The approval is for this commit only: a push to ${ask.branch} before then means asking again.`;
+  `Asked the owner to merge pull request #${ask.number} into ${ask.base} (squash), at commit ${short(ask.sha)}. It waits in their Needs you and stays there after your turn ends; this does not wait for the answer. The Console tells you the result as soon as it comes, starting a turn if you are not working, so end your turn now instead of waiting. The approval is for this commit only: a push to ${ask.branch} before then means asking again.`;
 export const mergeWaiting = (ask: MergeAsk) =>
-  `Pull request #${ask.number} at commit ${short(ask.sha)} is already waiting for the owner in their Needs you. Nothing more to do: you are told the result at the start of a later turn.`;
-export const mergeRunning = (number: number) => `The owner has approved merging pull request #${number} and the Console is merging it now. You are told the result at the start of a later turn.`;
+  `Pull request #${ask.number} at commit ${short(ask.sha)} is already waiting for the owner in their Needs you. Nothing more to do: the Console tells you the result as soon as it comes.`;
+export const mergeRunning = (number: number) => `The owner has approved merging pull request #${number} and the Console is merging it now. It tells you the result as soon as it comes.`;
 
 /** The line in the windows of the asking agent and the branch's agent. */
 export const mergedLine = (ask: MergeAsk, commit: string) =>
   `Merged pull request #${ask.number} into ${ask.base} (squash, commit ${short(commit)}), approved by the owner. ${ask.authorName}'s branch ${ask.branch} is now part of ${ask.base}: its next work should start with team_pull(from: "${ask.base}").`;
 export const notMergedLine = (number: number, reason: string) => `Pull request #${number} was not merged: ${reason}`;
 
-/** What an agent is told at its next turn once the merge went through:
+/** What an agent is told (as news) once the merge went through:
  * the agent whose branch it was (`own`), or the one that asked for it. */
 export function mergedNote(ask: MergeAsk, commit: string, own: boolean, askedBy: string | null): string {
   const how = `into ${ask.base} (squash, commit ${short(commit)})`;

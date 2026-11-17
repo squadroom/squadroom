@@ -3,6 +3,7 @@ import { TurnEvents } from "../events.ts";
 import { uploadsNote } from "../files.ts";
 import { keyFor } from "../keys.ts";
 import { PUSH_FAILURE_CHARS, pushFailedNote } from "../push-failure.ts";
+import { wakePrompt } from "../store/news.ts";
 import { errorMessage as message, type SessionTotals } from "../session.ts";
 import { fingerprint, loginKey, NO_REQUESTS } from "../spend.ts";
 import type { TurnRow } from "../store.ts";
@@ -129,11 +130,16 @@ export const turns = {
     // for the same push again blindly.
     const pushNews = this.store.failedPush(rt.agent.id, true);
     const pushNote = pushNews ? `${pushFailedNote(this.redactor.shorten(pushNews.text, PUSH_FAILURE_CHARS))}\n\n` : "";
-    // A merge it asked for, or of its own pull request: what
-    // came of it, said once.
-    const mergeNews = this.store.mergeNews(rt.agent.id);
-    const mergedNote = mergeNews.length ? `${mergeNews.join("\n\n")}\n\n` : "";
-    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${mergedNote}${baseNote}${pushNote}${t.prompt}`;
+    // What happened while it did not work, said once: a merge it asked
+    // for or of its own pull request, its push and the checks GitHub ran
+    // on it.
+    const news = this.store.news(rt.agent.id);
+    const newsNote = news.length ? `${news.join("\n\n")}\n\n` : "";
+    // The Console's message to an idle agent is its news, as it stands
+    // now (none lost, none twice); told once it reaches the agent.
+    const waking = this.store.isWake(this.store.turn(t.id)?.trigger ?? "", t.prompt) && (news.length > 0 || !!pushNews);
+    const body = waking ? `${baseNote}${wakePrompt(pushNews ? [...news, pushNote.trimEnd()] : news)}` : `${newsNote}${baseNote}${pushNote}${t.prompt}`;
+    t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${body}`;
     // Recorded only once the client has accepted the turn (which an
     // unacknowledged start proves later, or never).
     let spent = false;
@@ -149,7 +155,7 @@ export const turns = {
       if (uploads.length) this.safe(() => this.store.markDelivered(this.epoch!, uploads.map((u) => u.id), t.id));
       if (baseNews) this.safe(() => this.store.baseTold(this.epoch!, rt.agent.id, baseNews));
       if (pushNews) this.safe(() => this.store.pushTold(this.epoch!, rt.agent.id, pushNews.job));
-      if (mergeNews.length) this.safe(() => this.store.mergeTold(this.epoch!, rt.agent.id, mergeNews.length));
+      if (news.length) this.safe(() => this.store.newsTold(this.epoch!, rt.agent.id, news.length));
     };
     const session = this.ensureSession(rt);
     // Before the paid request is handed over: the durable mark must succeed,

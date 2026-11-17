@@ -41,6 +41,12 @@ finishes its current turn, then arrives as its next prompt. Routes pass one
 agent's finished reply straight to another, for example when the Lead ends
 with "ready for review".
 
+An agent also hears about its own GitHub work without anyone messaging it:
+when its push goes out or fails, when GitHub's checks on its pull request
+finish, and when a merge it asked for (or of its own pull request) is done.
+If the agent is idle, Squadroom sends it a short message with that news so
+it can carry on, instead of waiting for someone to write to it.
+
 When a team has an Orchestrator you give it the goal, and it reports back
 to you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one

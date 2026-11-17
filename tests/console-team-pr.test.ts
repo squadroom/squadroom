@@ -7,6 +7,7 @@ import { runCommand } from "../src/lib/console/commands.ts";
 import { needsView, projectView } from "../src/lib/console/views.ts";
 import { CHECKS_CHARS, JOB_LOG_CHARS, checksSummary, checksText, cleanComment, codexState, jobLogText, pullRequestReviewText } from "../src/lib/console/pull-request.ts";
 import { readChecks, readJobLog } from "../src/lib/console/github-api.ts";
+import { wakePrompt } from "../src/lib/console/worker/news.ts";
 import { git, harness, TOKEN } from "./helpers/console-harness.ts";
 import { resendNote } from "../src/lib/console/team.ts";
 import { teamProjectText, type ProjectAgent } from "../src/lib/console/team-project.ts";
@@ -333,6 +334,8 @@ test("team_pr reads the agent's pull request; team_pr_reply answers and resolves
   runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
   await h.ended(pushed);
   await h.until(() => gh.pulls.length === 1 && gh.comments.length === 1, "pull request opened");
+  // The agent hears that it went out.
+  assert.match(h.takeNews(lead.id).join("\n"), /^Pushed console\/[^ ]+ \(push \d+\)\. Opened pull request #100\./);
   gh.comments.push({ pr: 100, author: "chatgpt-codex-connector[bot]", body: SUMMARY("completed", "b149db344f31") });
   gh.threads.push({ id: "PRRT_one", pr: 100, resolved: false, path: "mobile/app/dinnerparty.jsx", line: 75, comments: [{ author: "chatgpt-codex-connector", body: FINDING }] });
   gh.threads.push({ id: "PRRT_two", pr: 100, resolved: false, path: "mobile/app/guest.jsx", line: 9, comments: [{ author: "octocat", body: "Same here?" }] });
@@ -865,10 +868,12 @@ test("a failed push is put in Needs you with the reason and told to the agent on
   assert.ok(item.text.startsWith(`The push of ${branch} did not go through. ${WORKFLOW_HINT}\n\nDetails: Pushing ${branch} failed: `), item.text);
   // It notifies as any Needs you item does.
   assert.ok(needNotices(needsView(h.store)).some((n) => n.key === `notice:${item.id}` && n.title === "Lead" && n.body.startsWith(`The push of ${branch} did not go through. GitHub refused`)));
-  // The agent's next turn starts with the reason, once.
+  // The idle agent is woken with the reason, once.
   const note = pushFailedNote(failed.message!);
   assert.ok(note.startsWith(`Your last push did not go through. ${WORKFLOW_HINT} (Pushing ${branch} failed: `));
-  assert.equal(await echo("second"), `echo: ${note}\n\nsecond`);
+  const woke = await h.woken(lead.id);
+  assert.equal(h.store.turn(woke)!.prompt, wakePrompt([note]));
+  assert.equal(await echo("second"), "echo: second");
   assert.equal(await echo("third"), "echo: third");
   // team_pr says it too, while that push is its latest.
   assert.equal(await echo(call("team_pr")), `team_pr: error: ${note}\n\n${branch} has no open pull request yet. Push it with team_push (the owner approves), which opens one.`);
@@ -876,7 +881,8 @@ test("a failed push is put in Needs you with the reason and told to the agent on
   // the owner's item stays as it is (no second notification).
   const again = await push("failed");
   assert.deepEqual(items().map((n) => n.id), [item.id]);
-  assert.equal(await echo("fourth"), `echo: ${pushFailedNote(again.message!)}\n\nfourth`);
+  const woke2 = await h.woken(lead.id, woke);
+  assert.equal(h.store.turn(woke2)!.prompt, wakePrompt([pushFailedNote(again.message!)]));
   assert.equal(await echo("fifth"), "echo: fifth");
   // Dismissed by the owner, it is gone; the next failure is a new item.
   runCommand(h.store, { action: "dismissNotice", noticeId: item.id });
@@ -884,14 +890,15 @@ test("a failed push is put in Needs you with the reason and told to the agent on
   await push("failed");
   assert.equal(items().length, 1);
   assert.notEqual(items()[0].id, item.id);
+  await h.woken(lead.id, woke2);
   // The owner fixes the cause. A push that goes through settles it: the
-  // item goes, and the agent is told nothing more (not even the failure
-  // it had not heard of yet).
+  // item goes, and the agent is told only that it went out.
   rmSync(hook);
   const done = await push("done");
   assert.match(done.message!, new RegExp(`^Pushed ${branch.replace("/", "\\/")} \\(push ${done.id}\\)`));
   assert.equal(items().length, 0);
   assert.equal(h.store.failedPush(lead.id), null);
+  assert.deepEqual(h.takeNews(lead.id), [done.message]);
   assert.equal(await echo("sixth"), "echo: sixth");
   gh.state.head = git(h.store.agent(lead.id)!.folder, "rev-parse", "HEAD");
   assert.match(await echo(call("team_pr")), /^team_pr: Pull request #100 \(open\)/);
@@ -981,6 +988,7 @@ test("team_project shows an agent of one tab where the other tabs' branches, pus
     const job = h.store.queuePush(id).id;
     await h.until(() => h.store.job(job)!.state !== "queued" && h.store.job(job)!.state !== "running", "the push ends");
     assert.equal(h.store.job(job)!.state, state, h.store.job(job)!.message ?? "");
+    if (state === "done") h.takeNews(id);
   };
   // One Builder's push goes through and opens its pull request, whose check
   // fails; it then commits once more. The other Builder's push is refused.
@@ -1042,4 +1050,40 @@ test("team_project shows an agent of one tab where the other tabs' branches, pus
   assert.doesNotMatch(theirs, /Builder|Lead|owner\/repo/);
   // Nothing was written on GitHub by reading.
   assert.equal(gh.pulls.length, 1);
+});
+
+test("GitHub's checks on a pushed commit wake the idle agent when they finish, with its push", async (t) => {
+  const bare = origin(t);
+  const gh = github();
+  gh.state.bare = bare;
+  const h = await harness(t, {}, false, {
+    project: { source: "github", repo: "https://github.com/owner/repo", baseBranch: "main" },
+    githubFetch: gh.fetcher,
+    remoteUrl: () => bare,
+    checksPollMs: 50,
+  });
+  await h.worker.start();
+  await h.until(() => h.store.project(h.project.id)!.state === "ready", "project ready");
+  const builder = h.agent("Builder").id;
+  await h.ready(builder);
+  writeFileSync(join(h.store.agent(builder)!.folder, ".git", "info", "exclude"), "args.jsonl\nenv.json\n");
+  await h.ended(h.send(builder, "write fix.txt"));
+  const job = h.store.queuePush(builder).id;
+  await h.until(() => h.store.job(job)!.state === "done", "pushed");
+  // The commit pushed, now waited for.
+  const sha = git(bare, "rev-parse", `refs/heads/${h.store.agentBase(builder).branch!}`);
+  assert.deepEqual(h.store.checksWatches().map((w) => [w.agentId, w.sha, w.number]), [[builder, sha, 100]]);
+  // No check yet: nothing wakes the agent, its push news waits.
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!h.events(builder).some((e) => e.kind === "owner" && (e.body as { text: string }).text.startsWith("[Console]")));
+  gh.jobs.push({ id: 51, sha, name: "test", status: "completed", conclusion: "failure", log: "" });
+  const prompt = h.store.turn(await h.woken(builder))!.prompt;
+  assert.equal(
+    prompt,
+    wakePrompt([
+      h.store.job(job)!.message!,
+      `GitHub's checks on your pull request #100 (commit ${sha.slice(0, 8)}) have finished (1 failed (CI)). team_checks shows them, and team_checks(job: n) the end of a failed job's log.`,
+    ]),
+  );
+  assert.deepEqual(h.store.checksWatches(), []);
 });

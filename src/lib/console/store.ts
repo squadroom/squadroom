@@ -14,6 +14,7 @@ import { pause } from "./store/pause.ts";
 import { upkeep } from "./store/upkeep.ts";
 import { images } from "./store/images.ts";
 import { merges } from "./store/merge.ts";
+import { news } from "./store/news.ts";
 
 // The Console's own store: `~/.squadroom/console.sqlite`, its own lease
 // row, append-only events. The web process writes only owner commands
@@ -341,6 +342,7 @@ type Pause = typeof pause;
 type Upkeep = typeof upkeep;
 type Images = typeof images;
 type Merges = typeof merges;
+type News = typeof news;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
-export interface ConsoleStore extends Projects, Turns, Lifecycle, Requests, Git, Files, Team, Mailbox, Pause, Upkeep, Images, Merges {}
-Object.assign(ConsoleStore.prototype, projects, turns, lifecycle, requests, git, files, team, mailbox, pause, upkeep, images, merges);
+export interface ConsoleStore extends Projects, Turns, Lifecycle, Requests, Git, Files, Team, Mailbox, Pause, Upkeep, Images, Merges, News {}
+Object.assign(ConsoleStore.prototype, projects, turns, lifecycle, requests, git, files, team, mailbox, pause, upkeep, images, merges, news);
