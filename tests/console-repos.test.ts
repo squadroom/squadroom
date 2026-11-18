@@ -118,11 +118,14 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   const early = (runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } }).job;
   await h.until(() => ["done", "failed"].includes(h.store.job(early.id)!.state), "push refused");
   assert.match(h.store.job(early.id)!.message ?? "", /not committed yet/);
-  // The next turn commits them on their own, not as its own work.
-  const next = h.send(lead.id, "hello again");
-  await h.ended(next);
+  // The refused push wakes the idle agent with the reason; that turn
+  // commits the leftovers on their own, not as its own work.
+  const wake = await h.woken(lead.id);
+  let last = wake;
+  const woken = async () => h.store.turn((last = await h.woken(lead.id, last)))!.prompt;
+  assert.match(h.store.turn(wake)!.prompt, /did not go through[\s\S]*not committed yet/);
   await h.until(() => changesView(h.store, lead.id)!.commits.length === 2, "leftovers committed");
-  assert.equal(git(leadFolder, "log", "-1", "--format=%s"), `Console: changes not committed before turn ${next}`);
+  assert.equal(git(leadFolder, "log", "-1", "--format=%s"), `Console: changes not committed before turn ${wake}`);
   // Push branch: the agent's branch reaches "GitHub"; the token was used by
   // the owner's mirror only, never written anywhere the agent user can read.
   const job = (runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } }).job;
@@ -131,6 +134,8 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   assert.equal(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
   assert.equal(git(bare, "rev-parse", "refs/heads/main"), git(leadFolder, "rev-parse", "main"));
   assert.equal(h.store.job(job.id)!.url, `https://github.com/owner/repo/compare/main...console/${branch.slice(8)}?expand=1`);
+  // The idle agent hears that it went out.
+  assert.match(await woken(), /\n\nPushed console\//);
   const leak = (dir: string): boolean =>
     readdirSync(dir, { withFileTypes: true }).some((e) =>
       e.isDirectory() ? leak(join(dir, e.name)) : readFileSync(join(dir, e.name)).includes(GIT_TOKEN),
@@ -147,13 +152,15 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   await h.until(() => ["done", "failed"].includes(h.store.job(stray.id)!.state), "push refused");
   assert.match(h.store.job(stray.id)!.message ?? "", /has a commit the Console has not checked/);
   assert.notEqual(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
-  // The next turn records it (Changes shows it), and then it pushes.
-  await h.ended(h.send(lead.id, "hello once more"));
+  // The refusal wakes the agent; that turn records it (Changes shows it),
+  // and then it pushes.
+  assert.match(await woken(), /has a commit the Console has not checked/);
   assert.ok(changesView(h.store, lead.id)!.diff!.files.includes("late.txt"));
   const after = (runCommand(h.store, { action: "push", agentId: lead.id }) as { job: { id: number } }).job;
   await h.until(() => ["done", "failed"].includes(h.store.job(after.id)!.state), "push after the turn");
   assert.equal(h.store.job(after.id)!.state, "done", h.store.job(after.id)!.message ?? "");
   assert.equal(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
+  await woken();
 
   // A branch holding a credential the Console handed out is never pushed.
   const leaked = h.send(lead.id, "leak debug.txt");
@@ -163,9 +170,8 @@ test("a GitHub project: checked, mirrored, cloned per agent; turns are committed
   await h.until(() => ["done", "failed"].includes(h.store.job(refused.id)!.state), "push refused");
   assert.match(h.store.job(refused.id)!.message ?? "", /contains a credential/);
   assert.notEqual(git(bare, "rev-parse", `refs/heads/${branch}`), git(leadFolder, "rev-parse", "HEAD"));
-  // The agent's next turn is told why, and the owner's Needs you has it.
-  await h.ended(h.send(lead.id, "noted"));
-  assert.match(h.said(lead.id).at(-1)!, /^echo: Your last push did not go through\. [^\n]*contains a credential[^\n]*\nThe owner has been told in their Needs you\. [^\n]*\n\nnoted$/);
+  // The idle agent is woken with why, and the owner's Needs you has it.
+  assert.match(await woken(), /\n\nYour last push did not go through\. [^\n]*contains a credential[^\n]*\nThe owner has been told in their Needs you\. [^\n]*\n\nCarry on from here\./);
   assert.equal(needsView(h.store).notices.filter((n) => n.text.startsWith(`The push of ${branch} did not go through.`)).length, 1);
   // And never while the agent works.
   const busy = h.send(lead.id, "hang");

@@ -30,11 +30,11 @@ export const lifecycle = {
       if (this.pausedFor(agent)) return false;
       if (this.get("SELECT usage_hold FROM console_tabs WHERE id = ?", agent.tabId)?.usage_hold != null) return false;
       // Only the head of the agent's queue, read now: a Send next or Edit
-      // that committed first is what runs. A team turn held by a teammate
+      // that committed first is what runs. A team turn or wake held by a teammate
       // waits without blocking the owner's own messages, as the schedule
       // does.
       const held = !!this.heldBy(agent);
-      if (this.queuedTurns(agent.id).find((q) => !(held && q.trigger === "team"))?.id !== turnId) return false;
+      if (this.queuedTurns(agent.id).find((q) => !(held && this.holdable(q)))?.id !== turnId) return false;
       const now = this.now();
       const changed = this.run(
         "UPDATE console_turns SET status = 'running', epoch = ?, started_at = ?, billing = ? WHERE id = ? AND status = 'queued'",

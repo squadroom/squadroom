@@ -1,6 +1,6 @@
 // A failed push, said in plain words. Pure: the worker passes
 // the failure's text, already redacted, and puts what these return in the
-// owner's Needs you and at the start of the agent's next turn.
+// owner's Needs you and in what the agent is told next.
 
 /** The most of a failure's own text that either message carries (Git's
  * own words come already cut to 400 characters, after what failed). */
@@ -60,7 +60,8 @@ export function pushFailedNotice(branch: string | null, failure: string): string
   return hint ? `${what} ${hint.text}\n\nDetails: ${failure}` : `${what} ${failure}`;
 }
 
-/** What the agent is told, once, at the start of its next turn; team_pr
+/** What the agent is told, once (with its next turn, or a turn the
+ * Console starts for it when it is idle); team_pr
  * says it too while the failed push is the agent's latest. */
 export function pushFailedNote(failure: string): string {
   const hint = pushHint(failure);

@@ -22,7 +22,7 @@ import {
   type GitHubApi,
 } from "./github-api.ts";
 import { CONSOLE_FILES_IN_BRANCH, Mirror } from "./mirror.ts";
-import { CODEX_REVIEW, JOB_LOG_BYTES, checksSummary, checksText, jobLogText, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
+import { CODEX_REVIEW, JOB_LOG_BYTES, checksSummary, checksText, jobLogText, outcome, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { checksLine, checksRefusal, mergeCommitTitle, movedRefusal, notConsole, notFound, pullRefusal, reviewLine, unpushedRefusal, unstableRefusal, type MergeAsk, type PullState } from "./merge.ts";
 import { agentModel } from "./agents.ts";
 import type { Launcher } from "./launcher.ts";
@@ -598,6 +598,20 @@ export class Repos {
     if (!job) throw new GitError(`Job ${jobId} is not one of your pull request's checks for ${headSha.slice(0, 8)} (team_checks lists them).`);
     const log = await readJobLog(project.repo!, job.id, JOB_LOG_BYTES, gh);
     return redact(jobLogText(job, log, redact));
+  }
+  /** GitHub's checks on one pushed commit, for the Console's wait on them:
+   * whether any ran, whether all finished, and the summary team_project
+   * shows, redacted. Nothing is written. */
+  async commitChecks(project: ConsoleProject, sha: string): Promise<{ started: boolean; finished: boolean; failed: boolean; summary: string }> {
+    const r = await readRuns(project.repo!, sha, this.github(this.token(project.id)));
+    const runs = r.runs.map((run) => ({ ...run, name: this.o.redactor.text(run.name) }));
+    return {
+      started: runs.length > 0,
+      // A list GitHub cut short proves nothing about the runs it left out.
+      finished: runs.length > 0 && !r.incomplete && runs.every((run) => outcome(run) !== "running"),
+      failed: runs.some((run) => outcome(run) === "failed"),
+      summary: checksSummary(runs, r.incomplete),
+    };
   }
   /** team_project: where each of these agents' branches stands on GitHub,
    * by agent id, read with the owner's token in the worker and redacted.

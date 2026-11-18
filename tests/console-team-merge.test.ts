@@ -272,6 +272,7 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
     runCommand(h.store, { action: "decide", requestId: h.store.openRequests()[0].id, decision: "allow" });
     await h.ended(turn);
     await h.until(() => (h.store.latestJob(id)?.id ?? 0) > before && h.store.latestJob(id)!.state === "done", `${title} pushed`);
+    h.takeNews(id);
     return gh.pulls.find((p) => p.head === branch(id) && p.state === "open")!;
   };
   const green = (sha: string) => gh.jobs.push({ id: gh.jobs.length + 1, sha, name: "unit", status: "completed", conclusion: "success" }, { id: gh.jobs.length + 2, sha, name: "e2e", status: "completed", conclusion: "skipped" });
@@ -327,6 +328,7 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   // A push asked for in the same turn has not run yet.
   h.store.queuePush(lead.id);
   await h.until(() => h.store.latestJob(lead.id)!.state === "done", "pushed");
+  h.takeNews(lead.id);
   const sha = gh.headOf(pr);
   assert.notEqual(sha, head);
   assert.equal(items().length, 0);
@@ -338,7 +340,7 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   gh.state.threads = 2;
   assert.equal(
     await merge(lead.id),
-    `team_merge: Asked the owner to merge pull request #100 into main (squash), at commit ${sha.slice(0, 8)}. It waits in their Needs you and stays there after your turn ends; this does not wait for the answer. You are told the result at the start of a later turn. The approval is for this commit only: a push to ${branch(lead.id)} before then means asking again.`,
+    `team_merge: Asked the owner to merge pull request #100 into main (squash), at commit ${sha.slice(0, 8)}. It waits in their Needs you and stays there after your turn ends; this does not wait for the answer. The Console tells you the result as soon as it comes, starting a turn if you are not working, so end your turn now instead of waiting. The approval is for this commit only: a push to ${branch(lead.id)} before then means asking again.`,
   );
   assert.equal(items().length, 1);
   const item = items()[0];
@@ -416,6 +418,8 @@ test("team_merge: asked, shown in Needs you with the facts, approved after the t
   await echo(builder.id, "write more.txt");
   h.store.queuePush(builder.id);
   await h.until(() => gh.headOf(theirs) !== seen, "the branch moved");
+  await h.until(() => h.store.latestJob(builder.id)!.state === "done", "pushed");
+  h.takeNews(builder.id);
   const now = gh.headOf(theirs);
   green(now);
   const moved = await approve();
@@ -532,5 +536,5 @@ test("an agent that joins a merge while it runs is told its outcome", (t) => {
   const ask = { number: 7, url: "u", title: "T", branch: "console/x", base: "main", sha: "a".repeat(40), authorId: lead.id, authorName: "Lead", checks: "", review: null, alsoAsked: [builder.id] };
   const id = store.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'merge', 'running', ?, 0)", lead.id, JSON.stringify(ask));
   store.finishMerge(epoch, id, { merged: null, message: "not merged", url: null, windows: [lead.id], news: [{ agentId: lead.id, text: "Not merged." }], notice: null });
-  assert.deepEqual(store.mergeNews(builder.id), ["Not merged."]);
+  assert.deepEqual(store.news(builder.id), ["Not merged."]);
 });

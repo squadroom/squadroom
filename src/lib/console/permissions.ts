@@ -91,8 +91,10 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
       // Nothing runs on after its turn: helpers and commands finish, or are
       // stopped, inside the turn the per-turn commit covers.
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
-      // A permission prompt may wait for the owner (Needs you).
+      // A permission prompt may wait for the owner (Needs you), silently:
+      // Claude Code also ends a tool call that sends nothing for 5 minutes.
       MCP_TOOL_TIMEOUT: String(24 * 60 * 60_000),
+      CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(24 * 60 * 60_000),
       ...(permission === "edit" ? packageCacheEnv(`${folder}/.git/console-cache`) : {}),
     },
   };

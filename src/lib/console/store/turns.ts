@@ -68,29 +68,31 @@ type Gauge = { tokens: number | null; contextWindow: number | null; measured: bo
 export const turns = {
   /** Queue an owner message as a turn, with its transcript row. */
   queueTurn(this: ConsoleStore, agentId: string, prompt: string, resendOf: number | null = null, options: { pushApproved?: boolean; uploadIds?: number[] } = {}): Queued {
-    return this.transaction(() => {
-      const a = this.agent(agentId);
-      if (!a || a.state === "closed") throw new Error("That agent is closed.");
-      if (a.state === "error") throw new Error("That agent could not be set up.");
-      const resendSummary = resendOf !== null && !!this.turn(resendOf)?.summary;
-      if (resendSummary) this.summaryAllowed(a);
-      const now = this.now();
-      const id = this.insert(
-        "INSERT INTO console_turns (agent_id, trigger, prompt, status, resend_of, created_at, push_approved) VALUES (?, 'owner', ?, 'queued', ?, ?, ?)",
-        // A Send again of an "Open pull request" turn keeps its approval.
-        agentId, prompt, resendOf, now, (options.pushApproved ?? (resendOf !== null && this.pushApproved(resendOf))) ? 1 : 0,
-      );
-      // An owner message starts an instruction.
-      this.run("UPDATE console_turns SET instruction_id = id WHERE id = ?", id);
-      // A Re-send of a summary request is still one, with the same checks
-      // and first in the queue.
-      if (resendSummary) this.markSummary(id);
-      this.insertEvent(id, a, "owner", { text: prompt }, now);
-      // A Re-send carries the files its interrupted turn never announced.
-      if (resendOf !== null) this.run("UPDATE console_uploads SET bound_turn = ? WHERE bound_turn = ? AND delivered_turn IS NULL", id, resendOf);
-      const refusedUploads = this.bindUploads(agentId, id, options.uploadIds ?? []);
-      return { ...this.turn(id)!, refusedUploads };
-    });
+    return this.transaction(() => this.ownerTurn(agentId, prompt, resendOf, options));
+  },
+  /** queueTurn's work, in the caller's transaction. */
+  ownerTurn(this: ConsoleStore, agentId: string, prompt: string, resendOf: number | null, options: { pushApproved?: boolean; uploadIds?: number[] }): Queued {
+    const a = this.agent(agentId);
+    if (!a || a.state === "closed") throw new Error("That agent is closed.");
+    if (a.state === "error") throw new Error("That agent could not be set up.");
+    const resendSummary = resendOf !== null && !!this.turn(resendOf)?.summary;
+    if (resendSummary) this.summaryAllowed(a);
+    const now = this.now();
+    const id = this.insert(
+      "INSERT INTO console_turns (agent_id, trigger, prompt, status, resend_of, created_at, push_approved) VALUES (?, 'owner', ?, 'queued', ?, ?, ?)",
+      // A Send again of an "Open pull request" turn keeps its approval.
+      agentId, prompt, resendOf, now, (options.pushApproved ?? (resendOf !== null && this.pushApproved(resendOf))) ? 1 : 0,
+    );
+    // An owner message starts an instruction.
+    this.run("UPDATE console_turns SET instruction_id = id WHERE id = ?", id);
+    // A Re-send of a summary request is still one, with the same checks
+    // and first in the queue.
+    if (resendSummary) this.markSummary(id);
+    this.insertEvent(id, a, "owner", { text: prompt }, now);
+    // A Re-send carries the files its interrupted turn never announced.
+    if (resendOf !== null) this.run("UPDATE console_uploads SET bound_turn = ? WHERE bound_turn = ? AND delivered_turn IS NULL", id, resendOf);
+    const refusedUploads = this.bindUploads(agentId, id, options.uploadIds ?? []);
+    return { ...this.turn(id)!, refusedUploads };
   },
   /** The files sent with a message: bound to it, unless one was released
    * (its hold lapsed or was let go), since another turn may have announced

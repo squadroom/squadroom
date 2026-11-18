@@ -19,7 +19,7 @@ class CodexSession implements AgentSession {
   private driver: CodexLoginDriver;
   /** Its thread on the current server, the config it has, and its last
    * turn's id (a late event of that turn is not the next one's). */
-  thread: { id: string; key: string; lastTurnId?: string | null } | null = null;
+  thread: { id: string; key: string; server: number | undefined; lastTurnId?: string | null } | null = null;
   exited = false;
   // This turn's state.
   turn: TurnRequest | null = null;
@@ -220,6 +220,12 @@ class CodexSession implements AgentSession {
       developerInstructions: this.ctx.system(),
     };
     const session = this.ctx.storedSession();
+    // A thread still loaded on this server keeps the config it was loaded
+    // with when resumed: its old token (revoked above, so every Console
+    // tool call would be refused) and its old folder list. It is unloaded
+    // first, so the resume loads it again with this config.
+    if (this.thread && this.thread.id === session && this.thread.server === server.pid)
+      await server.call("thread/unsubscribe", { threadId: this.thread.id }).catch((error: unknown) => host.log(`thread ${this.thread?.id} could not be unloaded (${message(error)})`));
     let result: Record<string, unknown> | null = null;
     if (session)
       result = await server.call("thread/resume", { threadId: session, ...params }).catch((error: unknown) => {
@@ -241,7 +247,7 @@ class CodexSession implements AgentSession {
     }
     if (!id || result.model !== model.model) throw new Error(`Codex did not confirm ${model.model} for this thread. No turn was started.`);
     if (this.thread) this.driver.threads.delete(this.thread.id);
-    this.thread = { id, key };
+    this.thread = { id, key, server: server.pid };
     this.driver.threads.set(id, this);
     return id;
   }

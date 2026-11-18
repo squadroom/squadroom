@@ -108,6 +108,7 @@ export interface HarnessExtra {
   /** The first project's source (default: a new empty folder). */
   project?: { source: "folder" | "none" | "github"; repo?: string; baseBranch?: string };
   githubFetch?: typeof fetch;
+  checksPollMs?: number;
   remoteUrl?: (repo: string) => string;
   /** Free disk reported to the worker (default: plenty). */
   freeBytes?: number;
@@ -163,6 +164,8 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     freeBytes: () => extra.freeBytes ?? 1024 ** 4,
     kreaFetch: extra.kreaFetch,
     imagePollMs: 20,
+    // GitHub's checks are read only by a test that asks.
+    checksPollMs: extra.checksPollMs ?? 3_600_000,
     storePath: join(root, "console.sqlite"),
     ...extra.options,
   };
@@ -236,6 +239,27 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     until(() => !["queued", "running", "waiting_for_owner"].includes(store.turn(turnId)!.status), `turn ${turnId} ends`);
   const events = (agentId: string): ConsoleEvent[] => store.events(project.id, 0, 10_000).filter((e) => e.agentId === agentId);
   const said = (agentId: string) => events(agentId).filter((e) => e.kind === "text").map((e) => (e.body as { text: string }).text);
+  /** The Console's turn that wakes an idle agent with its news,
+   * after turn `after`, once it has ended. */
+  const woken = async (agentId: string, after = 0) => {
+    let id = 0;
+    await until(() => {
+      const e = events(agentId).find((x) => x.kind === "owner" && x.turnId > after && (x.body as { text: string }).text.startsWith("[Console] While you were not working"));
+      id = e?.turnId ?? 0;
+      return id > 0;
+    }, `${agentId} woken`);
+    await ended(id);
+    // Its commit after the turn is checked too.
+    await until(() => !worker.runtimes.get(agentId)?.busy, `${agentId} settled`);
+    return id;
+  };
+  /** An agent's untold news, now counted as told: for a test
+   * whose next turn should not start with it. */
+  const takeNews = (agentId: string) => {
+    const lines = store.news(agentId);
+    store.newsTold(worker.epoch!, agentId, lines.length);
+    return lines;
+  };
   const log = () => (existsSync(join(root, "launcher.log")) ? readFileSync(join(root, "launcher.log"), "utf8") : "");
   const codexCalls = () =>
     existsSync(join(agentHome, "codex-calls.jsonl"))
@@ -276,5 +300,5 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
           .slice(0, -1)
           .map((l) => JSON.parse(l) as { pid: number; at: number; cwd: string; argv?: string[]; method: string | null; id: number | null; params: Record<string, unknown> | null; result: Record<string, unknown> | null })
       : [];
-  return { root, store, worker, newWorker, project, tab, agent, codexAgent, acpAgent, acpCalls, keysFile, send, until, ended, started, events, said, log, codexCalls, ready, passes, agentHome, shared };
+  return { root, store, worker, newWorker, project, tab, agent, codexAgent, acpAgent, acpCalls, keysFile, send, until, ended, started, woken, takeNews, events, said, log, codexCalls, ready, passes, agentHome, shared };
 }

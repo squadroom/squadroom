@@ -30,6 +30,7 @@ import { refreshes } from "./worker/refreshes.ts";
 import { sessions } from "./worker/sessions.ts";
 import { teamGit } from "./worker/team-git.ts";
 import { merging } from "./worker/merge.ts";
+import { newsWake } from "./worker/news.ts";
 import { teamTools } from "./worker/team.ts";
 import { turns } from "./worker/turns.ts";
 import { consoleMirrorsDir } from "./config.ts";
@@ -62,6 +63,8 @@ export interface ConsoleWorkerOptions {
   now?: () => number;
   tickMs?: number;
   renewMs?: number;
+  /** How often GitHub's checks being waited for are read. */
+  checksPollMs?: number;
   /** Stop: interrupt, then TERM after this, then KILL after twice this. */
   stopGraceMs?: number;
   /** Codex: how long an interrupt gets before the shared App Server is
@@ -158,6 +161,9 @@ export class ConsoleWorker {
   sessionSaved = new Set<string>();
   cleaning = false;
   checking = false;
+  /** GitHub's checks being waited for: a look now, and when. */
+  checksPolling = false;
+  checksPolledAt = 0;
   mailing = false;
   beating = false;
   /** The Needs you e-mail's memory: when each item was first seen, and
@@ -267,6 +273,7 @@ export class ConsoleWorker {
     const epoch = this.store.takeLease(`${hostname()}:${process.pid}:${randomUUID()}`, this.now());
     if (epoch === null) throw new Error("Another Console worker is running (its lease is current).");
     this.epoch = epoch;
+    this.checksPolledAt = this.now();
     // Renewal starts at once: the recovery below may wait on the launcher
     // or Git for longer than the lease's TTL, and a worker that renewed
     // only afterwards would be replaced while it recovers.
@@ -570,6 +577,8 @@ export class ConsoleWorker {
       this.createFolders();
       this.pollWaits();
       this.deliverMail();
+      this.pollChecks();
+      this.wakeForNews();
       this.runRefreshes();
       const open = this.store.openTurns();
       this.closeAgents();
@@ -642,22 +651,27 @@ export class ConsoleWorker {
     const byAgent = new Map<string, TurnRow[]>();
     for (const row of open) if (row.status === "queued") byAgent.set(row.agentId, [...(byAgent.get(row.agentId) ?? []), row]);
     const ownOrder = (x: TurnRow, y: TurnRow) => (x.nextAt === null ? 1 : 0) - (y.nextAt === null ? 1 : 0) || (y.nextAt ?? 0) - (x.nextAt ?? 0) || x.id - y.id;
-    // A team turn held by a teammate cannot run, so it never sets where its
-    // agent's group stands.
+    // A team turn or the Console's wake held by a teammate cannot run, so it
+    // never sets where its agent's group stands.
     const heldAgents = new Set([...byAgent.keys()].filter((id) => {
       const a = this.store.agent(id);
       return !!a && !!this.store.heldBy(a);
     }));
     const position = (rows: TurnRow[]) => {
-      const runnable = rows.filter((r) => !(r.trigger === "team" && heldAgents.has(r.agentId)));
+      const runnable = rows.filter((r) => !(this.store.holdable(r) && heldAgents.has(r.agentId)));
       return Math.min(...(runnable.length ? runnable : rows).map((r) => r.id));
     };
     const ordered = [...byAgent.values()].sort((x, y) => position(x) - position(y)).flatMap((rows) => rows.sort(ownOrder));
     for (const row of ordered) {
       if (row.status !== "queued" || busy.has(row.agentId)) continue;
-      // A hold keeps a team turn that was already made, without reserving
-      // the agent: the owner's own messages still reach it.
-      if (row.trigger === "team") {
+      // The Console's wake whose news another turn told first.
+      if (this.store.staleWake(row)) {
+        this.safe(() => this.store.withdrawQueued(row.id));
+        continue;
+      }
+      // A hold keeps a team turn or a wake that was already made, without
+      // reserving the agent: the owner's own messages still reach it.
+      if (this.store.holdable(row)) {
         const held = this.store.agent(row.agentId);
         if (held && this.store.heldBy(held)) continue;
       }
@@ -734,7 +748,7 @@ export class ConsoleWorker {
 }
 
 // The area methods, each module's `this` the worker.
-type Areas = typeof sessions & typeof turns & typeof teamTools & typeof teamGit & typeof merging & typeof refreshes & typeof holds & typeof needs & typeof jobs & typeof images;
+type Areas = typeof sessions & typeof turns & typeof teamTools & typeof teamGit & typeof merging & typeof refreshes & typeof holds & typeof needs & typeof jobs & typeof images & typeof newsWake;
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging, @typescript-eslint/no-empty-object-type
 export interface ConsoleWorker extends Areas {}
-Object.assign(ConsoleWorker.prototype, sessions, turns, teamTools, teamGit, merging, refreshes, holds, needs, jobs, images);
+Object.assign(ConsoleWorker.prototype, sessions, turns, teamTools, teamGit, merging, refreshes, holds, needs, jobs, images, newsWake);

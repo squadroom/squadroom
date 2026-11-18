@@ -368,7 +368,8 @@ Things to know while using it:
 - **Needs you** (top bar) collects every permission request, question, note
   from an agent, interrupted turn and pause across projects. A permission
   request closes when its turn ends (a time limit, a Stop, a worker
-  restart); it then stays in Needs you marked "got no answer", with how
+  restart), not because it waited a while for you; it then stays in Needs
+  you marked "got no answer", with how
   often it was asked. **Always for this agent**, **Always for this
   project** and **Network to Auto** allow it for next time and tell the
   agent to try again, **Ask again** has the agent ask it again now that
@@ -401,9 +402,9 @@ Things to know while using it:
   commits, and a push whose commits add a file there is refused (if an
   agent commits them itself, that branch can't be pushed until the commit
   is removed). If a push fails, Needs you gets a note with the agent, the
-  branch and the reason, and the agent's next turn starts with one line
-  saying its last push did not go through and why, so it does not ask for
-  the same push again. For the usual causes the note says who has to act:
+  branch and the reason, and the agent is told in one line that its last
+  push did not go through and why, so it does not ask for the same push
+  again (see **News** below). For the usual causes the note says who has to act:
   you, when the token may not change workflow files
   (`.github/workflows/…`), when a branch rule on GitHub does not allow the
   push, or when GitHub did not accept the token; the agent, when its
@@ -494,8 +495,10 @@ Things to know while using it:
 - **Checks.** In a GitHub project an editing agent can read the GitHub
   Actions checks of its pull request's latest pushed commit with
   `team_checks`, and the end of one job's log with `team_checks(job: n)`.
-  The token needs **Actions: Read-only** (step 8). Nothing tells an agent
-  when checks finish; it looks again in a later turn.
+  The token needs **Actions: Read-only** (step 8). After a push that opens
+  or updates its pull request, the worker looks at those checks once a
+  minute and tells the agent when they have all finished (or when none
+  started within 10 minutes, or they are still running after an hour).
 - **The whole project.** Any agent in a project with files can call
   `team_project` to see every open tab: its agents, what each is doing,
   their branches and, in a GitHub project, each branch's last push (or why
@@ -521,10 +524,24 @@ Things to know while using it:
   you were shown. If the branch moved or a check changed in the meantime,
   nothing is merged, and you and the agent are told why. The branch is not
   deleted. The agent's window gets a line saying it was merged, the agent
-  (and any other agent that asked for the same merge) is told at the start
-  of its next turn, and the project's other editing
+  (and any other agent that asked for the same merge) is told (see
+  **News** below), and the project's other editing
   agents hear that the base branch has new commits. After a merge, an
   agent should start its next work with `team_pull` of the base branch.
+- **News.** A merge an agent asked for (or of its own pull request), its
+  push going out or failing, and GitHub's checks on its pushed commit
+  finishing are told to the agent as they happen. If it is working or has
+  messages waiting, that turn's prompt starts with them. If it is idle,
+  Squadroom sends it a message of its own, starting "[Console] While you
+  were not working:", with the news and a request to carry on (or say in
+  one line that there is nothing to do). The message shows in its window
+  like one of yours. It waits while the agent's pull request still has
+  checks running (their result comes in the same message), unless a later
+  push failed, which is told at once. It is not sent while the agent, its
+  tab or the Console is paused, while a teammate holds it, or in an
+  archived tab. If you edit it while it is queued, your text is sent as
+  written, with the news before it. A Re-send of one that was
+  interrupted is sent too, as your message. Each piece of news is told once.
 - **A window's history.** When you open a project, each window loads only
   its latest 80 events (at most 150 KB). **Show earlier messages** at the
   top of a window loads the next 200 (at most 300 KB) above, without moving
