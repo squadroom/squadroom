@@ -95,6 +95,10 @@ export function claudeSettings(folder: string, permission: Permission, paths: Co
       // Claude Code also ends a tool call that sends nothing for 5 minutes.
       MCP_TOOL_TIMEOUT: String(24 * 60 * 60_000),
       CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(24 * 60 * 60_000),
+      // A backstop for one long turn: Claude Code compacts at
+      // this size, not near the model's whole window (1M for Opus 5.5).
+      // Between turns the Console hands a long conversation off sooner.
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: "300000",
       ...(permission === "edit" ? packageCacheEnv(`${folder}/.git/console-cache`) : {}),
     },
   };

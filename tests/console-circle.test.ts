@@ -8,6 +8,7 @@ import { ConsoleWorker } from "../src/lib/console/worker.ts";
 import { Launcher } from "../src/lib/console/launcher.ts";
 import { join } from "node:path";
 import { git, harness, TOKEN } from "./helpers/console-harness.ts";
+import { AUTO_SUMMARY_TOKENS } from "../src/lib/console/store/turns.ts";
 
 //, first part: the circle detector and team_report.
 // Fakes only: no model, no network.
@@ -82,6 +83,12 @@ test("two agents going round in circles pause the tab; Resume starts the count a
       (p) => p.scope === "tab" && p.id === h.tab.id,
     ),
   );
+  // The Console's own handoff is no word from the owner.
+  h.store.run("UPDATE console_gauges SET tokens = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS, lead.id);
+  assert.ok(h.store.autoSummary(lead.id, null));
+  assert.notEqual(h.store.circle(h.tab.id, 4), null);
+  h.store.withdrawQueued(h.store.queuedTurns(lead.id).find((q) => q.summary)!.id);
+  h.store.run("UPDATE console_gauges SET tokens = 0 WHERE agent_id = ?", lead.id);
   // An owner message to the tab counts as progress, even before it runs.
   assert.notEqual(h.store.circle(h.tab.id, 4), null);
   const owner = h.send(lead.id, "hello");

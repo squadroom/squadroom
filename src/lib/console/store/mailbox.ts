@@ -2,6 +2,7 @@ import { isOpen, type ConsoleAgent, type TurnStatus } from "../types.ts";
 import type { ConsoleStore } from "../store.ts";
 import { circlePair, continuation, READ_PAGE, SHARE_MAX, TeamError, type TeamMessage } from "../team.ts";
 import { MESSAGE_NAMES, MESSAGES, newId, safeCut, teamMessage, type Row } from "./rows.ts";
+import { AUTO_SUMMARY_PROMPT } from "./turns.ts";
 
 type Named = TeamMessage & { fromName: string; toName: string };
 type Route = { id: number; from: string; fromName: string; to: string; toName: string; phrase: string };
@@ -281,14 +282,15 @@ export const mailbox = {
    * that turn may yet turn out to be progress.
    */
   circle(this: ConsoleStore, tabId: string, limit: number, unsettled: (from: string, fromTurn: number) => boolean = () => false): { a: string; b: string; count: number } | null {
-    const one = (sql: string) => Number((this.get(sql, tabId)?.n as number | null) ?? 0);
+    const one = (sql: string, ...args: string[]) => Number((this.get(sql, tabId, ...args)?.n as number | null) ?? 0);
     const since = Math.max(
       // The latest commit by any agent of the tab: the Console's, or any
       // that moved the branch (the agent's own git commit, a merge).
       one("SELECT MAX(COALESCE(c.progress_mark, c.turn_id)) AS n FROM console_commits c JOIN console_agents a ON a.id = c.agent_id WHERE a.tab_id = ?"),
       one("SELECT MAX(COALESCE(t.progress_mark, t.id)) AS n FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.tab_id = ? AND t.progressed = 1"),
       // The owner's latest message: a turn of its own, or delivered as mail.
-      one("SELECT MAX(t.id) AS n FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.tab_id = ? AND t.trigger = 'owner' AND t.status <> 'withdrawn'"),
+      // The Console's own handoff is not the owner's input.
+      one("SELECT MAX(t.id) AS n FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.tab_id = ? AND t.trigger = 'owner' AND t.status <> 'withdrawn' AND NOT (t.summary = 1 AND t.prompt = ?)", AUTO_SUMMARY_PROMPT),
       // An owner's edit of a queued message.
       one("SELECT circle_from AS n FROM console_tabs WHERE id = ?"),
       one("SELECT MAX(turn_id) AS n FROM console_messages WHERE tab_id = ? AND from_agent IS NULL"),

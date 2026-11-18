@@ -128,7 +128,11 @@ wide screen, as does **Cmd+B** (**Ctrl+B** off a Mac).
 A role is a prompt with a name. It tells the agent what its job is and how
 to work with the others. There are eight built in: Orchestrator, Planner,
 Architect, Lead, Pair Lead, Designer, Reviewer and Tester. You pick one when
-you add an agent, and you can change the prompt for that one agent.
+you add an agent, and you can change the prompt for that one agent. Every
+agent is also told to keep reviews few and short: ask once per finished
+change, report only material problems (wrong behaviour, security, data
+loss, missing tests for risky logic, code made harder to maintain), and
+build the smallest change that works.
 
 To make your own, open **Settings**, then **Roles**, then **New role**: a
 name, a one-line description, the access (Code edit or Code analysis), a

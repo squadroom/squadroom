@@ -108,8 +108,11 @@ export const turns = {
       : "";
     // A Code analysis agent hears which teammates' commits its folder now has
     // (kept in the store, so a worker restart does not lose it).
-    const shown = rt.agent.permission === "look" ? this.store.shown(rt.agent.id) : [];
-    const shownNote = (shown.length ? this.shownNote(shown) : "") + (rt.agent.permission === "look" ? this.owedNote(rt.agent.id) : "");
+    // A summary request is told none of the news, base or teammates'
+    // commits that the turn after it serves: they stay untold for that turn.
+    const handoff = !!this.store.turn(t.id)?.summary;
+    const shown = rt.agent.permission === "look" && !handoff ? this.store.shown(rt.agent.id) : [];
+    const shownNote = (shown.length ? this.shownNote(shown) : "") + (rt.agent.permission === "look" && !handoff ? this.owedNote(rt.agent.id) : "");
     // Fresh session with summary: the new session's first prompt opens with
     // the summary the agent wrote in its last session. It is set in the
     // same transaction that clears the session.
@@ -122,18 +125,18 @@ export const turns = {
     const step = stepped ? stepNote(stepped, rt.agent.permission === "edit") : "";
     // GitHub's base branch moved: said once for each new commit
     // of it, where team_pull is offered (not in a tab with steps).
-    const baseNews = stepped || !project ? null : this.store.baseNews(rt.agent);
+    const baseNews = stepped || !project || handoff ? null : this.store.baseNews(rt.agent);
     const baseNote = baseNews
       ? `${project!.baseBranch} on GitHub has new commits that your branch does not have yet. team_pull(from: "${project!.baseBranch}") brings them in.\n\n`
       : "";
     // Its last push failed: said once, with the reason, so it does not ask
     // for the same push again blindly.
-    const pushNews = this.store.failedPush(rt.agent.id, true);
+    const pushNews = handoff ? null : this.store.failedPush(rt.agent.id, true);
     const pushNote = pushNews ? `${pushFailedNote(this.redactor.shorten(pushNews.text, PUSH_FAILURE_CHARS))}\n\n` : "";
     // What happened while it did not work, said once: a merge it asked
     // for or of its own pull request, its push and the checks GitHub ran
     // on it.
-    const news = this.store.news(rt.agent.id);
+    const news = handoff ? [] : this.store.news(rt.agent.id);
     const newsNote = news.length ? `${news.join("\n\n")}\n\n` : "";
     // The Console's message to an idle agent is its news, as it stands
     // now (none lost, none twice); told once it reaches the agent.

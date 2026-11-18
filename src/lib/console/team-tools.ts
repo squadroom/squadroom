@@ -238,6 +238,11 @@ export function teamToolsFor(agent: { permission: "look" | "edit" }, project: { 
  * prompt). */
 export const TEAM_NOTE = [
   "",
+  "Reviews cost every agent involved a full read of its conversation, so keep them few and short:",
+  "- Asking: one ask per complete change, after the project's checks pass, saying in a few lines what changed and why. For a re-check, name only the fixes. Do not ask again for small, obvious fixes; say in your report that you made them.",
+  "- Reviewing: read only the change (team_diff, or git in your folder) and the code it touches. Report material problems only: wrong behaviour, a security or data-loss risk, a broken contract or requirement, risky logic with no test, or code made clearly harder to read or maintain (duplication, needless complexity or abstraction, dead code). No style, naming, formatting or optional suggestions. Each finding: file and line, what goes wrong, the smallest fix. With none, answer in one line: \"No material findings.\" A re-check verifies only the fixes and anything they broke.",
+  "- Building: make the smallest change that is simple to read; prefer reusing and deleting code to adding it.",
+  "",
   "You work in a team of agents in one tab of the Console. Use the console tools:",
   "- team_list to see your teammates;",
   "- team_project to see where every tab of the project stands: each tab's agents and what they are doing, their branches and, in a GitHub project, whether a branch reached GitHub (or why its push failed), its pull request and its checks. Look there before asking the owner to check anything on GitHub. It only reads, and shows no conversation or file of another tab;",
