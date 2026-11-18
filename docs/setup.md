@@ -540,7 +540,8 @@ Things to know while using it:
   push failed, which is told at once. It is not sent while the agent, its
   tab or the Console is paused, while a teammate holds it, or in an
   archived tab. If you edit it while it is queued, your text is sent as
-  written, with the news before it. Each piece of news is told once.
+  written, with the news before it. A Re-send of one that was
+  interrupted is sent too, as your message. Each piece of news is told once.
 - **A window's history.** When you open a project, each window loads only
   its latest 80 events (at most 150 KB). **Show earlier messages** at the
   top of a window loads the next 200 (at most 300 KB) above, without moving

@@ -174,3 +174,22 @@ test("a queued wake waits while a teammate holds the agent; the owner's message 
   h.store.releaseHold(mate.id, lead.id);
   await h.ended(wake);
 });
+
+test("Re-send of an interrupted wake whose news was told is the owner's message: sent, not withdrawn", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  h.store.addNews(lead.id, "Your pull request #7 was merged.");
+  assert.ok(h.store.wake(h.worker.epoch!, lead.id, wakePrompt(["Your pull request #7 was merged."])));
+  const wake = h.store.queuedTurns(lead.id)[0].id;
+  // It reached the agent (news told), then a worker restart interrupted it.
+  h.store.newsTold(h.worker.epoch!, lead.id, 1);
+  h.store.run("UPDATE console_turns SET status = 'interrupted', prompted = 1, started_at = ?, ended_at = ? WHERE id = ?", Date.now(), Date.now(), wake);
+  const again = h.store.acknowledgeTurn(wake, true)!;
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.ended(again.id);
+  assert.equal(h.store.turn(again.id)!.status, "done");
+  assert.ok(h.said(lead.id).at(-1)!.endsWith(wakePrompt(["Your pull request #7 was merged."])));
+});

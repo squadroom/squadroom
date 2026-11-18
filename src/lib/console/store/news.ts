@@ -66,25 +66,26 @@ export const news = {
    * when the agent got a turn or mail meanwhile (that turn tells it), or
    * when its latest turn is a wake that failed before it was sent: the
    * news then waits for its next turn instead of failing over and over. */
-  isWake(this: ConsoleStore, turn: { trigger: string; prompt: string; revisedAt?: number | null }): boolean {
-    // One the owner edited is the owner's message, sent as written.
-    return turn.trigger === "owner" && !turn.revisedAt && turn.prompt.startsWith(WAKE_HEAD);
+  isWake(this: ConsoleStore, turn: { trigger: string; prompt: string; revisedAt?: number | null; resendOf?: number | null }): boolean {
+    // One the owner edited or chose to send again (Re-send) is the owner's
+    // message, sent as written.
+    return turn.trigger === "owner" && !turn.revisedAt && !turn.resendOf && turn.prompt.startsWith(WAKE_HEAD);
   },
   /** A turn a teammate's hold keeps waiting: a team turn or the Console's
    * wake. The owner's own messages still reach a held agent. */
-  holdable(this: ConsoleStore, turn: { trigger: string; prompt: string; revisedAt: number | null }): boolean {
+  holdable(this: ConsoleStore, turn: { trigger: string; prompt: string; revisedAt: number | null; resendOf: number | null }): boolean {
     return turn.trigger === "team" || this.isWake(turn);
   },
   /** A queued wake with nothing left to tell (another turn told it first). */
-  staleWake(this: ConsoleStore, turn: { agentId: string; trigger: string; prompt: string; revisedAt: number | null }): boolean {
+  staleWake(this: ConsoleStore, turn: { agentId: string; trigger: string; prompt: string; revisedAt: number | null; resendOf: number | null }): boolean {
     return this.isWake(turn) && !this.news(turn.agentId).length && !this.failedPush(turn.agentId, true);
   },
   wake(this: ConsoleStore, epoch: number, agentId: string, prompt: string): boolean {
     return this.transaction(() => {
       if (this.agent(agentId)?.state !== "ready") return false;
       if (this.openTurns().some((t) => t.agentId === agentId) || this.agentsWithMail().includes(agentId)) return false;
-      const last = this.get("SELECT trigger, prompt, status, prompted, revised_at FROM console_turns WHERE agent_id = ? AND status <> 'withdrawn' ORDER BY id DESC LIMIT 1", agentId);
-      if (last && this.isWake({ trigger: last.trigger as string, prompt: last.prompt as string, revisedAt: last.revised_at as number | null }) && last.status !== "done" && !last.prompted) return false;
+      const last = this.get("SELECT trigger, prompt, status, prompted, revised_at, resend_of FROM console_turns WHERE agent_id = ? AND status <> 'withdrawn' ORDER BY id DESC LIMIT 1", agentId);
+      if (last && this.isWake({ trigger: last.trigger as string, prompt: last.prompt as string, revisedAt: last.revised_at as number | null, resendOf: last.resend_of as number | null }) && last.status !== "done" && !last.prompted) return false;
       this.ownerTurn(agentId, prompt, null, {});
       return true;
     }, epoch);
