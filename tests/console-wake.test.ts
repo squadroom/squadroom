@@ -116,3 +116,57 @@ test("a queued wake whose news another turn told first is withdrawn, not sent wi
   h.store.addNews(lead.id, "Pushed your branch.");
   assert.equal(h.store.turn(await h.woken(lead.id, wake))!.prompt, wakePrompt(["Pushed your branch."]));
 });
+
+test("a later push that failed is told at once, without waiting for an earlier push's checks", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  h.store.watchChecks(lead.id, SHA, 12);
+  h.store.addNews(lead.id, "Pushed your branch. Opened pull request #12.");
+  const job = h.store.insert("INSERT INTO console_jobs (agent_id, kind, state, request, created_at) VALUES (?, 'push', 'running', NULL, ?)", lead.id, Date.now());
+  h.store.failPush(h.worker.epoch!, job, "GitHub refused the push.", "Lead's push failed.");
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  const wake = h.store.turn(await h.woken(lead.id))!;
+  assert.match(wake.prompt, /Opened pull request #12\.[\s\S]*GitHub refused the push\./);
+  assert.equal(h.store.checksWatches().length, 1, "the earlier checks are still waited for");
+});
+
+test("a queued wake the owner edited is sent as written, with the news before it", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  h.store.addNews(lead.id, "Your pull request #7 was merged.");
+  assert.ok(h.store.wake(h.worker.epoch!, lead.id, wakePrompt(["Your pull request #7 was merged."])));
+  const wake = h.store.queuedTurns(lead.id)[0].id;
+  const edited = `${wakePrompt(["Your pull request #7 was merged."])}\n\nThen start the next task.`;
+  h.store.editQueued(wake, edited);
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.ended(wake);
+  assert.equal(h.said(lead.id).at(-1), `echo: Your pull request #7 was merged.\n\n${edited}`);
+  assert.deepEqual(h.store.news(lead.id), []);
+});
+
+test("a queued wake waits while a teammate holds the agent", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  const mate = h.agent("Mate");
+  await h.ready(lead.id, mate.id);
+  const turn = h.send(mate.id, "hello");
+  await h.ended(turn);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  h.store.addNews(lead.id, "Your pull request #7 was merged.");
+  assert.ok(h.store.wake(h.worker.epoch!, lead.id, wakePrompt(["Your pull request #7 was merged."])));
+  const wake = h.store.queuedTurns(lead.id)[0].id;
+  // Resume ends the tab's holds, so the hold comes right after it.
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  h.store.addHold(h.worker.epoch!, { turnId: turn, tabId: h.tab.id, holder: mate.id, held: lead.id, reason: "merging", ttlMs: 60_000, key: "k1", summary: "hold", result: "held" });
+  await settle();
+  assert.equal(h.store.turn(wake)!.status, "queued");
+  h.store.releaseHold(mate.id, lead.id);
+  await h.ended(wake);
+});

@@ -21,20 +21,21 @@ export const newsWake = {
   /** An agent with news and nothing else to do gets the Console's message.
    * It waits while the agent works, has mail or a push queued (that turn or
    * push tells it first), is paused or held, or while GitHub's checks on
-   * its latest push still run (their result comes with the rest). */
+   * its latest push still run (their result comes with the rest), unless a
+   * later push failed: that is told at once. */
   wakeForNews(this: ConsoleWorker): void {
     const epoch = this.epoch!;
     const waiting = new Set([
       ...this.store.agentsWithMail(),
       ...this.store.agentsWithJobs(),
-      ...this.store.checksWatches().map((w) => w.agentId),
       ...this.store.openTurns().map((t) => t.agentId),
     ]);
+    const watched = new Set(this.store.checksWatches().map((w) => w.agentId));
     for (const agent of this.store.agents()) {
       if (agent.state !== "ready" || waiting.has(agent.id)) continue;
       const lines = this.store.news(agent.id);
       const failed = this.store.failedPush(agent.id, true);
-      if (!lines.length && !failed) continue;
+      if ((!lines.length && !failed) || (watched.has(agent.id) && !failed)) continue;
       const rt = this.runtimes.get(agent.id);
       if (rt?.turn || rt?.busy || this.store.tab(agent.tabId)?.archivedAt !== null || this.store.pausedFor(agent) || this.store.heldBy(agent)) continue;
       const all = failed ? [...lines, pushFailedNote(this.redactor.shorten(failed.text, PUSH_FAILURE_CHARS))] : lines;

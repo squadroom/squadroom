@@ -27,6 +27,8 @@ test("a helper's tool calls feed only the helpers row (and its task calls); Cons
     { type: "helper_result", id: "x", text: "y", error: false },
   ]);
   assert.equal(claudeSettings("/f", "edit", { agentHome: "/agent", shared: "/s" }).env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, "1");
+  // A team_push waiting for the owner sends nothing: Claude Code must not end it after 5 minutes.
+  assert.equal(claudeSettings("/f", "edit", { agentHome: "/agent", shared: "/s" }).env.CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT, String(86_400_000));
 });
 
 test("a helper's row: its type, name and tool; done with its transcript, opened by its id and only for its own agent", async (t) => {

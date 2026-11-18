@@ -137,7 +137,8 @@ export const turns = {
     const newsNote = news.length ? `${news.join("\n\n")}\n\n` : "";
     // The Console's message to an idle agent is its news, as it stands
     // now (none lost, none twice); told once it reaches the agent.
-    const waking = this.store.isWake(this.store.turn(t.id)?.trigger ?? "", t.prompt) && (news.length > 0 || !!pushNews);
+    const row = this.store.turn(t.id);
+    const waking = !!row && this.store.isWake(row) && (news.length > 0 || !!pushNews);
     const body = waking ? `${baseNote}${wakePrompt(pushNews ? [...news, pushNote.trimEnd()] : news)}` : `${newsNote}${baseNote}${pushNote}${t.prompt}`;
     t.sent = `${summaryNote}${step}${uploads.length ? uploadsNote(uploads) : ""}${shownNote}${resent}${mergeNote}${body}`;
     // Recorded only once the client has accepted the turn (which an

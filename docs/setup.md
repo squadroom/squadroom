@@ -368,7 +368,8 @@ Things to know while using it:
 - **Needs you** (top bar) collects every permission request, question, note
   from an agent, interrupted turn and pause across projects. A permission
   request closes when its turn ends (a time limit, a Stop, a worker
-  restart); it then stays in Needs you marked "got no answer", with how
+  restart), not because it waited a while for you; it then stays in Needs
+  you marked "got no answer", with how
   often it was asked. **Always for this agent**, **Always for this
   project** and **Network to Auto** allow it for next time and tell the
   agent to try again, **Ask again** has the agent ask it again now that
@@ -535,10 +536,11 @@ Things to know while using it:
   were not working:", with the news and a request to carry on (or say in
   one line that there is nothing to do). The message shows in its window
   like one of yours. It waits while the agent's pull request still has
-  checks running (their result comes in the same message), and it is not
-  sent while the agent, its tab or the Console is paused, while a
-  teammate holds it, or in an archived tab. Each piece of news is told
-  once.
+  checks running (their result comes in the same message), unless a later
+  push failed, which is told at once. It is not sent while the agent, its
+  tab or the Console is paused, while a teammate holds it, or in an
+  archived tab. If you edit it while it is queued, your text is sent as
+  written, with the news before it. Each piece of news is told once.
 - **A window's history.** When you open a project, each window loads only
   its latest 80 events (at most 150 KB). **Show earlier messages** at the
   top of a window loads the next 200 (at most 300 KB) above, without moving

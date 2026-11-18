@@ -201,7 +201,15 @@ month it started too.
 ## Mailboxes and team tools
 
 The worker runs a loopback MCP server; each agent session gets a bearer
-token for it, revoked when the session ends. Through it, agents in one tab
+token for it, revoked when the session ends. When a Codex window's thread
+has to pick up a new config (a teammate's folder was added or removed),
+the worker first unloads it from its App Server (`thread/unsubscribe`) and
+then resumes it: Codex keeps a still-loaded thread's old config on resume,
+including the token just revoked, and every team tool call would then be
+refused. Claude Code gets `MCP_TOOL_TIMEOUT` and
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` of 24 hours, so a tool call that waits
+silently for you (a `team_push` approval in Needs you) is not cut off after
+Claude Code's default 5 minutes. Through it, agents in one tab
 call the team tools (`team_send`, `team_ask`, `team_reply`, `team_read`,
 `team_pull`, `team_diff`, `team_claim`, `team_hold`, `team_push`,
 `team_pr`, `team_checks`, `team_merge`, `team_project`, `team_report`,
@@ -396,9 +404,10 @@ an hour. A failed read is tried again on the next pass.
 On every tick, after mail is delivered, the worker looks for agents that
 have news and nothing else coming (`wakeForNews` in
 `src/lib/console/worker/news.ts`). It skips an agent that has mail, a push
-queued, a check watch still open (the checks' result comes with the rest),
-a turn queued or running, or a runtime still busy, and one that is paused,
-held or in an archived tab. For the rest it queues a turn on the owner's
+queued, a check watch still open (the checks' result comes with the rest,
+unless a later push failed: that is told at once), a turn queued or
+running, or a runtime still busy, and one that is paused, held or in an
+archived tab. For the rest it queues a turn on the owner's
 side whose text starts `[Console] While you were not working:` and lists
 the news, then asks the agent to carry on or say in one line that there is
 nothing to do. It queues one only if the agent is ready, has no open turn
@@ -410,7 +419,10 @@ News is counted as told only once a turn reaches the agent. Any turn's
 prompt starts with the untold news, so a message that arrives first tells
 it, and a wake still queued with nothing left to tell is withdrawn before
 it starts. A wake's text is rebuilt from the untold news when it starts,
-so nothing is lost or told twice.
+so nothing is lost or told twice. A queued wake you edited is your message:
+it is sent as you wrote it, with the untold news before it, like any other
+turn. A teammate's hold keeps a queued wake waiting, as it does team
+turns; your own messages still go through.
 
 ## Sign-in
 

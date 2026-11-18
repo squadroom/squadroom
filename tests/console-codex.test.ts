@@ -152,6 +152,12 @@ test("a new agent folder: made only between Codex turns, and the thread is resum
   const filesystem = ((resume!.params.config as Record<string, unknown>).permissions as Record<string, { filesystem: Record<string, string> }>)[CODEX_PROFILE]
     .filesystem;
   assert.equal(filesystem[h.store.agent(late.id)!.folder], "deny");
+  // The loaded thread was unloaded first, so the resume took the new config
+  // and its new token: the Console's tools still answer.
+  const methods = h.codexCalls().map((c) => c.method);
+  assert.equal(methods.lastIndexOf("thread/unsubscribe"), methods.indexOf("thread/resume") - 1);
+  await h.ended(h.send(coder.id, "team_send Late hello"));
+  assert.match(h.said(coder.id).at(-1)!, /^team_send: Sent/);
 });
 
 test("file changes: made by its sandbox in its folder; every request to write outside it is declined; the Console's own MCP tools only", async (t) => {

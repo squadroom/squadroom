@@ -46,6 +46,8 @@ const ephemeral = process.argv.includes('cli_auth_credentials_store="ephemeral"'
 let account = ephemeral ? null : (setup.account ?? "chatgpt");
 fs.appendFileSync("codex-starts.jsonl", JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), keys: Object.keys(process.env).filter((k) => k.endsWith("_API_KEY")) }) + "\n");
 const threads = new Map(); // id -> { cwd, model, config }
+/** Threads loaded on this server (started, or resumed and not unsubscribed). */
+const loaded = new Set();
 /** The prompt without the Console's notes before it (as fake-claude). */
 const body = (text) => text.replace(/^Step \d+ of \d+: [\s\S]*?\n\n/, "").replace(/^Your folder now has your teammates' [\s\S]*?\n\n/, "").replace(/^These teammates' commits could not be checked out[\s\S]*?\n\n/, "");
 const turns = new Map(); // threadId -> { id, hang }
@@ -275,12 +277,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/start": {
       const id = `thread-${process.pid}-${nextThread++}`;
       threads.set(id, q.params);
+      loaded.add(id);
       return reply(threadResult(id, q.params));
     }
     case "thread/resume": {
       if (!q.params.threadId.startsWith(`thread-${process.pid}-`) && !setup.resumeAny)
         return send({ id: q.id, error: { code: -32600, message: "no rollout found" } });
-      threads.set(q.params.threadId, q.params);
+      // As Codex does, a thread still loaded keeps the config it was loaded
+      // with (its MCP connection, its bearer token, its profile).
+      if (!loaded.has(q.params.threadId)) threads.set(q.params.threadId, q.params);
+      loaded.add(q.params.threadId);
       reply(threadResult(q.params.threadId, q.params));
       // A resumed thread replays an earlier turn's usage, here with requests
       // this worker never saw (as after a worker restart), so its total moved.
@@ -351,6 +357,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       }, 100);
       return;
     }
+    case "thread/unsubscribe":
+      return reply({ status: loaded.delete(q.params.threadId) ? "unsubscribed" : "notLoaded" });
     case "turn/interrupt": {
       reply({});
       const turn = turns.get(q.params.threadId);
