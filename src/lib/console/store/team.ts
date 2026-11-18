@@ -7,19 +7,26 @@ import type { MergeAsk } from "../merge.ts";
 import { safeCut, tab } from "./rows.ts";
 
 /** A Needs you item an agent or the Console made: a note, a team_report,
- * or a proposed tab with its team. */
+ * a proposed tab with its team, a merge request, or a tab proposed for
+ * closing. */
 export interface Notice {
   id: number;
   agentId: string;
   agentName: string;
   projectId: string;
-  kind: "note" | "report" | "proposal" | "merge";
+  kind: "note" | "report" | "proposal" | "merge" | "close";
   text: string;
   proposal: Proposal | null;
+  /** A tab proposed for closing, by an agent or the Console. */
+  close: CloseAsk | null;
   /** A pull request an agent asks to have merged. */
   merge: MergeAsk | null;
   createdAt: number;
 }
+
+/** A tab proposed for closing; `console` when the Console suggested it,
+ * after a day with nothing running or open there. */
+export type CloseAsk = { tabId: string; tabName: string; console?: true };
 
 type Call = { turnId: number; agentId: string; key: string; tool: string; summary: string };
 
@@ -314,16 +321,94 @@ export const team = {
       agentId: r.agent_id as string,
       agentName: r.agent_name as string,
       projectId: r.project_id as string,
-      kind: r.kind === "report" || r.kind === "proposal" || r.kind === "merge" ? r.kind : "note",
+      kind: r.kind === "report" || r.kind === "proposal" || r.kind === "merge" || r.kind === "close" ? r.kind : "note",
       text: r.text as string,
       proposal: r.kind === "proposal" ? (JSON.parse(r.data as string) as Proposal) : null,
+      close: r.kind === "close" ? (JSON.parse(r.data as string) as CloseAsk) : null,
       merge: r.kind === "merge" ? (JSON.parse(r.data as string) as MergeAsk) : null,
       createdAt: r.created_at as number,
     }));
   },
   dismissNotice(this: ConsoleStore, id: number): boolean {
     // A proposal is answered (Create or Decline), so its agent is told; a
-    // merge request too (Approve or Deny).
-    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0 AND kind NOT IN ('proposal', 'merge')", id) === 1;
+    // merge request too (Approve or Deny), and a tab proposed for closing
+    // (Close tab or Keep).
+    return this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ? AND dismissed = 0 AND kind NOT IN ('proposal', 'merge', 'close')", id) === 1;
+  },
+
+  // ── Closing tabs whose work is done ───────────────────────
+  /** Why a tab is not ready to close, from the Console's own records: an
+   * agent of it has a turn open (other than `except`, the turn asking) or
+   * its last commit still being recorded, a conflicted team_pull, messages
+   * waiting, a push or merge waiting, or a request, tab proposal or merge
+   * request in Needs you. Null when none; GitHub is checked apart
+   * (`tabWork` in the worker). */
+  tabBusy(this: ConsoleStore, tabId: string, except: number | null = null): string | null {
+    const agents = this.all("SELECT id, name FROM console_agents WHERE tab_id = ? AND state <> 'closed'", tabId).map((r) => ({ id: r.id as string, name: r.name as string }));
+    const open = this.openTurns();
+    const requests = this.openRequests();
+    const asks = this.notices().filter((n) => n.proposal || n.merge);
+    const settling = this.settlingAgents();
+    for (const a of agents) {
+      if (open.some((t) => t.agentId === a.id && t.id !== except)) return `${a.name} is working or has a turn queued.`;
+      if (settling.includes(a.id)) return `${a.name}'s last turn is still being committed.`;
+      if (this.merging(a.id)) return `${a.name} has a merge from team_pull with conflicts still to resolve.`;
+      if (this.queuedMessages(a.id).length) return `${a.name} has messages waiting.`;
+      if (this.get("SELECT 1 AS x FROM console_jobs WHERE agent_id = ? AND state IN ('queued', 'running') LIMIT 1", a.id)) return `${a.name} has a push or merge waiting.`;
+      if (requests.some((r) => r.agentId === a.id) || asks.some((n) => n.agentId === a.id)) return `${a.name} has a request waiting in the owner's Needs you.`;
+    }
+    return null;
+  },
+  /** team_close_tab: the call's record and its Needs you item, once per tab
+   * while one is open. */
+  proposeClose(this: ConsoleStore, epoch: number, r: { turnId: number; agentId: string; key: string; summary: string; tab: ConsoleTab; reason: string }): string {
+    return this.callOnce(epoch, { turnId: r.turnId, agentId: r.agentId, key: r.key, tool: "team_close_tab", summary: r.summary }, () => {
+      if (this.notices().some((n) => n.close?.tabId === r.tab.id)) throw new TeamError(`Closing the tab "${r.tab.name}" is already waiting for the owner.`);
+      const text = `Close the tab "${r.tab.name}": ${r.reason}`;
+      this.run("INSERT INTO console_notices (agent_id, text, kind, data, created_at) VALUES (?, ?, 'close', ?, ?)", r.agentId, text, JSON.stringify({ tabId: r.tab.id, tabName: r.tab.name } satisfies CloseAsk), this.now());
+      this.chargePayload(r.turnId, Buffer.byteLength(text, "utf8"));
+      return `Proposed closing the tab "${r.tab.name}" to the owner (their Needs you). This does not wait: you are told when they close it or keep it.`;
+    });
+  },
+  /** Open tabs with nothing run for `idleMs` (no turn started, queued or
+   * ended since), in open projects that keep another open tab, which the
+   * Console has not suggested closing since: the candidates for its own
+   * suggestion, each with an agent of its own to carry it. */
+  idleTabs(this: ConsoleStore, idleMs: number): (ConsoleTab & { agentId: string })[] {
+    const before = this.now() - idleMs;
+    return this.all(
+      `SELECT * FROM (SELECT tb.*, MAX(tb.created_at, COALESCE((SELECT MAX(MAX(COALESCE(t.ended_at, 0), COALESCE(t.started_at, 0), t.created_at)) FROM console_turns t JOIN console_agents a ON a.id = t.agent_id WHERE a.tab_id = tb.id), 0)) AS last,
+        (SELECT id FROM console_agents WHERE tab_id = tb.id ORDER BY state = 'closed', created_at LIMIT 1) AS agent
+       FROM console_tabs tb JOIN console_projects p ON p.id = tb.project_id
+       WHERE tb.archived_at IS NULL AND p.archived_at IS NULL AND (SELECT COUNT(*) FROM console_tabs o WHERE o.project_id = tb.project_id AND o.archived_at IS NULL) > 1) x
+       WHERE last < ? AND agent IS NOT NULL AND NOT EXISTS (SELECT 1 FROM console_notices n WHERE n.kind = 'close' AND json_extract(n.data, '$.tabId') = x.id AND (n.dismissed = 0 OR n.created_at >= last))`,
+      before,
+    ).map((r) => ({ ...tab(r), agentId: r.agent as string }));
+  },
+  /** The Console's own suggestion to close an idle tab. */
+  suggestClose(this: ConsoleStore, epoch: number, t: ConsoleTab & { agentId: string }, days: number) {
+    const text = `Close the tab "${t.name}"? Nothing has run there for ${days === 1 ? "a day" : `${days} days`}, and nothing is left open: no work waiting, none that GitHub lacks, no open pull request.`;
+    this.write(epoch, "INSERT INTO console_notices (agent_id, text, kind, data, created_at) VALUES (?, ?, 'close', ?, ?)", t.agentId, text, JSON.stringify({ tabId: t.id, tabName: t.name, console: true } satisfies CloseAsk), this.now());
+  },
+  /** The owner's answer: Close tab closes the tab (its folders are kept,
+   * and Restore brings it back), Keep leaves it. An agent that proposed it
+   * is told, as news, unless its own tab is the one closed. */
+  settleClose(this: ConsoleStore, noticeId: number, close: boolean) {
+    const n = this.notices().find((x) => x.id === noticeId && x.close);
+    if (!n?.close) throw new Error("That has already been answered.");
+    const { tabId, tabName } = n.close;
+    if (close && this.tab(tabId)?.archivedAt === null) this.archive("tab", tabId);
+    this.transaction(() => {
+      this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", noticeId);
+      if (n.close!.console) return;
+      const proposer = this.agent(n.agentId);
+      if (!proposer || proposer.state === "closed" || this.tab(proposer.tabId)?.archivedAt !== null) return;
+      this.addNews(
+        proposer.id,
+        close
+          ? `The owner closed the tab "${tabName}", as you proposed with team_close_tab. Its agents' folders are kept.`
+          : `The owner kept the tab "${tabName}" open, which you proposed closing with team_close_tab.`,
+      );
+    });
   },
 };

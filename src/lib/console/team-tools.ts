@@ -53,6 +53,19 @@ export const TEAM_TOOLS = [
     inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"] },
   },
   {
+    name: "team_close_tab",
+    description:
+      "Propose closing a tab of your project whose work is done (your own tab included): the owner closes it or keeps it in their Needs you, and you are told which; this does not wait. Closing keeps its agents' folders, and the owner can restore it. Refused, with the reason, while any of its agents is working or has messages waiting, has committed work GitHub does not have, or has an open pull request.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tab: { type: "string", description: "The tab's name, as team_project shows it." },
+        reason: { type: "string", description: "Why its work is done, in a line or two." },
+      },
+      required: ["tab", "reason"],
+    },
+  },
+  {
     name: "team_propose_tab",
     description:
       "Propose a new tab with a team of its own, for work better done apart from your tab. The owner creates it, changes it or declines it in their Needs you tray, and you are told which; this does not wait. Once it exists, its Orchestrator (a pair: its Lead) is linked to you: team_list shows it, and team_send, team_ask and team_reply work between the two of you. It is given your goal as its first message and sends you its result. A wrong kind, model or role is answered with the list to choose from.",
@@ -243,6 +256,12 @@ export const TEAM_NOTE = [
   "- Reviewing: read only the change (team_diff, or git in your folder) and the code it touches. Report material problems only: wrong behaviour, a security or data-loss risk, a broken contract or requirement, risky logic with no test, or code made clearly harder to read or maintain (duplication, needless complexity or abstraction, dead code). No style, naming, formatting or optional suggestions. Each finding: file and line, what goes wrong, the smallest fix. With none, answer in one line: \"No material findings.\" A re-check verifies only the fixes and anything they broke.",
   "- Building: make the smallest change that is simple to read; prefer reusing and deleting code to adding it.",
   "",
+  "Every message starts a turn that rereads the recipient's whole conversation, so when you lead other agents or tabs:",
+  "- Do not pass on what the Console already tells each agent itself: its pushes, GitHub's checks, its merges and the base branch moving.",
+  "- Send each agent one message per round of work, with everything it needs. Do not follow up on a message you just sent unless something has changed.",
+  "- Product decisions the goal leaves open (what to build, scope, design) go to the owner with team_report, not to another agent.",
+  "- When a tab's work is done (merged, nothing left open), propose closing it with team_close_tab.",
+  "",
   "You work in a team of agents in one tab of the Console. Use the console tools:",
   "- team_list to see your teammates;",
   "- team_project to see where every tab of the project stands: each tab's agents and what they are doing, their branches and, in a GitHub project, whether a branch reached GitHub (or why its push failed), its pull request and its checks. Look there before asking the owner to check anything on GitHub. It only reads, and shows no conversation or file of another tab;",
@@ -257,5 +276,6 @@ export const TEAM_NOTE = [
   "- team_pull(from) to bring a teammate's committed work into your branch (team_pull_abort to give up a conflicted merge). Your folder has no Git remote and never updates from GitHub by itself: in a GitHub project, team_pull with the base branch's name (usually main) brings in what was merged there since your folder was made. The owner has no button for that, so do not ask them to refresh your folder;",
   "- team_claim(paths, note) before editing shared areas, and team_release when done; respect teammates' claims;",
   "- team_hold(to, reason) to ask a teammate to hang on while you change something, and team_resume(to) afterwards;",
+  "- team_close_tab(tab, reason) to propose closing a tab of the project whose work is done, your own included. The owner closes it or keeps it, and you are told which; its folders are kept. It is refused while the tab's agents are working, have work not on GitHub or have an open pull request;",
   "- team_propose_tab(name, goal, members) to propose a new tab with a team of its own for work better done apart. The owner creates, changes or declines it, and you are told which. An agent of another tab that team_list shows as linked to you takes team_send and team_ask like a teammate (give its id if its name is also a teammate's); the other team tools work only inside your tab.",
 ].join("\n");

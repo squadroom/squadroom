@@ -107,6 +107,9 @@ export interface ConsoleWorkerOptions {
   /** How often GitHub is asked where each project's base branch is (default
    * ten minutes). */
   baseCheckMs?: number;
+  /** How often idle tabs are looked for, to suggest closing them (default
+   * an hour). */
+  closeCheckMs?: number;
   /** Where the page stages uploads; leftovers there are removed at start
    * (unset: not swept). */
   uploadsDir?: string;
@@ -350,6 +353,7 @@ export class ConsoleWorker {
       }, this.options.retentionCheckMs ?? 60_000),
     );
     this.timers.push(setInterval(() => void this.checkBases(), this.options.baseCheckMs ?? 10 * 60_000));
+    this.timers.push(setInterval(() => void this.suggestClosing(), this.options.closeCheckMs ?? 60 * 60_000));
     this.log(`worker started (lease epoch ${epoch})`);
   }
   /** Still the lease holder, and not stopping: checked immediately before

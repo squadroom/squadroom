@@ -89,6 +89,7 @@ export type ConsoleCommand =
   | { action: "createTeam"; tabId: string; setup?: unknown }
   | { action: "decideProposal"; noticeId: number; decision: "create" | "decline"; setup?: unknown }
   | { action: "decideMerge"; noticeId: number; decision: "approve" | "deny" }
+  | { action: "decideClose"; noticeId: number; decision: "close" | "keep" }
   | { action: "saveRole"; role: Partial<RoleDef> }
   | { action: "deleteRole" | "resetRole"; id: string }
   | { action: "cleanupDelete"; keys: string[] }
@@ -515,6 +516,13 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     if (!n) throw new CommandError("That merge request has already been answered.");
     if (input.decision !== "approve" && input.decision !== "deny") throw new CommandError("Choose Approve or Deny.");
     store.settleMerge(n.id, input.decision === "approve");
+    return { done: true };
+  },
+  decideClose(store, input) {
+    // A tab proposed for closing, by an agent's team_close_tab or by the
+    // Console after a day idle. Closing keeps its agents' folders.
+    if (input.decision !== "close" && input.decision !== "keep") throw new CommandError("Choose Close tab or Keep.");
+    store.settleClose(Number(input.noticeId), input.decision === "close");
     return { done: true };
   },
   decideProposal(store, input, options) {
