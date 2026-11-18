@@ -565,6 +565,18 @@ Things to know while using it:
   result is sent back to that agent when its team has finished. There is
   no limit on how many tabs agents may propose; none exists until you
   create it.
+- **Closing finished tabs.** An agent can propose closing a tab whose work
+  is done (`team_close_tab`). It is refused while an agent of that tab is
+  working or has messages waiting, has a push, merge or request waiting,
+  has committed work GitHub does not have, or has an open pull request.
+  The Console also suggests closing a tab where nothing has run for a day
+  and nothing is left open, once until the tab runs again; it never
+  suggests the project's last open tab. Either way you find it in Needs
+  you: **Close tab** closes it as the tab menu does (the agents' folders
+  are kept, and Restore brings it back), and **Keep** leaves it open.
+  **Close tab** checks the tab again first: if work has started there
+  since, it says what and closes nothing. An
+  agent that proposed it is told which you chose.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
 - **Fresh session with summary** (click the context gauge in a window's
@@ -808,6 +820,8 @@ with until then.
 | Agent turns caused by one message of yours (through team messages); set per tab in its menu, **Turn limits…** | 40 unless you set another; 1 to 1,000 | The tab pauses; Resume continues |
 | Time one message of yours keeps the team going; set in the same dialog | 2 h unless you set another; 5 min to 24 h | The tab pauses; Resume continues |
 | Two agents messaging with no new commit or message from you | 12 messages | The tab pauses (the circle detector) |
+| Team messages to an idle agent waiting for others to join them | 1 min from the first | They start one turn together; a Re-send goes at once |
+| A tab with nothing run and nothing left open | 1 day | Needs you suggests closing it |
 
 Raising a tab's turn limits asks for a recent e-mailed code, as raising a
 spend limit does; lowering them doesn't, and changing them never lifts a

@@ -211,6 +211,12 @@ export const LIMITS = {
   /** Messages two agents may exchange with no new commit, owner message or
    * Resume before the tab pauses. */
   circleMessages: 12,
+  /** How long team messages to an idle agent wait for others to join them
+   * in one turn, from when the first could be delivered. */
+  joinMs: 60_000,
+  /** How long a tab has nothing run before the Console suggests closing
+   * it, when nothing is left open there. */
+  idleTabMs: 24 * 60 * 60_000,
   /** How long a claim lasts unless released. */
   claimMs: 2 * 60 * 60_000,
   /** How long a hold lasts unless lifted. */

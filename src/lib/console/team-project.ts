@@ -8,7 +8,7 @@ export type AgentOnGitHub = {
   head: string | null;
   /** Commits in the agent's folder that GitHub lacks; null when not known. */
   unpushed: number | null;
-  pr: { number: number; url: string; state: string; draft: boolean; mergeable: string } | null;
+  pr: { number: number; url: string; state: string; draft: boolean; mergeable: string; headSha?: string } | null;
   /** The pull request's checks in one line; null when they could not be read. */
   checks?: string | null;
 } | null;
@@ -40,6 +40,18 @@ export interface ProjectStatus {
   githubError: string | null;
   tabs: { name: string; yours: boolean; paused: boolean; agents: ProjectAgent[] }[];
   now: number;
+}
+
+/** What an agent's branch still has open, as the reason its tab is not
+ * closed yet; null when nothing. `folder`: its committed work as of its
+ * last finished turn (`files` changed against where it started). Work that
+ * is on GitHub (the same commit), or whose pull request was merged at that
+ * commit, is not lost by closing. */
+export function branchLeft(name: string, folder: { head: string; files: number } | null, g: AgentOnGitHub | undefined): string | null {
+  if (!g) return `${name}'s branch on GitHub could not be read.`;
+  if (g.pr?.state === "OPEN") return `${name}'s pull request #${g.pr.number} is still open.`;
+  if (!folder?.files || g.head === folder.head || (g.pr?.state === "MERGED" && g.pr.headSha === folder.head)) return null;
+  return `${name} has committed work that GitHub does not have.`;
 }
 
 const short = (sha: string) => sha.slice(0, 8);

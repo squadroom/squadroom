@@ -212,6 +212,11 @@ export const projects = {
       // for agents closed now or earlier.
       for (const a of inScope)
         this.run("UPDATE console_messages SET state = 'discarded', ended_at = ? WHERE to_agent = ? AND state IN ('queued', 'in_turn', 'interrupted')", now, a.id);
+      // Proposals to close a tab that are now moot are settled: those of
+      // its agents (no longer shown, they would still hold back the
+      // Console's own suggestion) and those for this tab itself.
+      for (const a of inScope) this.run("UPDATE console_notices SET dismissed = 1 WHERE kind = 'close' AND dismissed = 0 AND agent_id = ?", a.id);
+      if (scope === "tab") this.run("UPDATE console_notices SET dismissed = 1 WHERE kind = 'close' AND dismissed = 0 AND json_extract(data, '$.tabId') = ?", id);
       return open;
     });
     for (const agentId of closed) this.requestStop(agentId, true);

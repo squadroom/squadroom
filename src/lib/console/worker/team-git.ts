@@ -3,8 +3,8 @@ import { agentKind } from "../agents.ts";
 import { BRANCHES_MAX } from "../github-api.ts";
 import { PUSH_FAILURE_CHARS, pushFailedNote, pushHint } from "../push-failure.ts";
 import { errorMessage as message } from "../session.ts";
-import { TeamError } from "../team.ts";
-import { teamProjectText, type AgentOnGitHub, type ProjectAgent } from "../team-project.ts";
+import { callSummary, TeamError } from "../team.ts";
+import { branchLeft, teamProjectText, type AgentOnGitHub, type ProjectAgent } from "../team-project.ts";
 import { agentStatus, PERMISSION_LABELS } from "../types.ts";
 import type { ConsoleWorker } from "../worker.ts";
 import { REPLY_MAX } from "./shared.ts";
@@ -218,6 +218,61 @@ export const teamGit = {
         now: Date.now(),
       }),
     );
+  },
+
+  // ── Closing tabs whose work is done ───────────────────────
+  /** team_close_tab: checked now (nothing running or waiting, nothing open
+   * on GitHub), then put to the owner in Needs you. */
+  async teamCloseTab(this: ConsoleWorker, { me, t, args, epoch, key }: TeamCall): Promise<string> {
+    const wanted = typeof args.tab === "string" ? args.tab.trim() : "";
+    const reason = typeof args.reason === "string" ? this.redactor.text(args.reason.trim()).slice(0, 1_000) : "";
+    if (!wanted || !reason) throw new TeamError("Give the tab's name and, in a line or two, why its work is done.");
+    const open = this.store.tabs(me.projectId).filter((x) => x.archivedAt === null);
+    const named = open.filter((x) => x.id === wanted || x.name.trim().toLowerCase() === wanted.toLowerCase());
+    if (named.length !== 1)
+      throw new TeamError(named.length ? `Several open tabs are called "${wanted.slice(0, 60)}".` : `No open tab of this project is called "${wanted.slice(0, 60)}" (team_project lists them).`);
+    const tab = named[0];
+    if (open.length < 2) throw new TeamError("This is the project's only open tab, so it stays open.");
+    const left = this.store.tabBusy(tab.id, t.id) ?? (await this.tabWork(tab.id));
+    if (left) throw new TeamError(`The tab "${tab.name}" cannot be closed yet: ${left}`);
+    return write(this, () => this.store.proposeClose(epoch, { turnId: t.id, agentId: me.id, key, summary: this.redactor.text(callSummary("team_close_tab", args)), tab, reason }));
+  },
+  /** What a tab's editing agents still have open on GitHub (a GitHub
+   * project), as the reason it is not closed yet; null when nothing. A
+   * closed agent counts too: closing it kept its branch and pull request. */
+  async tabWork(this: ConsoleWorker, tabId: string): Promise<string | null> {
+    const tab = this.store.tab(tabId);
+    const project = tab && this.store.project(tab.projectId);
+    if (project?.source !== "github") return null;
+    const agents = this.store
+      .agents(project.id)
+      .filter((a) => a.tabId === tabId && a.permission === "edit" && a.folder && this.store.agentBase(a.id).branch);
+    if (!agents.length) return null;
+    if (agents.length > BRANCHES_MAX) return "it has too many agents to check at once.";
+    let onGitHub: Map<string, AgentOnGitHub>;
+    try {
+      onGitHub = await this.repos.readProjectBranches(project, agents);
+    } catch (error) {
+      return `GitHub could not be read (${this.redactor.shorten(message(error), 200)}).`;
+    }
+    for (const a of agents) {
+      const d = this.store.diffSummary(a.id);
+      const left = branchLeft(a.name, d && { head: d.head, files: d.files.length }, onGitHub.get(a.id) ?? undefined);
+      if (left) return left;
+    }
+    return null;
+  },
+  /** The Console's own suggestion: a tab with nothing run for a day and
+   * nothing left open is put to the owner to close, once until it runs
+   * again. */
+  async suggestClosing(this: ConsoleWorker): Promise<void> {
+    if (this.stopped || this.epoch === null) return;
+    const idleMs = this.limits.idleTabMs;
+    for (const tab of this.safe(() => this.store.idleTabs(idleMs)) ?? []) {
+      if (this.store.tabBusy(tab.id) || (await this.tabWork(tab.id))) continue;
+      if (this.stopped || this.epoch === null) return;
+      this.safe(() => this.store.suggestClose(this.epoch!, tab, Math.max(1, Math.round(idleMs / 86_400_000))));
+    }
   },
 
   async teamPrReply(this: ConsoleWorker, c: TeamCall): Promise<string> {

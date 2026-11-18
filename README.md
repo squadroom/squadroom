@@ -94,7 +94,10 @@ shows up in Needs you with **Create**, **Edit…** and **Decline**. Nothing
 is made until you choose, and the agent is told what you chose. If you
 create the tab, its Orchestrator (or a pair's Lead) and the agent that
 proposed it can message each other across the two tabs, and the new tab's
-result is sent back when its team has finished.
+result is sent back when its team has finished. When a tab's work is done,
+an agent can propose closing it (`team_close_tab`), and the Console
+suggests it by itself for a tab where nothing has run for a day. Needs you
+then shows **Keep** and **Close tab**; closing keeps the agents' folders.
 
 Every agent works in its own Git clone on its own `console/…` branch (a
 Code analysis agent, which changes no files, sits on the base branch).
@@ -132,7 +135,11 @@ you add an agent, and you can change the prompt for that one agent. Every
 agent is also told to keep reviews few and short: ask once per finished
 change, report only material problems (wrong behaviour, security, data
 loss, missing tests for risky logic, code made harder to maintain), and
-build the smallest change that works.
+build the smallest change that works. An agent that leads others is told
+not to pass on what the Console already tells each agent (pushes, checks,
+merges, the base branch moving), to send each agent one message per round
+of work, to take open product decisions to you with `team_report`, and to
+propose closing a tab once its work is done.
 
 To make your own, open **Settings**, then **Roles**, then **New role**: a
 name, a one-line description, the access (Code edit or Code analysis), a

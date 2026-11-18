@@ -138,7 +138,8 @@ export default function NeedsTray({
       {needs.notices.map((n) => (
         <div key={`n${n.id}`} className={styles.need}>
           <p>
-            <b>{n.agentName}</b> {project(n.projectId)} · {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : n.kind === "merge" ? "asks to merge" : "note"}
+            <b>{n.close?.console ? "The Console" : n.agentName}</b> {project(n.projectId)} ·{" "}
+            {n.kind === "report" ? "report" : n.kind === "proposal" ? "proposes a tab" : n.kind === "merge" ? "asks to merge" : n.kind === "close" ? "suggests closing a tab" : "note"}
           </p>
           <p className={styles.needText}>{n.text}</p>
           {n.merge && (
@@ -164,6 +165,12 @@ export default function NeedsTray({
                 {/* Each merge is the owner's: no "Always". */}
                 {act("Deny", { action: "decideMerge", noticeId: n.id, decision: "deny" }, false, "Do not merge it; its agent is told")}
                 {act("Approve", { action: "decideMerge", noticeId: n.id, decision: "approve" }, true, "Squash and merge it on GitHub now, if it is still as shown here (the Console checks again first)")}
+              </>
+            ) : n.close ? (
+              <>
+                {/* Closing keeps the folders, and Restore brings the tab back. */}
+                {act("Keep", { action: "decideClose", noticeId: n.id, decision: "keep" }, false, "Leave the tab open")}
+                {act("Close tab", { action: "decideClose", noticeId: n.id, decision: "close" }, true, "Close the tab and stop its agents; their folders are kept, and Restore brings it back")}
               </>
             ) : (
               act("Dismiss", { action: "dismissNotice", noticeId: n.id }, true)

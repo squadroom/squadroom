@@ -248,6 +248,8 @@ export const teamTools = {
         return this.teamPush(call);
       case "team_merge":
         return this.teamMerge(call);
+      case "team_close_tab":
+        return this.teamCloseTab(call);
     }
     throw new TeamError(`Unknown tool: ${name}`);
   },
@@ -293,6 +295,11 @@ export const teamTools = {
         chars += m.body.length;
       }
       if (!batch.length) continue;
+      // Messages arriving close together share one turn: the batch waits
+      // until its first message has been deliverable for joinMs. A Re-send
+      // is the owner's, so it goes at once.
+      const ready = (m: (typeof batch)[number]) => Math.max(m.createdAt, (m.fromTurn !== null && this.store.turn(m.fromTurn)?.endedAt) || 0);
+      if (!batch.some((m) => m.resendAfter !== null) && this.now() - Math.min(...batch.map(ready)) < this.limits.joinMs) continue;
       const instruction = Math.max(...batch.map((m) => m.instructionId ?? 0));
       if (instruction) {
         const use = this.store.instructionUse(instruction, agent.tabId);

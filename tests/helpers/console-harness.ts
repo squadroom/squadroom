@@ -156,7 +156,8 @@ export async function harness(t: TestContext, limits: Partial<typeof LIMITS> = {
     codexCallMs: extra.codexCallMs,
     acpCallMs: extra.acpCallMs ?? ACP_CALL_MS,
     drivers: extra.drivers,
-    limits,
+    // Messages wait to join others only where a test asks for it.
+    limits: { joinMs: 0, ...limits },
     log: () => {},
     mirrorsDir: join(root, "mirrors"),
     githubFetch: extra.githubFetch,

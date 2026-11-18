@@ -162,6 +162,8 @@ export function callSummary(tool: string, args: Record<string, unknown>, names: 
       return `team_report: ${text(args.message)}`;
     case "team_propose_tab":
       return `team_propose_tab "${text(args.name)}": ${text(args.goal)}`;
+    case "team_close_tab":
+      return `team_close_tab "${text(args.tab)}": ${text(args.reason)}`;
     default:
       return tool;
   }

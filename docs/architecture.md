@@ -224,9 +224,12 @@ Claude Code's default 5 minutes. Through it, agents in one tab
 call the team tools (`team_send`, `team_ask`, `team_reply`, `team_read`,
 `team_pull`, `team_diff`, `team_claim`, `team_hold`, `team_push`,
 `team_pr`, `team_checks`, `team_merge`, `team_project`, `team_report`,
-`team_propose_tab`, …). Messages
+`team_propose_tab`, `team_close_tab`, …). Messages
 are queued in the store and delivered together as one prompt when the
-recipient is free; nobody waits inside a tool call. Routes forward a
+recipient is free; nobody waits inside a tool call. Team messages to an
+idle agent wait until the first of them has been deliverable for a minute
+(`LIMITS.joinMs`), so messages sent close together share one turn; a
+Re-send goes at once. Routes forward a
 finished turn's reply automatically. In a GitHub project, `team_pull` with
 the base branch's name brings in the base branch as GitHub has it now: the
 worker checks the repository again, fetches into the owner's mirror and
@@ -283,6 +286,23 @@ tools stay inside a tab. Once the new tab has come to rest (no open or
 queued turn, no mail waiting, not paused), the worker sends its lead's
 final message to the proposing agent, once; if that agent is closed by
 then, the result goes to Needs you instead.
+
+`team_close_tab` proposes closing a tab of the agent's project, its own
+included. It is refused while the project has no other open tab, or while
+any agent of that tab has a turn open or queued, a commit still being
+recorded, a conflicted `team_pull`, messages waiting, a push or merge job
+waiting, or a request in Needs you. In a GitHub project the worker also
+reads the tab's editing agents' branches: an open pull request, or
+committed work that GitHub does not have (unless its pull request was
+merged at that commit), keeps the tab open. Otherwise a notice of kind
+`close` goes into Needs you, with **Keep** and **Close tab**. Close tab
+closes the tab as the tab menu does (folders kept, Restore brings it
+back); the proposing agent gets one line of news either way, unless its
+own tab was closed. Once an hour the worker also looks for open tabs
+where no turn has started, been queued or ended for a day
+(`LIMITS.idleTabMs`), in projects with another open tab. Each one that
+passes the same checks gets a `close` notice from the Console itself,
+once until the tab runs again.
 
 ## GitHub
 
