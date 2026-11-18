@@ -653,13 +653,12 @@ export class ConsoleWorker {
     const ownOrder = (x: TurnRow, y: TurnRow) => (x.nextAt === null ? 1 : 0) - (y.nextAt === null ? 1 : 0) || (y.nextAt ?? 0) - (x.nextAt ?? 0) || x.id - y.id;
     // A team turn or the Console's wake held by a teammate cannot run, so it
     // never sets where its agent's group stands.
-    const holdable = (r: TurnRow) => r.trigger === "team" || this.store.isWake(r);
     const heldAgents = new Set([...byAgent.keys()].filter((id) => {
       const a = this.store.agent(id);
       return !!a && !!this.store.heldBy(a);
     }));
     const position = (rows: TurnRow[]) => {
-      const runnable = rows.filter((r) => !(holdable(r) && heldAgents.has(r.agentId)));
+      const runnable = rows.filter((r) => !(this.store.holdable(r) && heldAgents.has(r.agentId)));
       return Math.min(...(runnable.length ? runnable : rows).map((r) => r.id));
     };
     const ordered = [...byAgent.values()].sort((x, y) => position(x) - position(y)).flatMap((rows) => rows.sort(ownOrder));
@@ -672,7 +671,7 @@ export class ConsoleWorker {
       }
       // A hold keeps a team turn or a wake that was already made, without
       // reserving the agent: the owner's own messages still reach it.
-      if (holdable(row)) {
+      if (this.store.holdable(row)) {
         const held = this.store.agent(row.agentId);
         if (held && this.store.heldBy(held)) continue;
       }

@@ -150,7 +150,7 @@ test("a queued wake the owner edited is sent as written, with the news before it
   assert.deepEqual(h.store.news(lead.id), []);
 });
 
-test("a queued wake waits while a teammate holds the agent", async (t) => {
+test("a queued wake waits while a teammate holds the agent; the owner's message behind it still runs", async (t) => {
   const h = await harness(t);
   await h.worker.start();
   const lead = h.agent("Lead");
@@ -166,6 +166,10 @@ test("a queued wake waits while a teammate holds the agent", async (t) => {
   runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
   h.store.addHold(h.worker.epoch!, { turnId: turn, tabId: h.tab.id, holder: mate.id, held: lead.id, reason: "merging", ttlMs: 60_000, key: "k1", summary: "hold", result: "held" });
   await settle();
+  assert.equal(h.store.turn(wake)!.status, "queued");
+  // The owner's own message is not held behind the wake.
+  const owner = h.send(lead.id, "hello");
+  await h.ended(owner);
   assert.equal(h.store.turn(wake)!.status, "queued");
   h.store.releaseHold(mate.id, lead.id);
   await h.ended(wake);

@@ -70,6 +70,11 @@ export const news = {
     // One the owner edited is the owner's message, sent as written.
     return turn.trigger === "owner" && !turn.revisedAt && turn.prompt.startsWith(WAKE_HEAD);
   },
+  /** A turn a teammate's hold keeps waiting: a team turn or the Console's
+   * wake. The owner's own messages still reach a held agent. */
+  holdable(this: ConsoleStore, turn: { trigger: string; prompt: string; revisedAt: number | null }): boolean {
+    return turn.trigger === "team" || this.isWake(turn);
+  },
   /** A queued wake with nothing left to tell (another turn told it first). */
   staleWake(this: ConsoleStore, turn: { agentId: string; trigger: string; prompt: string; revisedAt: number | null }): boolean {
     return this.isWake(turn) && !this.news(turn.agentId).length && !this.failedPush(turn.agentId, true);
