@@ -86,6 +86,11 @@ test("a proposal to close a tab waits in Needs you; Close closes it, keeps its f
   assert.throws(() => runCommand(store, { action: "dismissNotice", noticeId: notice.id }), /already ended/);
   assert.throws(() => runCommand(store, { action: "decideClose", noticeId: notice.id, decision: "maybe" }), /Close tab or Keep/);
 
+  // Busy again since it was proposed: Close says why and closes nothing.
+  const again = store.queueTurn(typo.id, "more").id;
+  assert.throws(() => runCommand(store, { action: "decideClose", noticeId: notice.id, decision: "close" }), /busy again: Typo is working/);
+  assert.equal(store.tab(done.id)!.archivedAt, null);
+  store.withdrawQueued(again);
   runCommand(store, { action: "decideClose", noticeId: notice.id, decision: "close" });
   assert.notEqual(store.tab(done.id)!.archivedAt, null);
   assert.equal(store.agent(typo.id)!.state, "closed");
@@ -105,10 +110,25 @@ test("Keep leaves the tab open and tells the proposer; the project's last open t
   assert.match(store.news(lead.id)[0], /kept the tab "Typography" open/);
   // Closed by hand meanwhile, the other tab is the last: Close says why and the item stays.
   store.proposeClose(epoch, { turnId: turn, agentId: lead.id, key: "k2", summary: "s", tab: store.tab(lead.tabId)!, reason: "done" });
+  store.finishTurn(epoch, turn, "done", null, null, "ok");
   runCommand(store, { action: "archive", scope: "tab", id: done.id });
   const item = needsView(store).notices.find((n) => n.close)!;
   assert.throws(() => runCommand(store, { action: "decideClose", noticeId: item.id, decision: "close" }), /at least one open tab/);
   assert.ok(needsView(store).notices.some((n) => n.id === item.id));
+});
+
+test("closing a tab settles the close proposals its agents made and those for it", (t) => {
+  const { store, p, done, lead, typo, epoch, turn } = project(t);
+  const third = store.createTab(p.id, "Third");
+  store.proposeClose(epoch, { turnId: turn, agentId: lead.id, key: "k", summary: "s", tab: third, reason: "done" });
+  const typoTurn = store.queueTurn(typo.id, "x").id;
+  store.startTurn(epoch, typoTurn);
+  store.proposeClose(epoch, { turnId: typoTurn, agentId: typo.id, key: "k", summary: "s", tab: store.tab(lead.tabId)!, reason: "done" });
+  store.finishTurn(epoch, typoTurn, "done", null, null, "ok");
+  // Lead's tab closes by hand: its proposal for Third, and Typo's for it, are settled.
+  runCommand(store, { action: "archive", scope: "tab", id: lead.tabId });
+  assert.deepEqual(store.all("SELECT dismissed FROM console_notices WHERE kind = 'close'").map((r) => r.dismissed), [1, 1]);
+  assert.ok(store.tab(done.id)!.archivedAt === null);
 });
 
 test("the Console suggests closing a tab idle for a day, once until it runs again", (t) => {

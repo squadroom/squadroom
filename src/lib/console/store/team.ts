@@ -397,7 +397,12 @@ export const team = {
     const n = this.notices().find((x) => x.id === noticeId && x.close);
     if (!n?.close) throw new Error("That has already been answered.");
     const { tabId, tabName } = n.close;
-    if (close && this.tab(tabId)?.archivedAt === null) this.archive("tab", tabId);
+    if (close && this.tab(tabId)?.archivedAt === null) {
+      // Checked again: work may have started there since it was proposed.
+      const busy = this.tabBusy(tabId);
+      if (busy) throw new Error(`The tab "${tabName}" is busy again: ${busy} Keep it, or close it once that is done.`);
+      this.archive("tab", tabId);
+    }
     this.transaction(() => {
       this.run("UPDATE console_notices SET dismissed = 1 WHERE id = ?", noticeId);
       if (n.close!.console) return;

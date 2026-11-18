@@ -573,7 +573,9 @@ Things to know while using it:
   and nothing is left open, once until the tab runs again; it never
   suggests the project's last open tab. Either way you find it in Needs
   you: **Close tab** closes it as the tab menu does (the agents' folders
-  are kept, and Restore brings it back), and **Keep** leaves it open. An
+  are kept, and Restore brings it back), and **Keep** leaves it open.
+  **Close tab** checks the tab again first: if work has started there
+  since, it says what and closes nothing. An
   agent that proposed it is told which you chose.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
