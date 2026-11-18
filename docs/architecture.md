@@ -143,6 +143,17 @@ month it started too.
   not load a repository's own settings and plugins (`opencode.json`,
   `.opencode/`), which also means it ignores the repository's `AGENTS.md`.
   Kimi Code's and Gemini CLI's usage statistics are off.
+- **Long conversations.** Before an agent's next turn, if its context
+  gauge has reached `AUTO_SUMMARY_TOKENS` (150,000), the worker queues a
+  summary turn first in its queue (`autoSummary` in
+  `src/lib/console/store/turns.ts`), in the instruction of the turn it goes
+  before. It is the same turn as Fresh session with summary, with its own
+  prompt. It is not queued again when the last turn that ran was a
+  summary, so a failed one does not repeat. A summary turn is told no news,
+  failed push, base-branch news or teammates' commits; those stay for the
+  next turn. The circle detector does not count it as your message. Claude
+  Code gets `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000` as a backstop for one
+  long turn.
 - **Permissions.** The Console answers each permission request itself
   (writes only inside the agent's own folder, never at Code analysis; reads
   outside it refused; in a tab with steps, only the current step's files)

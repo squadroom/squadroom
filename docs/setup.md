@@ -567,6 +567,15 @@ Things to know while using it:
   create it.
 - **Stop** asks the agent to stop; **Force stop** ends its process.
   **Start fresh** begins a new conversation in the same folder.
+- **Fresh session with summary** (click the context gauge in a window's
+  header) costs one turn: the agent writes a handoff (goal and milestone,
+  where things stand, next steps, open asks, decisions, pitfalls), and its
+  next message starts a new conversation that opens with it. Squadroom does
+  this by itself before an agent's next turn once its conversation reaches
+  150,000 tokens, since every step of a turn re-reads the whole
+  conversation. If that summary fails, the turn goes ahead in the old
+  session. Claude Code also compacts on its own at 300,000 tokens within a
+  single long turn.
 - **Tabs with steps** (from a template such as **Document review**): each
   step names the files the agents may change during it. Any AI may edit
   there, on a subscription or an API key. A request to change another file

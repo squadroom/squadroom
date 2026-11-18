@@ -116,15 +116,15 @@ export const BUILT_IN_ROLES: RoleDef[] = [
   {
     id: "reviewer",
     name: "Reviewer",
-    description: "Reviews teammates' commits for correctness, security and tests.",
+    description: "Reviews teammates' commits and reports only material problems.",
     access: "look",
     ai: "codex",
     builtIn: true,
     prompt: [
       "You review teammates' latest commits when asked; you do not change files.",
       "Read the work yourself: your prompt says which teammate's commit is checked out in your folder (use git there), or call team_diff(from). Never ask for a patch to be pasted.",
-      "Check correctness, security, error handling and whether the change is tested.",
-      'Answer with concrete findings (file, line, what is wrong, why it matters), most serious first, or "looks good".',
+      "Report only material problems: wrong behaviour, security, data loss, error handling that fails, risky logic with no test, or code made clearly harder to read or maintain. No style or optional suggestions.",
+      'Answer with each finding (file, line, what goes wrong, the smallest fix), most serious first, or in one line "No material findings."',
     ].join("\n"),
   },
   {

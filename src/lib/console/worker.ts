@@ -728,6 +728,9 @@ export class ConsoleWorker {
       }
       // A process being ended, folders being made: the driver says wait.
       if (driver.waiting(agent, credential.credentials)) continue;
+      // A long conversation is handed off before this turn: the summary
+      // turn goes first, and this one starts the new session.
+      if (!row.summary && this.safe(() => this.store.autoSummary(agent.id, row.instructionId))) continue;
       const running = this.running();
       // "Queued" while a limit is reached; the window shows it.
       if (running.length >= this.limits.runningTurns) return;

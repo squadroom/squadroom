@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { runCommand } from "../src/lib/console/commands.ts";
 import { projectView } from "../src/lib/console/views.ts";
 import { SUMMARY_PROMPT } from "../src/lib/console/store.ts";
+import { AUTO_SUMMARY_PROMPT, AUTO_SUMMARY_TOKENS } from "../src/lib/console/store/turns.ts";
 import { harness } from "./helpers/console-harness.ts";
 
 // Fresh session with summary. One turn in which the agent
@@ -129,4 +130,96 @@ test("Start fresh waits for a queued summary request; a Re-send of one is checke
   assert.throws(() => runCommand(h.store, { action: "resend", turnId: third }), /already has a summary request/);
   assert.equal(h.store.turn(third)!.acknowledged, false);
   assert.ok(other);
+});
+
+// The Console's own Fresh session with summary, before the next turn of a
+// conversation that reached AUTO_SUMMARY_TOKENS.
+
+test("a long conversation is handed off before its next turn, which starts the new session; a short one is not", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  const first = h.send(lead.id, "hello");
+  await h.ended(first);
+  // Short: the next turn runs in the same session.
+  const session = h.store.session(lead.id);
+  await h.ended(h.send(lead.id, "short"));
+  assert.equal(h.store.session(lead.id), session);
+  assert.equal(h.said(lead.id).at(-1), "echo: short");
+  // Long: the summary goes first, in the instruction it serves.
+  h.store.run("UPDATE console_gauges SET tokens = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS, lead.id);
+  const next = h.send(lead.id, "carry on");
+  await h.ended(next);
+  const summary = h.store.all("SELECT id FROM console_turns WHERE agent_id = ? AND summary = 1", lead.id);
+  assert.equal(summary.length, 1);
+  const s = h.store.turn(summary[0].id as number)!;
+  assert.equal(s.prompt, AUTO_SUMMARY_PROMPT);
+  assert.equal(s.status, "done");
+  assert.ok(s.id > next && (s.startedAt ?? 0) <= (h.store.turn(next)!.startedAt ?? 0), "it ran before the message");
+  assert.equal(s.instructionId, next);
+  // The message opened the new session with the handoff.
+  assert.notEqual(h.store.session(lead.id), session);
+  assert.match(h.said(lead.id).at(-1)!, /^echo: This is a new session\.[\s\S]*Your conversation has grown long[\s\S]*carry on$/);
+});
+
+test("a handoff that failed is not asked for again: the turn goes ahead in the same session", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await h.ended(h.send(lead.id, "hello"));
+  const session = h.store.session(lead.id);
+  h.store.run("UPDATE console_gauges SET tokens = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS + 1, lead.id);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  assert.ok(h.store.autoSummary(lead.id, null));
+  assert.equal(h.store.autoSummary(lead.id, null), false, "one at a time");
+  const summary = h.store.queuedTurns(lead.id)[0].id;
+  h.store.run("UPDATE console_turns SET status = 'failed', ended_at = ? WHERE id = ?", Date.now(), summary);
+  assert.equal(h.store.autoSummary(lead.id, null), false);
+  const next = h.send(lead.id, "carry on");
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.ended(next);
+  assert.equal(h.store.session(lead.id), session);
+  assert.equal(h.said(lead.id).at(-1), "echo: carry on");
+});
+
+test("a wake held up by a handoff keeps its news and runs after it, in the new session", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await h.ended(h.send(lead.id, "hello"));
+  h.store.run("UPDATE console_gauges SET tokens = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS, lead.id);
+  h.store.addNews(lead.id, "Your pull request #7 was merged.");
+  const wake = await h.woken(lead.id);
+  await h.ended(wake);
+  const summary = h.store.all("SELECT id FROM console_turns WHERE agent_id = ? AND summary = 1", lead.id)[0].id as number;
+  assert.equal(h.store.turn(summary)!.status, "done");
+  assert.equal(h.store.turn(wake)!.status, "done");
+  assert.doesNotMatch(h.said(lead.id).find((s) => s.includes("Your conversation has grown long"))!, /pull request #7/);
+  assert.match(h.said(lead.id).at(-1)!, /^echo: This is a new session\.[\s\S]*Your pull request #7 was merged\./);
+});
+
+test("the handoff counts toward the instruction of the turn it goes before, and a later long session is handed off again", async (t) => {
+  const h = await harness(t);
+  await h.worker.start();
+  const lead = h.agent("Lead");
+  await h.ready(lead.id);
+  await h.ended(h.send(lead.id, "hello"));
+  h.store.run("UPDATE console_gauges SET tokens = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS, lead.id);
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  const a = h.send(lead.id, "first");
+  const b = h.send(lead.id, "second");
+  runCommand(h.store, { action: "resume", scope: "tab", id: h.tab.id });
+  await h.ended(b);
+  const summaries = h.store.all("SELECT id, instruction_id FROM console_turns WHERE agent_id = ? AND summary = 1 ORDER BY id", lead.id);
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].instruction_id, a, "the turn it went before, not the newest");
+  // The new session grows long: the summary (newer by id than "first" and
+  // "second", which ran after it) does not stop the next handoff.
+  runCommand(h.store, { action: "pause", scope: "tab", id: h.tab.id });
+  const c = h.send(lead.id, "third");
+  h.store.run("UPDATE console_gauges SET tokens = ?, session_id = ? WHERE agent_id = ?", AUTO_SUMMARY_TOKENS + 1000, h.store.session(lead.id), lead.id);
+  assert.ok(h.store.autoSummary(lead.id, c));
 });

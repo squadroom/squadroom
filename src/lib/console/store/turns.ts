@@ -5,7 +5,15 @@ import { event, OPEN, turn } from "./rows.ts";
 /** Fresh session with summary: what the agent is asked, and the most of
  * its answer carried into the new session. */
 export const SUMMARY_PROMPT =
-  "The owner is starting you on a fresh session. Write a summary of this conversation for your next session, which will not see it: the task and its goal, what you have done and changed (files, commits), decisions and their reasons, what is unfinished, the next steps, and anything the owner asked you to remember. Write only the summary. Change no files.";
+  "The owner is starting you on a fresh session. Write a handoff for your next session, which will not see this conversation. Use these headings, briefly, with exact names (files, branches, commits, pull request numbers, correlation ids): the goal and the milestone; where it stands (what is done and checked, what is pushed or merged); what is in flight and the next steps, in order; open asks and who owes whom an answer; decisions and their reasons; pitfalls found. Leave out what the files, the Git history or the pull request already say. Write only the handoff. Change no files.";
+/** The Console's own Fresh session with summary: a conversation this long
+ * is handed off before its next turn, so no turn re-reads a long history
+ * at every step. */
+export const AUTO_SUMMARY_TOKENS = 150_000;
+export const AUTO_SUMMARY_PROMPT = SUMMARY_PROMPT.replace(
+  "The owner is starting you on a fresh session.",
+  "Your conversation has grown long, so the Console is starting you on a fresh session before your next message (each step of a turn re-reads the whole conversation).",
+);
 export const SUMMARY_MAX = 20_000;
 
 type Queued = TurnRow & { refusedUploads: string[] };
@@ -305,6 +313,33 @@ export const turns = {
       const t = this.queueTurn(agentId, SUMMARY_PROMPT);
       this.markSummary(t.id);
       return this.turn(t.id)!;
+    });
+  },
+  /** The Console's own summary request, before the agent's next turn,
+   * when its conversation reached AUTO_SUMMARY_TOKENS: first in its queue,
+   * in the instruction of the turn it goes before (it starts no new one
+   * when that turn has one). False when it is not due or a summary is not
+   * allowed now. */
+  autoSummary(this: ConsoleStore, agentId: string, instructionId: number | null): boolean {
+    return this.transaction(() => {
+      const agent = this.agent(agentId);
+      const tokens = this.gauge(agentId)?.tokens ?? 0;
+      if (!agent || agent.state !== "ready" || tokens < AUTO_SUMMARY_TOKENS) return false;
+      // One that just failed (no summary written) is not asked for again
+      // and again: the owner sees it, and the turn goes ahead.
+      // The last turn that ran, in the order turns ran (a summary goes ahead
+      // of turns queued before it, so not by id).
+      const last = this.get("SELECT summary FROM console_turns WHERE agent_id = ? AND status NOT IN ('withdrawn', 'queued') ORDER BY COALESCE(started_at, ended_at) DESC, id DESC LIMIT 1", agentId);
+      if (last?.summary) return false;
+      try {
+        this.summaryAllowed(agent);
+      } catch {
+        return false;
+      }
+      const t = this.ownerTurn(agentId, AUTO_SUMMARY_PROMPT, null, {});
+      this.run("UPDATE console_turns SET instruction_id = ? WHERE id = ?", instructionId ?? t.id, t.id);
+      this.markSummary(t.id);
+      return true;
     });
   },
   /** What a summary request needs, new or a Re-send. */
