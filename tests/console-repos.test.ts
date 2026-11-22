@@ -368,6 +368,56 @@ test("no new clone when free disk would fall below the floor", async (t) => {
   assert.match(h.store.agent(lead.id)!.error!, /Not enough free disk/);
 });
 
+test("Try again sets up a folder that failed on the disk floor, with the floor still checked", async (t) => {
+  let free = 1024 ** 3;
+  const h = await harness(t, {}, false, { options: { freeBytes: () => free } });
+  await h.worker.start();
+  const lead = h.agent();
+  await h.until(() => h.store.agent(lead.id)!.state === "error", "refused");
+  const refusal = h.store.agent(lead.id)!.error!;
+  assert.match(refusal, /Not enough free disk/);
+  // Still too little space: the same clear error, and the worker carries on.
+  assert.deepEqual(runCommand(h.store, { action: "retrySetup", agentId: lead.id }), { retrying: true });
+  assert.notEqual(h.store.agent(lead.id)!.state, "ready");
+  await h.until(() => h.store.agent(lead.id)!.state === "error", "refused again");
+  assert.equal(h.store.agent(lead.id)!.error, refusal);
+  assert.equal(h.store.agent(lead.id)!.folder, "");
+  // Space freed: the same agent gets its folder.
+  free = 1024 ** 4;
+  runCommand(h.store, { action: "retrySetup", agentId: lead.id });
+  await h.ready(lead.id);
+  assert.equal(h.store.agent(lead.id)!.error, null);
+  assert.ok(h.store.agent(lead.id)!.folder);
+  // Only a failed setup can be tried again.
+  assert.throws(() => runCommand(h.store, { action: "retrySetup", agentId: lead.id }), /folder setup failed/);
+});
+
+test("Try again after a setup that failed partway starts from an empty folder", async (t) => {
+  // The first agent's branch fails once, after the project's repository was filled.
+  let failOnce = true;
+  const h = await harness(t, {}, false, {
+    launcher: (l) => {
+      const git = l.git.bind(l);
+      l.git = (repo, args, ...rest) => {
+        if (failOnce && args.includes("checkout") && args.includes("-b")) {
+          failOnce = false;
+          return Promise.resolve({ code: 1, stdout: "", stderr: "injected", truncated: false } as Awaited<ReturnType<typeof git>>);
+        }
+        return git(repo, args, ...rest);
+      };
+      return l;
+    },
+  });
+  await h.worker.start();
+  const lead = h.agent();
+  await h.until(() => h.store.agent(lead.id)!.state === "error", "failed");
+  assert.match(h.store.agent(lead.id)!.error!, /injected/);
+  runCommand(h.store, { action: "retrySetup", agentId: lead.id });
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  assert.equal(git(folder, "rev-parse", "--abbrev-ref", "HEAD"), consoleBranch(lead.id, "Lead"));
+});
+
 test("a GitHub project whose base branch is missing or unprotected is refused before any clone", async (t) => {
   const bare = origin(t);
   const h = await harness(t, {}, false, {

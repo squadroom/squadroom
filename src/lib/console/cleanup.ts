@@ -86,6 +86,15 @@ const real = (path: string) => {
   }
 };
 
+/** Removes one folder of the agent's home as `agent`, as the cleanup does:
+ * a failed setup's partly made clone. True when it is gone (or never was). */
+export async function removeHomeFolder(launcher: Launcher, agentHome: string, key: string): Promise<boolean> {
+  if (!HOME_KEY.test(key)) return false;
+  const root = real(agentHome);
+  const r = await launcher.runIn(root, "/usr/bin/perl", ["-e", REMOVE_SCRIPT, root, key], 4096, 600_000);
+  return r.stdout.startsWith("ok\t") || (r.stdout.startsWith("skip\t") && r.code === 0);
+}
+
 /** What the owner may remove now. */
 export async function scanCleanup(o: CleanupOptions): Promise<CleanupItem[]> {
   const home = real(o.paths.agentHome);

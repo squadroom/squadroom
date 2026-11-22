@@ -108,6 +108,7 @@ export type ConsoleCommand =
   | { action: "setStep"; tabId: string; step: number }
   | { action: "archive" | "restore"; scope: "project" | "tab"; id: string }
   | { action: "recheckProject"; id: string }
+  | { action: "retrySetup"; agentId: string }
   | { action: "createAgent"; tabId: string; name: string; role?: string; kind: string; model: string; effort?: string | null; permission: string; askFirst?: boolean }
   | { action: "setAskFirst"; agentId: string; on: boolean }
   | { action: "setAi"; agentId: string; model: string; effort?: string | null }
@@ -741,6 +742,11 @@ const COMMANDS: Record<RunAction, CommandHandler> = {
     // After the repository was fixed on GitHub: the worker checks it again.
     store.recheckProject(id(input.id, "Project"));
     return { rechecking: true };
+  },
+  retrySetup(store, input) {
+    // Once disk is freed, or the failure fixed: the worker sets the folder up again.
+    store.retryAgentSetup(id(input.agentId, "Agent"));
+    return { retrying: true };
   },
   createTab(store, input, options) {
     // From a template: checked before the tab is made.
