@@ -5,7 +5,8 @@ import { acpConformance } from "./helpers/acp-matrix.ts";
 // 4. Like the pinned 1.5.14 (offline probe, 2026-11-22), the fake lists the
 // model both as `models` ids carrying a thinking level and as the `model`
 // and `thought_level` config options; the Console switches both through
-// the config options.
+// the config options. Its usage is ACP's names with thinking inside the
+// output.
 acpConformance({
   kind: "antigravity-cli",
   label: "Antigravity CLI",
@@ -15,5 +16,6 @@ acpConformance({
   args: ["acp", "--disable-telemetry", "--process-per-session"],
   configOptions: true,
   thinkingLevel: true,
+  usage: "thought-in-output",
   key: { name: "GEMINI_API_KEY", value: "AIzaSyFAKE-antigravity-acp-key-0000000ABCD", cap: { usd: 10, url: "https://aistudio.google.com/", checkedAt: "2026-11-22" } },
 });

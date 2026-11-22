@@ -74,9 +74,10 @@ export interface AgentKindInfo {
    * session/set_config_option, and each answer must confirm them. */
   acpConfigOptions?: boolean;
   /** Where it reports a turn's usage: ACP's `usage` (left out), Grok
-   * Build's own `_meta.usage` with xAI's meaning, or ACP's `usage` with
-   * Gemini's meaning. */
-  acpUsage?: "xai-meta" | "gemini";
+   * Build's own `_meta.usage` with xAI's meaning, ACP's `usage` with
+   * Gemini's meaning, or ACP's `usage` with thinking inside the output
+   * (Antigravity CLI). */
+  acpUsage?: "xai-meta" | "gemini" | "thought-in-output";
   /** Its login lives in the agent account itself, set up by the owner
    * (Codex's ChatGPT login, Kimi Code's membership): no key crosses, and
    * Check connection reports it where the client has a status command. */
@@ -465,10 +466,10 @@ AGENT_KINDS.push({
   // network-off sandbox refuses (as OpenCode's server); its model calls
   // need the network anyway.
   needsNetwork: true,
-  // Each model names its key (GEMINI_API_KEY, as Gemini CLI's). Usage is
-  // read as plain ACP usage until a live turn shows its meaning: read that
-  // way, Gemini's meaning would overcharge or fail the total check, never
-  // undercharge.
+  // Each model names its key (GEMINI_API_KEY, as Gemini CLI's). Its usage
+  // counts thinking inside the output: read as plain ACP usage it never
+  // added up, and every turn was charged its allowance.
+  acpUsage: "thought-in-output",
   credential: null,
   offered: true,
   models: [

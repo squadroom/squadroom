@@ -7,7 +7,7 @@
 //   env        says which credential names reached it
 //   tools      lists the Console's team tools it was offered
 //   team_send NAME TEXT   calls a team tool
-//   nousage    ends without usage
+//   nousage    reports an empty gauge and one request's, ends without usage
 //   slownousage  ends without usage after half a second
 //   badusage   ends with a total smaller than its parts
 //   repeat     reports its context twice, then usage once
@@ -110,6 +110,15 @@ async function prompt(id, params) {
   // (input includes the cache, reasoning beside output, total = input +
   // output), the same tokens as ACP's `usage` above. `usage: "gemini"`
   // (Gemini CLI): the same meaning in ACP's `usage`, with no cache writes.
+  // `usage: "thought-in-output"` (Antigravity CLI 1.5.14's shape, offline
+  // probe 2026-11-22): ACP's names, input without the cached part, thinking
+  // inside the output, total = input + cache + output, no cache writes.
+  const thoughtInOutput = (u) => {
+    if (u.totalTokens === 10) return u;
+    const input = u.inputTokens + (u.cachedWriteTokens ?? 0);
+    const output = u.outputTokens + (u.thoughtTokens ?? 0);
+    return { inputTokens: input, outputTokens: output, cachedReadTokens: u.cachedReadTokens, cachedWriteTokens: 0, thoughtTokens: u.thoughtTokens, totalTokens: input + u.cachedReadTokens + output };
+  };
   const xai = (u) => {
     if (u.totalTokens === 10) return { inputTokens: 1000, outputTokens: 200, totalTokens: 10 };
     const input = u.inputTokens + (u.cachedReadTokens ?? 0) + (u.cachedWriteTokens ?? 0);
@@ -118,7 +127,15 @@ async function prompt(id, params) {
   const end = (stopReason, extra = {}) => {
     if (prompts.get(sessionId) === turn) prompts.delete(sessionId);
     const gemini = (u) => ({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, cachedReadTokens: u.cachedReadTokens, thoughtTokens: u.reasoningTokens, totalTokens: u.totalTokens });
-    const shaped = !extra.usage ? extra : setup.usage === "xai" ? { _meta: { usage: xai(extra.usage) } } : setup.usage === "gemini" ? { usage: gemini(xai(extra.usage)) } : extra;
+    const shaped = !extra.usage
+      ? extra
+      : setup.usage === "xai"
+        ? { _meta: { usage: xai(extra.usage) } }
+        : setup.usage === "gemini"
+          ? { usage: gemini(xai(extra.usage)) }
+          : setup.usage === "thought-in-output"
+            ? { usage: thoughtInOutput(extra.usage) }
+            : extra;
     send({ id, result: { stopReason, ...shaped } });
   };
   switch (word) {
@@ -143,6 +160,10 @@ async function prompt(id, params) {
       return end("end_turn", { usage });
     }
     case "nousage":
+      // An empty gauge (Antigravity CLI's, before its first request) is no
+      // request: one request seen, so one allowance.
+      update(sessionId, { sessionUpdate: "usage_update", used: 0, size: 200000 });
+      update(sessionId, { sessionUpdate: "usage_update", used: 1200, size: 200000 });
       say(sessionId, "No usage this time.");
       return end("end_turn");
     case "slownousage":

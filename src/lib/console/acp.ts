@@ -123,8 +123,14 @@ export function readAcpUpdate(update: unknown): AcpUpdate[] {
  * thinking. Undefined fields stay undefined, so the spend rule sees usage
  * that is missing; a reported total smaller than its parts is
  * contradictory, and is reported as missing too.
+ *
+ * `thoughtInOutput`: the client's `outputTokens` already include its
+ * `thoughtTokens`, which are only their breakdown, and the total is input,
+ * cache and output (Antigravity CLI 1.5.14: `inputTokens` is
+ * the prompt less its cached part, `cachedReadTokens` that cached part,
+ * summed over the turn's model requests).
  */
-export function readAcpUsage(usage: unknown): TurnUsage | null {
+export function readAcpUsage(usage: unknown, options: { thoughtInOutput?: boolean } = {}): TurnUsage | null {
   if (!isObject(usage)) return null;
   // An optional counter that is present but not a whole number (null
   // included) is contradictory, never "absent".
@@ -137,6 +143,13 @@ export function readAcpUsage(usage: unknown): TurnUsage | null {
   const thought = count(usage.thoughtTokens) ?? 0;
   const total = count(usage.totalTokens);
   if (input === undefined || output === undefined) return {};
+  if (options.thoughtInOutput) {
+    // Thinking is part of the output, so it is never added twice, and can
+    // never be more than the output it is part of.
+    if (thought > output) return {};
+    if (total !== undefined && total !== input + read + write + output) return {};
+    return { inputTokens: input + read + write, cacheReadTokens: read, cacheWriteTokens: write, outputTokens: output };
+  }
   // ACP's total is the sum of every token type: any other figure means the
   // parts do not add up.
   if (total !== undefined && total !== input + read + write + output + thought) return {};

@@ -156,7 +156,15 @@ month it started too.
   MCP over HTTP, so it couldn't reach the team tools. Antigravity CLI names its
   model and thinking level as session config options, and the ACP driver
   switches both with `session/set_config_option` (the kind's
-  `acpConfigOptions`), checking each answer before the first prompt.
+  `acpConfigOptions`), checking each answer before the first prompt. Its
+  usage is read with `acpUsage: "thought-in-output"`: `outputTokens`
+  already includes the thinking, and `inputTokens` leaves out the cached
+  part. It runs every command in a pseudo-terminal, so for its ACP mode
+  only the sandbox profile allows writes to `/dev/ptmx` and `/dev/tty`,
+  and to a `/dev/ttysN` only with the sandbox's `com.apple.sandbox.pty`
+  extension, which macOS gives a process for the ptys it creates (its
+  children inherit it). Reading a `/dev/ttysN` needs the same extension
+  in every sandboxed program, so none can read another's terminal.
 - **Long conversations.** Before an agent's next turn, if its context
   gauge has reached `AUTO_SUMMARY_TOKENS` (150,000), the worker queues a
   summary turn first in its queue (`autoSummary` in

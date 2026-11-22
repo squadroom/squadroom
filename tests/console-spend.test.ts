@@ -134,6 +134,9 @@ test("a turn without usage it can be trusted on is charged its reported requests
   assert.deepEqual(chargeTurn(LUNA, null, AT, claude), { usd: allowance * 4, basis: "allowance", allowances: 4 });
   // A repeated gauge figure is the same request.
   assert.equal(requestGauged(requestGauged(NO_REQUESTS, 500), 500).gauges, 1);
+  // An empty gauge is none (Antigravity CLI's, before its first request):
+  // its 0, then two requests, counted three.
+  assert.equal(requestGauged(requestGauged(requestGauged(NO_REQUESTS, 0), 9_000), 15_363).gauges, 2);
   // Codex reports each request: what they reported, plus one allowance for
   // a request that may have been under way when the turn did not end normally.
   const req = { inputTokens: 1_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 100 };

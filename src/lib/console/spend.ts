@@ -131,9 +131,10 @@ export function requestStarted(r: RunningUsage): RunningUsage {
   return { ...r, starts: r.starts + 1 };
 }
 /** The context gauge's figure: one request's input. A repeat of the same
- * figure is the same request. */
+ * figure is the same request, and zero is none: Antigravity CLI reports an
+ * empty gauge before a conversation's first request. */
 export function requestGauged(r: RunningUsage, tokens: number): RunningUsage {
-  if (!whole(tokens)) return r;
+  if (!whole(tokens) || tokens === 0) return r;
   return { ...r, gauges: r.gauges + (tokens === r.lastGauge ? 0 : 1), lastGauge: tokens, largest: Math.max(r.largest, tokens) };
 }
 /** A stored running usage, as `RunningUsage` (anything else is none). */

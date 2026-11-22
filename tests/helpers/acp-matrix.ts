@@ -38,9 +38,10 @@ export interface AcpVendor {
    * (Grok Build's `xai.api_key`). */
   keyAuth?: string;
   /** How it reports usage other than plain ACP: in session/prompt's
-   * `_meta.usage` with xAI's meaning (Grok Build), or in its `usage` with
-   * Gemini's meaning (Gemini CLI). */
-  usage?: "xai" | "gemini";
+   * `_meta.usage` with xAI's meaning (Grok Build), in its `usage` with
+   * Gemini's meaning (Gemini CLI), or in its `usage` with thinking inside
+   * the output (Antigravity CLI). */
+  usage?: "xai" | "gemini" | "thought-in-output";
   /** Offered in New agent and the team setup. */
   offered?: boolean;
   /** A paid kind's key, by its credential name; null for a membership. */
@@ -48,8 +49,9 @@ export interface AcpVendor {
 }
 
 export function acpConformance(v: AcpVendor) {
-  // Gemini reports no cache writes: the fake counts them as plain input.
-  const HELLO_USAGE = { inputTokens: 1500, cacheReadTokens: 400, cacheWriteTokens: v.usage === "gemini" ? 0 : 100, outputTokens: 250 };
+  // Gemini and Antigravity report no cache writes: the fake counts them as
+  // plain input.
+  const HELLO_USAGE = { inputTokens: 1500, cacheReadTokens: 400, cacheWriteTokens: v.usage === "gemini" || v.usage === "thought-in-output" ? 0 : 100, outputTokens: 250 };
   const model = agentModel(v.kind, v.model)!;
   /** The fake agent's setup for this kind, with any test-specific parts. */
   const base = (extra: Record<string, unknown> = {}) =>

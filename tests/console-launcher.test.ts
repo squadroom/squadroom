@@ -320,6 +320,75 @@ test("spawn --sandbox: no preferences are written (defaults write)", { skip: !sa
   assert.notEqual(spawnSync("/usr/bin/defaults", ["read", domain, "k"], { stdio: "ignore" }).status, 0);
 });
 
+// Antigravity CLI runs each command in a pseudo-terminal. Under
+// the sandbox it may create its own ptys and use their terminals, never one
+// it did not create, and a pty still writes nothing outside its folders.
+const python = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"].find((p) => existsSync(p));
+const PTY_PROBE = `
+import os, pty, sys
+other, outside = sys.argv[1], sys.argv[2]
+def tryopen(path, flags):
+    try:
+        os.close(os.open(path, flags))
+        return "open"
+    except OSError:
+        return "refused"
+try:
+    m, s = pty.openpty()
+except OSError:
+    print("pty refused"); sys.exit(0)
+os.write(s, b"hi\\n")
+print("pty", os.read(m, 10).strip().decode(), flush=True)
+pid = os.fork()
+if pid == 0:
+    os.setsid()
+    import fcntl, termios
+    fcntl.ioctl(s, termios.TIOCSCTTY, 0)
+    print("child", tryopen(os.ttyname(s), os.O_RDWR), tryopen("/dev/tty", os.O_RDWR)); sys.stdout.flush(); os._exit(0)
+os.waitpid(pid, 0)
+print("other", tryopen(other, os.O_WRONLY), tryopen(other, os.O_RDONLY))
+print("outside", tryopen(outside, os.O_WRONLY | os.O_CREAT))
+`;
+
+/** A pty held open outside the sandbox (by this user, as a teammate's or
+ * the owner's would be), and its terminal's path. */
+async function outsidePty(t: TestContext): Promise<string> {
+  const holder = spawn(python!, ["-I", "-c", "import os, pty, sys, time\nm, s = pty.openpty()\nprint(os.ttyname(s), flush=True)\ntime.sleep(60)"], { stdio: ["ignore", "pipe", "ignore"] });
+  t.after(() => holder.kill("SIGKILL"));
+  return await new Promise<string>((resolve) => holder.stdout.once("data", (d) => resolve(String(d).trim())));
+}
+
+test("spawn --sandbox: Antigravity CLI may open its own pseudo-terminals, never another's, and still writes only in its folders", { skip: !sandboxed || !python }, async (t) => {
+  const s = sandboxLauncher(t);
+  const other = await outsidePty(t);
+  assert.match(other, /^\/dev\/ttys\d+$/);
+  const outside = join(s.root, "work", "p1", "pty-escape.txt");
+  const bin = join(s.root, "bin");
+  mkdirSync(bin);
+  const probe = join(s.root, "pty-probe.py");
+  writeFileSync(probe, PTY_PROBE);
+  // A stand-in program named antigravity that runs the probe.
+  const agy = join(bin, "antigravity");
+  writeFileSync(agy, `#!/bin/sh\nexec ${python} -I ${probe} ${other} ${outside}\n`, { mode: 0o755 });
+  const run = (program: string, ...args: string[]) =>
+    spawnSync("/bin/zsh", ["-f", s.path, "spawn", "--keep", "", "--sandbox", "edit", "--net", "off", "--port", "4999", "--deny", s.mate, s.mine, program, ...args], {
+      env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv,
+      encoding: "utf8",
+    });
+  const r = run(agy, "acp");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split("\n"), ["pty hi", "child open open", "other refused refused", "outside refused"]);
+  assert.ok(!existsSync(outside));
+  // Every other program is left as it was: it cannot create a pty, and it
+  // cannot open another's terminal either.
+  const sh = run("/bin/sh", "-c", `${python} -I ${probe} ${other} ${outside}`);
+  assert.equal(sh.status, 0, sh.stderr);
+  assert.equal(sh.stdout.trim(), "pty refused");
+  const peek = run("/bin/sh", "-c", `cat ${other} </dev/null; echo x > ${other}`);
+  assert.notEqual(peek.status, 0);
+  assert.match(peek.stderr, /Operation not permitted/);
+});
+
 test("spawn --sandbox: writes only in the clone and its temporary folder; Code analysis writes neither its clone", { skip: !sandboxed }, (t) => {
   const s = sandboxLauncher(t);
   const edit = s.run("edit", `echo y > ${s.mine}/new.txt && echo z > "$TMPDIR/t.txt" && echo ok`);
