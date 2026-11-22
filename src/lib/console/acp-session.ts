@@ -317,9 +317,17 @@ class AcpSession implements AgentSession {
     this.flushText();
     const reason = String(result.stopReason ?? "");
     // Where the client reports its usage: ACP's `usage`, Grok Build's own
-    // `_meta.usage`, or ACP's `usage` with Gemini's meaning.
+    // `_meta.usage`, or ACP's `usage` with Gemini's meaning or with thinking
+    // inside the output (Antigravity CLI).
     const reader = agentKind(this.ctx.agent.kind)?.acpUsage;
-    const usage = reader === "xai-meta" ? readXaiUsage(result._meta) : reader === "gemini" ? readGeminiUsage(result.usage) : readAcpUsage(result.usage);
+    const usage =
+      reader === "xai-meta"
+        ? readXaiUsage(result._meta)
+        : reader === "gemini"
+          ? readGeminiUsage(result.usage)
+          : reader === "thought-in-output"
+            ? readAcpUsage(result.usage, { thoughtInOutput: true })
+            : readAcpUsage(result.usage);
     const emit = this.ctx.emit;
     if (reason === "end_turn") return emit({ kind: "completed", outcome: "done", error: null, usage });
     if (reason === "cancelled") return emit({ kind: "completed", outcome: "stopped", error: `${this.driver.label} stopped the turn.`, usage });

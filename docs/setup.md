@@ -795,9 +795,28 @@ must confirm each switch, or the turn stops before anything is sent.
   full allowance (the 1,048,576-token window as input and 65,536 tokens as
   output): about $2.75 for Carbon or Argon ($5.50 from December), $4.13 for
   Neon and $2.06 for Hydrogen.
-- **Usage** is read as plain ACP usage. How the real client reports it
-  hasn't been checked in a live turn yet, so compare a first turn's cost
-  with Google's usage page.
+- **Usage.** It reports usage under ACP's field names with a meaning of
+  its own: `inputTokens` leaves out the cached part of the prompt,
+  `cachedReadTokens` is that cached part, `outputTokens` already includes
+  the thinking (`thoughtTokens` is only its breakdown), and `totalTokens`
+  is input plus cache plus output. Squadroom reads it that way, so cache
+  reads are priced once at the cached rate and thinking once as output.
+  (This was measured with version 1.5.14 and a stand-in for Google's API.
+  Read as plain ACP usage, it never added up, and every turn was charged
+  its full allowance.) It also sends an empty context gauge before its
+  first request, which isn't counted as a request. On a conversation's
+  first prompt it asks Gemini 3.1 Flash-Lite for a title: that small
+  request isn't in its usage, so Squadroom can't charge it, and your key's
+  monthly cap covers it. Compare a first turn's cost with Google's usage
+  page.
+- **Commands run in a terminal.** It runs every command in a
+  pseudo-terminal (pty) and fails without one ("failed to create PTY:
+  operation not permitted"). The launcher lets Antigravity CLI, and no
+  other kind, create its own ptys. A terminal is reachable only by the
+  program that created it, so no sandboxed program can read or type into
+  another's. A pty is a device, not a file, so commands in it still write
+  only in the clone and the temporary folder. This needs launcher version
+  4: run the setup script again.
 
 OpenCode doesn't load a repository's own settings or plugins
 (`opencode.json`, `.opencode/`), so it also ignores the repository's
@@ -813,8 +832,10 @@ $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.
 Gemini CLI was tested at 0.65.0 on 2026-11-01 with a Gemini API key; its
 live turns showed how it reports usage (see `readGeminiUsage` in
-`src/lib/console/acp.ts`). Kimi Code and Antigravity CLI have not had a
-live turn yet.
+`src/lib/console/acp.ts`). Antigravity CLI 1.5.14's first live turn, on
+2026-11-22, named its model correctly. It also showed that its usage has
+its own meaning and that its commands need a terminal; both are handled
+now. Kimi Code has not had a live turn yet.
 
 If an agent program stops right after it starts, the turn's reason ends
 with the last lines it printed on its error output, with keys masked.

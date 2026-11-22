@@ -22,7 +22,7 @@ export interface LauncherConfig {
 export const SYSTEM_LAUNCHER_PATH = "/usr/local/libexec/console-agent";
 /** The launcher version this worker needs: `readonly VERSION=` in
  * scripts/console/console-agent (a test keeps the two equal). */
-export const LAUNCHER_VERSION = 3;
+export const LAUNCHER_VERSION = 4;
 const BASE_ENV = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", LANG: "en_US.UTF-8" };
 
 /**

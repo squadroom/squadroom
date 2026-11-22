@@ -162,6 +162,11 @@ only restates one of them is not a new finding.
   the sandbox (the commands they run are sandboxed) and share your launchd
   session, so if one were taken over it could start a background job that
   runs as you.
+- **Terminals of the same user.** An Antigravity CLI window runs its
+  commands in pseudo-terminals owned by `agent`. No sandboxed program can
+  open another's terminal, but Claude Code's and Codex's own programs run
+  outside the launcher's sandbox as `agent`, so one that was taken over
+  could.
 - **Without mail**, GitHub is the only sign-in factor (weighty actions
   are then off).
 - **Programs left running.** A program an agent left running keeps the

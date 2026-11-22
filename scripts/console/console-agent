@@ -26,7 +26,7 @@ umask 027
 # (LAUNCHER_VERSION in src/lib/console/launcher.ts, kept equal by a test):
 # raise both whenever this file changes, so an update tells the owner to
 # run the setup script again.
-readonly VERSION=3
+readonly VERSION=4
 # setup-agent-user.sh replaces these four lines with the host's paths
 # (NODE_BIN: the folder of the Node it installed the clients with).
 readonly AGENT_HOME=/Users/agent
@@ -193,6 +193,19 @@ case ${1-} in
         login_rules='(allow file-read-data (subpath (param "KIMILOGIN")))'
         writes+=' (subpath (param "KIMILOGIN"))'
       fi
+      # Pseudo-terminals: a terminal (/dev/ttysN) is reachable only with the
+      # sandbox's pty extension, which macOS gives a process for each pty it
+      # creates through /dev/ptmx (its children inherit it). So a program
+      # here never reads or writes another's terminal: not the owner's, nor
+      # a teammate's (the same agent user), only its own. Only Antigravity
+      # CLI may create one: it runs every command in a pty and fails without
+      # it. The others still cannot. A pty is a device, not a file: it opens
+      # nothing outside the clone and the temporary folder, and /dev/tty is
+      # only a process's own terminal.
+      ttys='(regex #"^/dev/ttys[0-9]+$")'
+      own_tty="(require-all $ttys (extension \"com.apple.sandbox.pty\"))"
+      pty=""
+      [[ ${3:t} == antigravity && ${4-} == acp ]] && pty="(literal \"/dev/ptmx\") (literal \"/dev/tty\") $own_tty"
       # Antigravity CLI keeps all its state (settings, logs, conversations)
       # in the folder its `--gemini-dir` names, and uses the Gemini API key
       # in its environment only when the settings file there says
@@ -228,8 +241,10 @@ case ${1-} in
           (subpath (param \"CLAUDE\")) (prefix (param \"CLAUDEJSON\")) (subpath (param \"SHARED\")))
         (allow file-read-data (subpath (param \"CLONE\")) (subpath (param \"TMP\")))
         $login_rules
+        (deny file-read-data $ttys)
+        (allow file-read-data $own_tty)
         (deny file-write*)
-        (allow file-write* $writes (literal \"/dev/null\"))
+        (allow file-write* $writes (literal \"/dev/null\") $pty)
         (deny user-preference-write)" $params "$@"
     fi
     shift 2

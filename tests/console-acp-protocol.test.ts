@@ -165,6 +165,33 @@ test("Gemini CLI's usage (live check 2026-11-01): cached tokens are inside input
   assert.deepEqual(readGeminiUsage({ inputTokens: 10, outputTokens: 2, totalTokens: 12 }), { inputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 2 });
 });
 
+test("Antigravity CLI's usage (offline probe of 1.5.14, 2026-11-22): input without its cached part, thinking inside output", () => {
+  // A stand-in Gemini API answered one request with promptTokenCount 1000,
+  // cachedContentTokenCount 300, candidatesTokenCount 50, thoughtsTokenCount
+  // 20 and totalTokenCount 1070; session/prompt's usage was exactly this.
+  const one = { inputTokens: 700, outputTokens: 70, cachedReadTokens: 300, cachedWriteTokens: 0, thoughtTokens: 20, totalTokens: 1070 };
+  const read = (u: unknown) => readAcpUsage(u, { thoughtInOutput: true });
+  assert.deepEqual(read(one), { inputTokens: 1000, cacheReadTokens: 300, cacheWriteTokens: 0, outputTokens: 70 });
+  // Read as plain ACP usage the thinking is counted twice and the total
+  // never adds up, so every such turn was charged its allowance.
+  assert.deepEqual(readAcpUsage(one), {});
+  // A turn of two requests (a tool call, then the answer: 2000 prompt, 1000
+  // cached, 30 + 10 out) is their sum.
+  const two = { inputTokens: 1700, outputTokens: 110, cachedReadTokens: 1300, cachedWriteTokens: 0, thoughtTokens: 30, totalTokens: 3110 };
+  assert.deepEqual(read(two), { inputTokens: 3000, cacheReadTokens: 1300, cacheWriteTokens: 0, outputTokens: 110 });
+  // Priced once each: cached reads at the cached rate, thinking as output.
+  const hydrogen = agentModel("antigravity-cli", "gemini-4-hydrogen")!;
+  const usd = chargeTurn(hydrogen, read(one), new Date("2026-11-22T15:00:00Z"))!;
+  assert.equal(usd.basis, "reported");
+  assert.ok(Math.abs(usd.usd - (700 * 1.5 + 300 * 0.075 + 70 * 7.5) / 1e6) < 1e-12, String(usd.usd));
+  // Figures that do not add up are never priced as reported.
+  assert.equal(read(undefined), null);
+  assert.deepEqual(read({ ...one, totalTokens: 1090 }), {});
+  assert.deepEqual(read({ ...one, thoughtTokens: 71 }), {});
+  assert.deepEqual(read({ ...one, cachedReadTokens: null }), {});
+  assert.deepEqual(read({ outputTokens: 70 }), {});
+});
+
 test("ACP tool rows show readable names, never the bare kind 'other'", () => {
   assert.deepEqual(acpToolLabel("other", "read_file"), { name: "Read file", summary: "" });
   assert.deepEqual(acpToolLabel("other", "list_dir"), { name: "List dir", summary: "" });
