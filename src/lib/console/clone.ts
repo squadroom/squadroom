@@ -144,15 +144,25 @@ export class Clone {
       await this.git(["merge", "--quit"], "Clearing an unfinished merge");
       await this.git(["reset", "--quiet"], "Clearing the index");
     }
-    await this.git(["add", "--all", "--", "."], "Adding the changes");
-    // The excluded folders' index entries go back to the last commit (an
-    // exclude pathspec would make `add` fail on them where the repository
-    // ignores them): what the agent staged there is unstaged (the files
-    // stay on disk), and files the repository already tracks there are
-    // kept, never deleted.
+    // `git add` fails outright when a pathspec names a path the repository
+    // ignores, an exclude one too. So a Console folder is excluded only
+    // where the repository does not ignore it (`--no-index`: a file it
+    // tracks there does not count); an ignored one's new files stay out
+    // anyway. Excluding it keeps what an agent leaves there (a scratch
+    // repository with no commit) from failing the add.
+    const excluded: string[] = [];
+    for (const dir of CONSOLE_DIRS) {
+      if ((await this.run(["check-ignore", "--no-index", "--quiet", "--", dir], 4096)).code !== 0) excluded.push(`:(exclude)${dir}`);
+    }
+    await this.git(["add", "--all", "--", ".", ...excluded], "Adding the changes");
+    // The Console folders' index entries go back to the last commit: what
+    // the agent staged there is unstaged (the files stay on disk), and
+    // files the repository already tracks there are kept, never deleted.
     await this.git(["reset", "--quiet", "--", ...CONSOLE_DIRS], "Clearing the index");
     if (options.only) {
-      const staged = await this.git(["diff", "--cached", "--name-only", "-z", "--no-renames"], "Reading the staged changes", 16 * 1024 * 1024);
+      // A submodule's pointer is listed even where the repository's
+      // settings hide submodule changes (`diff.ignoreSubmodules`).
+      const staged = await this.gitAll(["diff", "--cached", "--name-only", "-z", "--no-renames", "--ignore-submodules=none"], "Reading the staged changes", 16 * 1024 * 1024);
       const paths = staged.stdout.split("\0").filter(Boolean);
       const outside = paths.filter((p) => !options.only!(p));
       for (let i = 0; i < outside.length; i += 100) await this.git(["reset", "--quiet", "--", ...outside.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Clearing the index");
@@ -182,7 +192,7 @@ export class Clone {
   /** Every path that differs from HEAD, in the index or on disk (the
    * excluded folders aside), with its two-letter status. */
   private async changes(): Promise<{ code: string; path: string }[]> {
-    const status = await this.gitAll(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
+    const status = await this.gitAll(["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all", "--ignore-submodules=none", "--", ...EXCLUDE], "Reading the changes", 16 * 1024 * 1024);
     return status.stdout
       .split("\0")
       .filter(Boolean)
@@ -262,7 +272,7 @@ export class Clone {
   }
   /** Every path that differs between two commits (uncapped). */
   async diffPaths(from: string, to: string): Promise<string[]> {
-    const r = await this.gitAll(["diff", "--no-renames", "--name-only", "-z", from, to], "Comparing commits", 16 * 1024 * 1024);
+    const r = await this.gitAll(["diff", "--no-renames", "--name-only", "-z", "--ignore-submodules=none", from, to], "Comparing commits", 16 * 1024 * 1024);
     return r.stdout.split("\0").filter(Boolean);
   }
   /** Every path a commit changed (uncapped, for the claim check). */
