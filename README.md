@@ -182,6 +182,9 @@ team can mix them.
   GPT-5.6 Luna.
 - **Grok Build**, with an xAI API key.
 - **Gemini CLI**, with a Gemini API key.
+- **Antigravity CLI**, Google's client for Gemini 4, with a Gemini API key:
+  Gemini 4 Carbon, Argon, Neon or Hydrogen. Like OpenCode, it needs the
+  project's network switch on.
 - **Kimi Code**, on your Kimi Code membership.
 - **OpenCode**, with an API key for the model you choose: GPT-5.6 Luna,
   Claude Haiku 4.5, DeepSeek V4 Pro, DeepSeek V4.1 Flash, Kimi K3, GLM-5.3,
@@ -199,7 +202,7 @@ it:
 OpenCode and the DeepSeek, Kimi K3, GLM and Qwen models were checked on a
 real Mac on 2026-11-01: each answered, named its model and reported what it
 used. A short turn cost between $0.0013 and $0.026. Gemini CLI had live
-turns on the same day; Kimi Code hasn't had one yet. See
+turns on the same day; Kimi Code and Antigravity CLI haven't had one yet. See
 [docs/setup.md](docs/setup.md#12-other-agent-kinds-acp) for the keys each
 model needs.
 
@@ -440,7 +443,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 ## Terms and providers
 
 Squadroom drives the official command-line clients (Claude Code, Codex,
-Gemini CLI, Grok Build, Kimi Code, OpenCode) with **your own** accounts,
+Gemini CLI, Antigravity CLI, Grok Build, Kimi Code, OpenCode) with **your own** accounts,
 subscriptions and API keys. You are responsible for using each of them
 under that provider's terms. Squadroom is an independent project and is not
 affiliated with, endorsed by or sponsored by Anthropic, OpenAI, Google,

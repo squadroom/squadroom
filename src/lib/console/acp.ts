@@ -10,7 +10,8 @@ import type { TurnUsage } from "./types.ts";
 // agent works only in its own clone, in the launcher's sandbox. What the
 // Console uses:
 //   initialize, session/new, session/load, session/set_model or
-//   session/set_config_option (the model selector, readSessionModel),
+//   session/set_config_option (the model selector, readSessionModel, and
+//   Antigravity CLI's thinking level, readConfigOption),
 //   session/prompt (its answer ends the turn: stopReason, usage),
 //   session/cancel (a notification), session/update (the agent's stream),
 //   session/request_permission (the agent asks; Needs you decides).
@@ -22,16 +23,27 @@ import type { TurnUsage } from "./types.ts";
  * options, where the model is the `select` option of category (or id)
  * "model" (Kimi Code 2.x). `configId` says which way it is switched: by
  * session/set_config_option with that id, or (null) by session/set_model.
- * Null when the session names no model at all.
+ * `config`: read the config options even when `models` is there too
+ * (Antigravity CLI, whose `models` ids carry a thinking level). Null when
+ * the session names no model at all.
  */
-export function readSessionModel(result: Record<string, unknown>): { current: string | null; available: string[]; configId: string | null } | null {
+export function readSessionModel(result: Record<string, unknown>, config = false): { current: string | null; available: string[]; configId: string | null } | null {
   const models = result.models as { currentModelId?: unknown; availableModels?: { modelId?: unknown }[] } | null | undefined;
-  if (models && typeof models === "object") {
+  if (!config && models && typeof models === "object") {
     const available = Array.isArray(models.availableModels) ? models.availableModels.map((m) => m?.modelId).filter((m): m is string => typeof m === "string") : [];
     return { current: typeof models.currentModelId === "string" ? models.currentModelId : null, available, configId: null };
   }
+  return readConfigOption(result, "model");
+}
+
+/**
+ * A `select` session config option by its category (or, without one, its
+ * id): "model", or "thought_level" (the thinking level, Antigravity CLI).
+ * Its current value, the values on offer, and the id that switches it.
+ */
+export function readConfigOption(result: Record<string, unknown>, category: string): { current: string | null; available: string[]; configId: string } | null {
   const options = Array.isArray(result.configOptions) ? (result.configOptions as Record<string, unknown>[]) : [];
-  const option = options.find((o) => o && typeof o === "object" && (o.category === "model" || (o.category === undefined && o.id === "model")));
+  const option = options.find((o) => o && typeof o === "object" && (o.category === category || (o.category === undefined && o.id === category)));
   if (!option || typeof option.id !== "string") return null;
   // Values may be listed flat or in groups.
   const values: string[] = [];

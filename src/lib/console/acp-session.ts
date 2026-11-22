@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { agentKind } from "./agents.ts";
-import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readGeminiUsage, readSessionModel, readXaiUsage } from "./acp.ts";
+import { ACP_PROTOCOL, AcpError, AcpProcess, AUTH_REQUIRED, readAcpUpdate, readAcpUsage, readConfigOption, readGeminiUsage, readSessionModel, readXaiUsage } from "./acp.ts";
 import type { SandboxSpec } from "./launcher.ts";
 import { ASK_FIRST_REASON, inside, outsideStep, realInside, type Decision } from "./permissions.ts";
 import { TEAM_TOOL_NAMES } from "./team-tools.ts";
@@ -220,7 +220,9 @@ class AcpSession implements AgentSession {
       }
       if (!id) throw new AcpError(`${this.driver.label} did not give a session id.`);
       // The model: the session must report it as current, or take it.
-      const reported = readSessionModel(result);
+      const config = !!agentKind(agent.kind)?.acpConfigOptions;
+      const reported = readSessionModel(result, config);
+      let options = result;
       if (reported?.current !== model.runs) {
         if (!reported || !reported.available.includes(model.runs))
           throw new AcpError(`${this.driver.label} did not offer ${model.runs}. No turn was started.`);
@@ -231,8 +233,21 @@ class AcpSession implements AgentSession {
         if (!set) throw new AcpError(`${this.driver.label} did not switch to ${model.runs}. No turn was started.`);
         // A config option's answer lists the options again: it must now
         // say the model is the one asked for.
-        if (reported.configId && readSessionModel(set)?.current !== model.runs)
+        if (reported.configId && readSessionModel(set, config)?.current !== model.runs)
           throw new AcpError(`${this.driver.label} did not switch to ${model.runs}. No turn was started.`);
+        options = set;
+      }
+      // The thinking level chosen for the agent (Antigravity CLI's
+      // `thought_level` option), checked the same way; none chosen leaves
+      // the client's own level for the model.
+      const effort = config && agent.effort && model.efforts.includes(agent.effort) ? agent.effort : null;
+      const level = effort ? readConfigOption(options, "thought_level") : null;
+      if (effort && level?.current !== effort) {
+        if (!level || !level.available.includes(effort))
+          throw new AcpError(`${this.driver.label} did not offer the ${effort} thinking level for ${model.runs}. No turn was started.`);
+        const set = await this.proc.call("session/set_config_option", { sessionId: id, configId: level.configId, value: effort }, this.driver.callMs).catch(() => null);
+        if (!set || readConfigOption(set, "thought_level")?.current !== effort || readSessionModel(set, config)?.current !== model.runs)
+          throw new AcpError(`${this.driver.label} did not switch to the ${effort} thinking level. No turn was started.`);
       }
       this.sessionId = id;
       return id;

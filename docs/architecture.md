@@ -55,6 +55,11 @@ browser ──https──▶ TLS proxy (e.g. Tailscale Serve) ──▶ web serv
   `npm install --package-lock-only --ignore-scripts` in its folder.
   Dependabot opens pull requests that raise these pins; they are merged
   after a live check, and the pin in `clients.ts` has to move with them.
+  Antigravity CLI is the exception: Google ships it as one binary, not on
+  npm, so `ANTIGRAVITY_CLIENT` in `clients.ts` pins its version and the URL
+  and SHA-512 of each Mac build. The setup script downloads the build,
+  checks the hash before unpacking it and installs it root-owned and
+  read-only. To change it, update all three for both builds.
 
 ## The store
 
@@ -142,7 +147,14 @@ month it started too.
   the agent user's `~/.kimi-code` is closed to every program. OpenCode does
   not load a repository's own settings and plugins (`opencode.json`,
   `.opencode/`), which also means it ignores the repository's `AGENTS.md`.
-  Kimi Code's and Gemini CLI's usage statistics are off.
+  Kimi Code's and Gemini CLI's usage statistics are off. For Antigravity
+  CLI's ACP mode only, the launcher adds `--gemini-dir`, a folder in the
+  window's temporary folder, and writes `antigravity-cli/settings.json`
+  there fresh at each start (`{"modelProvider":"gemini"}`, which makes it
+  use the Gemini API key), never through a link. Antigravity CLI names its
+  model and thinking level as session config options, and the ACP driver
+  switches both with `session/set_config_option` (the kind's
+  `acpConfigOptions`), checking each answer before the first prompt.
 - **Long conversations.** Before an agent's next turn, if its context
   gauge has reached `AUTO_SUMMARY_TOKENS` (150,000), the worker queues a
   summary turn first in its queue (`autoSummary` in

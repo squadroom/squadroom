@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { ACP_CLIENTS, CLIENT_VERSIONS } from "../src/lib/console/clients.ts";
+import { ACP_CLIENTS, ANTIGRAVITY_CLIENT, CLIENT_VERSIONS } from "../src/lib/console/clients.ts";
 import { envFileProblem } from "../src/config/server-env.ts";
 
 // The setup script installs each client from its committed lockfile
@@ -127,4 +127,22 @@ test("the web server and the worker refuse a .env.local every account can read, 
   // The worker checks before it reads the .env files.
   const worker = read("scripts/console-worker.ts");
   assert.ok(worker.indexOf("envFileProblem(") < worker.indexOf("workerEnv(root)"));
+});
+
+test("Antigravity CLI: the pinned build for this Mac, its SHA-512 checked before it is unpacked, installed root-owned and read-only", () => {
+  const setup = read("scripts/console/setup-agent-user.sh");
+  // The pins come from clients.ts, the one source.
+  assert.match(setup, /const \{ ANTIGRAVITY_CLIENT: a \} = await import\(process\.argv\[1\]\)/);
+  for (const [arch, build] of Object.entries(ANTIGRAVITY_CLIENT.builds)) {
+    assert.match(build.url, new RegExp(`^https://storage\\.googleapis\\.com/antigravity-public/antigravity-cli/${ANTIGRAVITY_CLIENT.version.replace(/\./g, "\\.")}-\\d+/`), arch);
+    assert.match(build.sha512, /^[0-9a-f]{128}$/, arch);
+  }
+  const download = setup.indexOf("/usr/bin/curl -fsSL --proto '=https'");
+  const check = setup.indexOf("/usr/bin/shasum -a 512 $stage/cli.tar.gz");
+  const unpack = setup.indexOf("/usr/bin/tar -xzf $stage/cli.tar.gz");
+  assert.ok(download > 0 && download < check && check < unpack);
+  assert.match(setup.slice(unpack), /chown -R root:wheel \$prefix\.new\n(?:[^\n]*\n){1,2}\s*\/bin\/chmod -R a-w,ug-s \$prefix\.new/);
+  assert.match(setup, /\/bin\/ln -sfh \$prefix\/antigravity \$CLIENTS\/bin\/antigravity/);
+  // The install happens after the running-turns and running-programs refusals.
+  assert.ok(setup.indexOf("(( force )) || fail \"${#${(f)running}}") < download);
 });

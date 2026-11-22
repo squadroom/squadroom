@@ -89,7 +89,11 @@ them all instead, ending their turns. It:
    never as root. Your own `claude` or `codex`, if you have them, are
    untouched. The versions come from `src/lib/console/clients.ts`. The copy
    carries no access lists or extended attributes. It also installs Gemini
-   CLI's system settings, which keep its usage statistics off.
+   CLI's system settings, which keep its usage statistics off. Antigravity
+   CLI isn't on npm: the script downloads Google's build for your Mac
+   (Apple silicon or Intel) over https, checks its SHA-512 against the one
+   in `clients.ts` before unpacking it, and installs it the same way,
+   root-owned and read-only, so it can't update itself.
 4. **Installs the launcher**, `/usr/local/libexec/console-agent`
    (root-owned), and one `sudoers` rule: your account may run only that
    launcher as `agent`, and only the named credentials cross.
@@ -732,10 +736,11 @@ macOS sandbox profile. All of them, and the login or key each one uses:
 | Codex | your ChatGPT login, kept in the agent account, or `OPENAI_API_KEY` (paid, capped) for its "(API key)" models | Code edit or Code analysis |
 | Grok Build | `XAI_API_KEY` (paid, capped) | Code edit or Code analysis |
 | Gemini CLI | `GEMINI_API_KEY` (paid, capped) | Code edit or Code analysis |
+| Antigravity CLI | `GEMINI_API_KEY` (paid, capped) | Code edit or Code analysis, with the project's network on |
 | Kimi Code | your Kimi Code membership, logged in as `agent` | Code edit or Code analysis |
 | OpenCode | the chosen model's key, each paid and capped (see below) | Code edit or Code analysis, with the project's network on |
 
-All six are listed under **Add**, **Agent** and in the team setup, at
+All seven are listed under **Add**, **Agent** and in the team setup, at
 either access level:
 
 - **Code edit**: the agent changes files in its own folder, and Squadroom
@@ -747,7 +752,7 @@ either access level:
 - **Code analysis**: the agent can read, run commands you approve and
   message its team, but not change files.
 
-The four ACP kinds have been tested at Code edit with a stand-in agent
+The five ACP kinds have been tested at Code edit with a stand-in agent
 program, not yet at Code edit with the real clients, so expect rough edges.
 
 OpenCode's models and the key each one uses:
@@ -767,6 +772,32 @@ network off the sandbox blocks that, and OpenCode quits straight away. Its
 model calls need the network anyway. If you try it with network off, the
 turn stops and its reason tells you to turn Network on.
 
+**Antigravity CLI** runs Google's Gemini 4 models: Carbon, Argon, Neon and
+Hydrogen, on `GEMINI_API_KEY` (the same key as Gemini CLI). It never uses a
+Google AI Pro or Ultra sign-in. Its thinking levels are low, medium and
+high, plus extra high for Neon and Hydrogen; Default leaves the client's
+own level. A session starts on another model, so Squadroom switches the
+model, and then the level you chose, before the first prompt. The client
+must confirm each switch, or the turn stops before anything is sent.
+
+- **It needs the project's network switch on**, for the same reason as
+  OpenCode: it starts a language server on local ports and talks to it.
+- **Its own folder.** The launcher gives each window a folder inside its
+  temporary folder (passed as `--gemini-dir`) holding one setting,
+  `{"modelProvider":"gemini"}`, which makes it use the key. That file is
+  written fresh at every start. Its settings, logs and conversations stay
+  in that folder; nothing goes in the agent user's home.
+- **Prices** (Google AI Studio, 22 November 2026, per million tokens in /
+  out / cache reads): Carbon and Argon $2 / $10 / $0.10, rising to $4 / $20
+  / $0.20 on 1 December 2026; Neon $3 / $15 / $0.15; Hydrogen $1.50 / $7.50
+  / $0.075. A turn whose usage is missing or doesn't add up is charged its
+  full allowance (the 1,048,576-token window as input and 65,536 tokens as
+  output): about $2.75 for Carbon or Argon ($5.50 from December), $4.13 for
+  Neon and $2.06 for Hydrogen.
+- **Usage** is read as plain ACP usage. How the real client reports it
+  hasn't been checked in a live turn yet, so compare a first turn's cost
+  with Google's usage page.
+
 OpenCode doesn't load a repository's own settings or plugins
 (`opencode.json`, `.opencode/`), so it also ignores the repository's
 `AGENTS.md`. Kimi Code keeps its sessions and settings in each window's own
@@ -781,13 +812,15 @@ $0.026 (Kimi K3). About 9,000 input tokens of every OpenCode turn are
 OpenCode's own system prompt, so even a one-line question is not free.
 Gemini CLI was tested at 0.65.0 on 2026-11-01 with a Gemini API key; its
 live turns showed how it reports usage (see `readGeminiUsage` in
-`src/lib/console/acp.ts`). Kimi Code has not had a live turn yet.
+`src/lib/console/acp.ts`). Kimi Code and Antigravity CLI have not had a
+live turn yet.
 
 If an agent program stops right after it starts, the turn's reason ends
 with the last lines it printed on its error output, with keys masked.
 
-The setup script installs the OpenCode, Grok Build, Gemini CLI and Kimi
-Code clients at the versions pinned in `src/lib/console/clients.ts`.
+The setup script installs the OpenCode, Grok Build, Gemini CLI, Kimi Code
+and Antigravity CLI clients at the versions pinned in
+`src/lib/console/clients.ts`.
 Kimi Code is logged in as `agent` with a device code:
 
 ```bash

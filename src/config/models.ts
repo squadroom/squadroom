@@ -61,6 +61,13 @@ export const MODELS: ModelConfig[] = [
   { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", provider: "openai", model: "gpt-6.1-terra", contextTokens: 1_050_000, inputPerMtok: 1, outputPerMtok: 5, cachedInputPerMtok: 0.05, cacheWritePerMtok: 1.25, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
   { id: "gpt-6-sol", label: "GPT-6 Sol", provider: "openai", model: "gpt-6-sol", contextTokens: 1_050_000, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.2, cacheWritePerMtok: 2.5, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
   { id: "gpt-6-luna", label: "GPT-6 Luna", provider: "openai", model: "gpt-6-luna", contextTokens: 1_050_000, inputPerMtok: 0.1, outputPerMtok: 0.5, cachedInputPerMtok: 0.01, cacheWritePerMtok: 0.125, maxOutputTokens: 16384, longContext: OPENAI_LONG_CONTEXT },
+  // Gemini 4, from Google AI Studio's pricing page on 22 November 2026
+  // (standard tier). Gemini caches by itself, so there is no cache-write
+  // rate. Carbon and Argon double on 1 December 2026.
+  { id: "gemini-4-carbon", label: "Gemini 4 Carbon", provider: "google", model: "gemini-4-carbon", contextTokens: 1_048_576, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.1, maxOutputTokens: 16384, scheduledPrices: { effectiveFrom: "2026-12-01T00:00:00.000Z", prices: { inputPerMtok: 4, outputPerMtok: 20, cachedInputPerMtok: 0.2 } } },
+  { id: "gemini-4-argon", label: "Gemini 4 Argon", provider: "google", model: "gemini-4-argon", contextTokens: 1_048_576, inputPerMtok: 2, outputPerMtok: 10, cachedInputPerMtok: 0.1, maxOutputTokens: 16384, scheduledPrices: { effectiveFrom: "2026-12-01T00:00:00.000Z", prices: { inputPerMtok: 4, outputPerMtok: 20, cachedInputPerMtok: 0.2 } } },
+  { id: "gemini-4-neon", label: "Gemini 4 Neon", provider: "google", model: "gemini-4-neon", contextTokens: 1_048_576, inputPerMtok: 3, outputPerMtok: 15, cachedInputPerMtok: 0.15, maxOutputTokens: 16384 },
+  { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", provider: "google", model: "gemini-4-hydrogen", contextTokens: 1_048_576, inputPerMtok: 1.5, outputPerMtok: 7.5, cachedInputPerMtok: 0.075, maxOutputTokens: 16384 },
 ];
 
 export function getModel(id: string): ModelConfig | undefined {

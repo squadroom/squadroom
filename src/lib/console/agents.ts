@@ -2,13 +2,13 @@
 // New agent dialog reads it, and the worker validates against it.
 //
 // The kinds: Claude Code, Codex and the ACP agents (OpenCode, Gemini CLI,
-// Grok Build, Kimi Code). Every kind is offered in the New agent and team
-// dialogs, at Code edit or Code analysis.
+// Grok Build, Kimi Code, Antigravity CLI). Every kind is offered in the New
+// agent and team dialogs, at Code edit or Code analysis.
 
 import { MODELS, type Provider, type TokenPrices } from "../../config/models.ts";
-import { ACP_CLIENTS, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
+import { ACP_CLIENTS, ANTIGRAVITY_CLIENT, CLIENT_VERSIONS, consoleClientPath } from "./clients.ts";
 
-export type AgentKind = "claude-code" | "codex" | "opencode" | "gemini-cli" | "grok-build" | "kimi-code";
+export type AgentKind = "claude-code" | "codex" | "opencode" | "gemini-cli" | "grok-build" | "kimi-code" | "antigravity-cli";
 export type ConsoleEffort = "low" | "medium" | "high" | "xhigh" | "max";
 /** Who bills an API-key model: a catalog provider, or OpenRouter, which
  * resells other providers' models through its own key. */
@@ -68,6 +68,11 @@ export interface AgentKindInfo {
    * the client advertises it, before any session. Never a sign-in: a
    * client that asks for any other method is refused. */
   acpKeyAuth?: string;
+  /** It names its model and thinking level as session config options
+   * (`model`, `thought_level`) beside a `models` list whose ids carry the
+   * level (Antigravity CLI): both are switched with
+   * session/set_config_option, and each answer must confirm them. */
+  acpConfigOptions?: boolean;
   /** Where it reports a turn's usage: ACP's `usage` (left out), Grok
    * Build's own `_meta.usage` with xAI's meaning, or ACP's `usage` with
    * Gemini's meaning. */
@@ -427,6 +432,56 @@ AGENT_KINDS.push(
     ],
   },
 );
+
+// Antigravity CLI, Google's client for Gemini 4, on a Gemini API key only,
+// never a Google AI Pro/Ultra sign-in. Google ships it as one binary, which
+// the setup script pins and installs (clients.ts). The launcher gives each
+// window its own `--gemini-dir`, in its temporary folder, with the settings
+// file that selects the key. Its `models` ids carry the thinking level
+// (gemini-4-carbon-high), so the Console switches the model and the level
+// through its config options instead, each answer confirmed.
+const GEMINI_4_EFFORTS: ConsoleEffort[] = ["low", "medium", "high"];
+const antigravity = (name: string, label: string, efforts: ConsoleEffort[]): AgentModel => ({
+  id: `gemini-4-${name}`,
+  label: `Gemini 4 ${label} (API key)`,
+  model: `gemini-4-${name}`,
+  runs: `gemini-4-${name}`,
+  efforts,
+  // The full allowance's output: the 65,536 maximum Google documents.
+  paid: catalog(`gemini-4-${name}`, "GEMINI_API_KEY", 65_536),
+});
+AGENT_KINDS.push({
+  kind: "antigravity-cli",
+  label: "Antigravity CLI",
+  binary: consoleClientPath("antigravity"),
+  version: ANTIGRAVITY_CLIENT.version,
+  // Never --dangerously-skip-permissions: the Console answers its
+  // permission requests. The launcher adds --gemini-dir.
+  acpArgs: ["acp", "--disable-telemetry"],
+  acpConfigOptions: true,
+  // It starts a language server on loopback ports and calls it, which a
+  // network-off sandbox refuses (as OpenCode's server); its model calls
+  // need the network anyway.
+  needsNetwork: true,
+  // Each model names its key (GEMINI_API_KEY, as Gemini CLI's). Usage is
+  // read as plain ACP usage until a live turn shows its meaning: read that
+  // way, Gemini's meaning would overcharge or fail the total check, never
+  // undercharge.
+  credential: null,
+  offered: true,
+  models: [
+    antigravity("carbon", "Carbon", GEMINI_4_EFFORTS),
+    antigravity("argon", "Argon", GEMINI_4_EFFORTS),
+    antigravity("neon", "Neon", [...GEMINI_4_EFFORTS, "xhigh"]),
+    antigravity("hydrogen", "Hydrogen", [...GEMINI_4_EFFORTS, "xhigh"]),
+  ],
+  sources: [
+    "Offline probe of the pinned 1.5.14 with a fake key (2026-11-22): `antigravity acp` flags (--disable-telemetry, --gemini-dir); API-key mode needs <gemini-dir>/antigravity-cli/settings.json {\"modelProvider\":\"gemini\"} and GEMINI_API_KEY; --gemini-dir moves all its state; session/new offers gemini-4-{carbon,argon,neon,hydrogen} as `model` config values with `thought_level`, and starts on gemini-3.1-pro-low; it listens on loopback ports",
+    "Gemini CLI 0.70.0's README (2026-11-22): \"Not tuned for the Gemini 4 series\"",
+    "Antigravity CLI FAQ (2026-11-22): wrapping it in third-party apps is unsupported on consumer plans, so a Gemini API key only",
+    "src/lib/console/clients.ts: Antigravity CLI pinned, with its builds' SHA-512",
+  ],
+});
 
 /** The kinds whose client takes an owner message in the middle of a turn
  * (Steer): Claude Code and Codex. ACP has no such request. */

@@ -226,6 +226,43 @@ test("spawn --sandbox: Gemini CLI's and Grok Build's own folders are the window'
   assert.match(linked.stderr, /gemini in the temporary folder is a link/);
 });
 
+test("spawn --sandbox: Antigravity CLI gets its own --gemini-dir in the window's temporary folder, with the settings that select the Gemini key", { skip: !sandboxed }, (t) => {
+  const s = sandboxLauncher(t);
+  // A stand-in program named antigravity: its arguments, then the settings.
+  const bin = join(s.root, "bin");
+  mkdirSync(bin);
+  const agy = join(bin, "antigravity");
+  writeFileSync(agy, '#!/bin/sh\necho "$*"\nwhile [ $# -gt 0 ] && [ "$1" != --gemini-dir ]; do shift; done\n[ $# -gt 0 ] && cat "$2/antigravity-cli/settings.json"\nexit 0\n', { mode: 0o755 });
+  const run = (...args: string[]) =>
+    spawnSync("/bin/zsh", ["-f", s.path, "spawn", "--keep", "", "--sandbox", "look", "--net", "on", "--port", "4999", s.mine, agy, ...args], {
+      env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv,
+      encoding: "utf8",
+    });
+  const r = run("acp", "--disable-telemetry");
+  assert.equal(r.status, 0, r.stderr);
+  const [argv, settings] = r.stdout.trim().split("\n");
+  const dir = argv.split(" ")[2];
+  assert.equal(argv, `acp --gemini-dir ${dir} --disable-telemetry`);
+  assert.match(dir, new RegExp(`^${s.root}/\\.tmp/[0-9a-f]{32}/antigravity$`));
+  assert.deepEqual(JSON.parse(settings), { modelProvider: "gemini" });
+  // A link left in place of the settings file is replaced, never written through.
+  const target = join(s.root, "planted.json");
+  writeFileSync(target, "x\n");
+  rmSync(join(dir, "antigravity-cli", "settings.json"));
+  symlinkSync(target, join(dir, "antigravity-cli", "settings.json"));
+  assert.equal(run("acp").status, 0);
+  assert.equal(readFileSync(target, "utf8"), "x\n");
+  assert.ok(lstatSync(join(dir, "antigravity-cli", "settings.json")).isFile());
+  // A link in place of its folder is refused.
+  rmSync(dir, { recursive: true });
+  symlinkSync(s.mate, dir);
+  const linked = run("acp");
+  assert.equal(linked.status, 64);
+  assert.match(linked.stderr, /Antigravity's folder is a link/);
+  // Only its ACP mode gets the folder: `--version` runs as it is.
+  assert.equal(run("--version").stdout.split("\n")[0], "--version");
+});
+
 test("spawn --sandbox: a repository's OpenCode settings are not loaded, and Kimi Code's and Gemini CLI's usage statistics are off", { skip: !sandboxed }, (t) => {
   const s = sandboxLauncher(t);
   const r = s.run("look", 'echo "$OPENCODE_DISABLE_PROJECT_CONFIG|$KIMI_DISABLE_TELEMETRY|$GEMINI_CLI_SYSTEM_SETTINGS_PATH"');

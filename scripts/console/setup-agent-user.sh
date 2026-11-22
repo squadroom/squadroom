@@ -129,6 +129,20 @@ for line in $acp_clients; do
   [[ $line =~ '^(@[a-z0-9-]+/)?[a-z0-9-]+ [0-9]+\.[0-9]+\.[0-9]+ [a-z]+$' ]] || fail "src/lib/console/clients.ts gave an ACP client this script does not understand: $line"
 done
 
+# Antigravity CLI: one binary from Google, not on npm. Its
+# version, and the URL and SHA-512 of the build for this Mac, from the same
+# file. Rosetta reports x86_64, whose build runs there too.
+case $(/usr/bin/uname -m) in
+  arm64) agy_arch=arm64 ;;
+  x86_64) agy_arch=x64 ;;
+  *) fail "Antigravity CLI has no build for $(/usr/bin/uname -m)" ;;
+esac
+agy=($($node --no-warnings --input-type=module -e 'const { ANTIGRAVITY_CLIENT: a } = await import(process.argv[1]); const b = a.builds[process.argv[2]]; console.log(a.version, b.url, b.sha512);' "file://${HERE:h:h}/src/lib/console/clients.ts" $agy_arch)) ||
+  fail "could not read Antigravity CLI's pin from src/lib/console/clients.ts"
+readonly AGY_VERSION=${agy[1]} AGY_URL=${agy[2]} AGY_SHA512=${agy[3]}
+[[ $AGY_VERSION == <->.<->.<-> && $AGY_URL =~ '^https://storage\.googleapis\.com/antigravity-public/[A-Za-z0-9._/-]+\.tar\.gz$' && $AGY_SHA512 =~ '^[0-9a-f]{128}$' ]] ||
+  fail "src/lib/console/clients.ts gave an Antigravity CLI pin this script does not understand"
+
 step "Checking free disk space"
 free_gb=$(( $(/bin/df -k /System/Volumes/Data | /usr/bin/awk 'NR==2 {print $4}') / 1024 / 1024 ))
 print "  $free_gb GB free"
@@ -237,7 +251,7 @@ step "The agent user must be able to run $node"
 (cd / && sudo -u $AGENT $node --version >/dev/null 2>&1) ||
   fail "the '$AGENT' user cannot run $node (is it inside your home folder?); install Node 24 with Homebrew or the official installer"
 
-step "Installing Claude Code $CLAUDE_VERSION, Codex $CODEX_VERSION and the ACP clients in $CLIENTS"
+step "Installing Claude Code $CLAUDE_VERSION, Codex $CODEX_VERSION, the ACP clients and Antigravity CLI $AGY_VERSION in $CLIENTS"
 # Each client installs from its committed lockfile (scripts/console/clients/
 # <name>, kept equal to clients.ts by a test), so every dependency is the
 # one reviewed. npm and the clients' own install scripts run as '$AGENT', in
@@ -279,6 +293,33 @@ gemini_tmp=$(/usr/bin/mktemp)
 print -r -- '{ "privacy": { "usageStatisticsEnabled": false } }' > $gemini_tmp
 /usr/bin/install -o root -g wheel -m 644 $gemini_tmp $CLIENTS/gemini-system-settings.json
 /bin/rm -f $gemini_tmp
+# Antigravity CLI: the pinned build, checked against its SHA-512 before
+# anything is unpacked. Installed root-owned and read-only, so it cannot
+# update itself (Google's build does so in the background as it runs).
+prefix=$CLIENTS/antigravity-$AGY_VERSION
+[[ -x $prefix/antigravity && $(/bin/cat $prefix/tarball.sha512 2>/dev/null) == $AGY_SHA512 ]] || {
+  stage=$(/usr/bin/mktemp -d /private/tmp/console-client.XXXXXX)
+  /usr/bin/curl -fsSL --proto '=https' --tlsv1.2 -o $stage/cli.tar.gz $AGY_URL ||
+    { /bin/rm -rf $stage; fail "could not download Antigravity CLI $AGY_VERSION from $AGY_URL"; }
+  [[ $(/usr/bin/shasum -a 512 $stage/cli.tar.gz | /usr/bin/awk '{print $1}') == $AGY_SHA512 ]] ||
+    { /bin/rm -rf $stage; fail "the Antigravity CLI download does not match its SHA-512 in src/lib/console/clients.ts"; }
+  /bin/mkdir $stage/x
+  /usr/bin/tar -xzf $stage/cli.tar.gz -C $stage/x || { /bin/rm -rf $stage; fail "could not unpack Antigravity CLI"; }
+  [[ -f $stage/x/antigravity && ! -L $stage/x/antigravity ]] || { /bin/rm -rf $stage; fail "the Antigravity CLI download has no antigravity program"; }
+  /bin/rm -rf $prefix.new
+  /bin/mkdir $prefix.new
+  /bin/cp $stage/x/antigravity $prefix.new/antigravity
+  print -r -- $AGY_SHA512 > $prefix.new/tarball.sha512
+  /bin/rm -rf $stage
+  /usr/sbin/chown -R root:wheel $prefix.new
+  /bin/chmod 555 $prefix.new/antigravity
+  /bin/chmod -R -N $prefix.new
+  /bin/chmod -R a-w,ug-s $prefix.new
+  [[ -z $(/usr/bin/find $prefix.new -perm +6000 -print -quit) ]] || fail "$prefix.new has set-id files"
+  /bin/rm -rf $prefix
+  /bin/mv $prefix.new $prefix
+}
+/bin/ln -sfh $prefix/antigravity $CLIENTS/bin/antigravity
 /usr/sbin/chown -h root:wheel $CLIENTS $CLIENTS/bin $CLIENTS/bin/*
 /bin/chmod -h go-w $CLIENTS $CLIENTS/bin
 # From /: the agent user cannot read the owner's folder this runs in, and
@@ -289,6 +330,7 @@ for line in $acp_clients; do
   name=${line##* }
   print "  $name: $(cd / && sudo -H -u $AGENT $CLIENTS/bin/$name --version 2>&1 | head -1)"
 done
+print "  antigravity: $(cd / && sudo -H -u $AGENT $CLIENTS/bin/antigravity --version 2>&1 | head -1)"
 
 step "Installing the launcher at $LAUNCHER"
 /bin/mkdir -p ${LAUNCHER:h}

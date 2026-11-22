@@ -77,6 +77,16 @@ test("a paid turn's cost: reported usage at catalog prices, cache included; miss
   assert.equal(chargeTurn(SONNET, usage), null);
 });
 
+test("Gemini 4 Carbon on Antigravity CLI: charged at the rates of when the turn ran, before and after 2026-12-01; its allowance is the whole window and 65,536 output", () => {
+  const carbon = agentModel("antigravity-cli", "gemini-4-carbon")!;
+  const usage = { inputTokens: 100_000, cacheReadTokens: 40_000, cacheWriteTokens: 0, outputTokens: 2_000 };
+  const before = chargeTurn(carbon, usage, new Date("2026-11-30T23:59:59Z"))!;
+  const after = chargeTurn(carbon, usage, new Date("2026-12-01T00:00:00Z"))!;
+  assert.equal(before.usd, (60_000 * 2 + 40_000 * 0.1 + 2_000 * 10) / 1e6);
+  assert.equal(after.usd, before.usd * 2);
+  assert.equal(chargeTurn(carbon, null, new Date("2026-11-22T12:00:00Z"))!.usd, (1_048_576 * 2 + 65_536 * 10) / 1e6);
+});
+
 const SOL = agentModel("codex", "gpt-5.6-sol@api-key")!;
 const GROK = agentModel("grok-build", "grok-4.7")!;
 const AT = new Date("2026-10-22T15:00:00Z");
