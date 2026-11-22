@@ -26,7 +26,7 @@ umask 027
 # (LAUNCHER_VERSION in src/lib/console/launcher.ts, kept equal by a test):
 # raise both whenever this file changes, so an update tells the owner to
 # run the setup script again.
-readonly VERSION=2
+readonly VERSION=3
 # setup-agent-user.sh replaces these four lines with the host's paths
 # (NODE_BIN: the folder of the Node it installed the clients with).
 readonly AGENT_HOME=/Users/agent
@@ -192,6 +192,23 @@ case ${1-} in
         export KIMI_CODE_HOME=$kimi
         login_rules='(allow file-read-data (subpath (param "KIMILOGIN")))'
         writes+=' (subpath (param "KIMILOGIN"))'
+      fi
+      # Antigravity CLI keeps all its state (settings, logs, conversations)
+      # in the folder its `--gemini-dir` names, and uses the Gemini API key
+      # in its environment only when the settings file there says
+      # `modelProvider` "gemini". Each window's folder is in its temporary
+      # folder; the settings file is written afresh at each start, never
+      # through a link left there. Only its ACP mode gets the folder.
+      if [[ ${3:t} == antigravity && ${4-} == acp ]]; then
+        agy=$tmp/antigravity
+        for dir in $agy $agy/antigravity-cli; do
+          [[ ! -L $dir ]] || die "Antigravity's folder is a link"
+          /bin/mkdir -p -m 700 -- $dir
+        done
+        /bin/rm -f -- $agy/antigravity-cli/settings.json
+        ( setopt noclobber; print -r -- '{"modelProvider":"gemini"}' > $agy/antigravity-cli/settings.json ) ||
+          die "could not write Antigravity's settings"
+        set -- "${@[1,4]}" --gemini-dir $agy "${@[5,-1]}"
       fi
       # A repository's own OpenCode settings and plugins (opencode.json,
       # .opencode/) are not loaded. Usage statistics stay off: Kimi Code's

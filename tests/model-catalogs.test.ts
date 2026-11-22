@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { MODELS } from "../src/config/models.ts";
 import { AGENT_KINDS } from "../src/lib/console/agents.ts";
-import { ACP_CLIENTS, CLIENT_VERSIONS } from "../src/lib/console/clients.ts";
+import { ACP_CLIENTS, ANTIGRAVITY_CLIENT, CLIENT_VERSIONS } from "../src/lib/console/clients.ts";
 import { UNCAPPED } from "../src/lib/console/keys.ts";
 import { credentialInfo } from "../src/lib/console/keys-page.ts";
 
@@ -42,6 +42,26 @@ test("every agent kind is offered, and the ACP kinds with their pinned clients",
     const k = AGENT_KINDS.find((x) => x.kind === kind)!;
     assert.equal(k.version, ACP_CLIENTS[client].version, kind);
   }
+  assert.equal(AGENT_KINDS.find((x) => x.kind === "antigravity-cli")!.version, ANTIGRAVITY_CLIENT.version);
+});
+
+test("Antigravity CLI's Gemini 4 models: Google's catalog prices on the Gemini key, no cache-write price, xhigh for Neon and Hydrogen only", () => {
+  const agy = AGENT_KINDS.find((k) => k.kind === "antigravity-cli")!;
+  assert.deepEqual(agy.acpArgs, ["acp", "--disable-telemetry"]);
+  assert.ok(!agy.acpArgs!.some((a) => a.includes("dangerously")));
+  assert.equal(agy.needsNetwork, true);
+  assert.deepEqual(agy.models.map((m) => m.id), ["gemini-4-carbon", "gemini-4-argon", "gemini-4-neon", "gemini-4-hydrogen"]);
+  for (const m of agy.models) {
+    const c = MODELS.find((x) => x.id === m.id)!;
+    assert.deepEqual([c.provider, c.contextTokens, c.cacheWritePerMtok], ["google", 1_048_576, undefined], m.id);
+    assert.deepEqual([m.paid!.credential, m.paid!.contextWindow, m.paid!.maxOutputTokens], ["GEMINI_API_KEY", 1_048_576, 65_536], m.id);
+    assert.deepEqual([m.paid!.prices.inputPerMtok, m.paid!.prices.outputPerMtok, m.paid!.prices.cachedInputPerMtok, m.paid!.prices.cacheWritePerMtok], [c.inputPerMtok, c.outputPerMtok, c.cachedInputPerMtok, undefined], m.id);
+    assert.deepEqual(m.efforts, m.id === "gemini-4-neon" || m.id === "gemini-4-hydrogen" ? ["low", "medium", "high", "xhigh"] : ["low", "medium", "high"], m.id);
+  }
+  // Carbon and Argon double on 2026-12-01; Neon and Hydrogen have no change.
+  for (const id of ["gemini-4-carbon", "gemini-4-argon"])
+    assert.deepEqual(MODELS.find((m) => m.id === id)!.scheduledPrices, { effectiveFrom: "2026-12-01T00:00:00.000Z", prices: { inputPerMtok: 4, outputPerMtok: 20, cachedInputPerMtok: 0.2 } });
+  for (const id of ["gemini-4-neon", "gemini-4-hydrogen"]) assert.equal(MODELS.find((m) => m.id === id)!.scheduledPrices, undefined);
 });
 
 test("OpenCode's DeepSeek, Kimi and GLM models: each names its own key, at the catalog's peak prices, with a full allowance at least the provider's limits", () => {

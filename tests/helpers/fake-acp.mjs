@@ -23,7 +23,8 @@
 //   forbidden  answers the prompt with a 403, having said nothing
 //   lateforbidden  says something, then answers with a 403
 // Setup: { models: null | {current, available}, setModelFails, loadSession,
-// http, protocolVersion, authRequired, ignoreTerm, keyAuth }. `keyAuth`
+// http, protocolVersion, authRequired, ignoreTerm, keyAuth, configOptions,
+// ignoreConfig, levels, level, alsoModels }. `keyAuth`
 // (Grok Build): the method advertised for the key in the environment, and
 // no session opens until it is selected with authenticate.
 import fs from "node:fs";
@@ -65,14 +66,20 @@ const say = (sessionId, text) => {
 };
 const usage = { inputTokens: 1000, outputTokens: 200, cachedReadTokens: 400, cachedWriteTokens: 100, thoughtTokens: 50, totalTokens: 1750 };
 // `configOptions: true` answers in the protocol's session config options
-// (Kimi Code 2.x): the model is a select option of category "model".
+// (Kimi Code 2.x): the model is a select option of category "model", with
+// a thinking level beside it (`thought_level`, Antigravity CLI: `levels`
+// on offer, starting at `level`). `alsoModels` (Antigravity CLI) also
+// lists `models`, whose ids carry the level, on another current model.
 let chosen = null;
+let chosenLevel = null;
 let keyAuthenticated = false;
 const configModel = (current, available) => ({
   configOptions: [
     { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: "default", options: [{ value: "default", name: "Default" }] },
     { id: "model", name: "Model", category: "model", type: "select", currentValue: current, options: [{ group: "all", name: "All", options: available.map((value) => ({ value, name: value })) }] },
+    { id: "thought_level", name: "Thinking", category: "thought_level", type: "select", currentValue: chosenLevel ?? setup.level ?? "low", options: (setup.levels ?? ["low", "medium", "high"]).map((value) => ({ value, name: value })) },
   ],
+  ...(setup.alsoModels ? { models: { currentModelId: "gemini-3.1-pro-low", availableModels: available.map((m) => ({ modelId: `${m}-high`, name: m })) } } : {}),
 });
 const models = (current) =>
   setup.models === null
@@ -308,8 +315,9 @@ rl.on("line", (line) => {
       if (setup.setModelFails) return send({ id: m.id, error: { code: -32602, message: "unknown model" } });
       return send({ id: m.id, result: {} });
     case "session/set_config_option":
-      if (!setup.configOptions || m.params.configId !== "model") return send({ id: m.id, error: { code: -32602, message: "unknown option" } });
-      if (!setup.ignoreConfig) chosen = m.params.value;
+      if (!setup.configOptions || !["model", "thought_level"].includes(m.params.configId)) return send({ id: m.id, error: { code: -32602, message: "unknown option" } });
+      if (!setup.ignoreConfig && m.params.configId === "model") chosen = m.params.value;
+      if (!setup.ignoreConfig && m.params.configId === "thought_level") chosenLevel = m.params.value;
       return send({ id: m.id, result: models(setup.defaultModel ?? "openai/gpt-5.6-luna") });
     case "session/prompt":
       return void prompt(m.id, m.params);

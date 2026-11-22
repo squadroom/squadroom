@@ -30,6 +30,10 @@ export interface AcpVendor {
   /** It reports its model as a session config option (Kimi Code 2.x),
    * switched with session/set_config_option. */
   configOptions?: boolean;
+  /** It also lists `models`, whose ids carry a thinking level, and its
+   * thinking level is the `thought_level` config option, switched to the
+   * agent's chosen one (Antigravity CLI). */
+  thinkingLevel?: boolean;
   /** The authenticate method that selects the key in its environment
    * (Grok Build's `xai.api_key`). */
   keyAuth?: string;
@@ -49,7 +53,7 @@ export function acpConformance(v: AcpVendor) {
   const model = agentModel(v.kind, v.model)!;
   /** The fake agent's setup for this kind, with any test-specific parts. */
   const base = (extra: Record<string, unknown> = {}) =>
-    JSON.stringify({ defaultModel: v.model, configOptions: !!v.configOptions, ...(v.keyAuth ? { keyAuth: v.keyAuth } : {}), ...(v.usage ? { usage: v.usage } : {}), ...extra });
+    JSON.stringify({ defaultModel: v.model, configOptions: !!v.configOptions, ...(v.thinkingLevel ? { alsoModels: true } : {}), ...(v.keyAuth ? { keyAuth: v.keyAuth } : {}), ...(v.usage ? { usage: v.usage } : {}), ...extra });
   const paid = !!v.key;
   function keys(path: string, key: Record<string, unknown> | null = v.key ? { value: v.key.value, cap: v.key.cap } : null) {
     const extra = v.key && key ? { [v.key.name]: key } : {};
@@ -191,6 +195,41 @@ export function acpConformance(v: AcpVendor) {
     assert.equal(h.store.turn(refused)!.costUsd, null);
     assert.ok(!h.acpCalls().some((c) => c.method === "session/prompt" && c.cwd === h.store.agent(other.id)!.folder));
   });
+
+  if (v.thinkingLevel)
+    test(`${v.label}: the agent's thinking level, switched to and confirmed; none chosen leaves the client's; one not offered or not taken is refused before any prompt`, async (t) => {
+      const effort = model.efforts.at(-1)!;
+      const h = await acp(t, { level: "low", levels: model.efforts });
+      const withLevel = (name: string) => h.store.createAgent({ tabId: h.tab.id, name, role: "", kind: v.kind, model: v.model, effort, permission: "look" });
+      const sets = () => h.acpCalls().filter((c) => c.method === "session/set_config_option" && c.params?.configId === "thought_level");
+      const plain = agent(h);
+      await h.ready(plain.id);
+      const first = h.send(plain.id, "hello");
+      await h.ended(first);
+      assert.equal(h.store.turn(first)!.status, "done", h.store.turn(first)!.reason ?? "");
+      assert.equal(sets().length, 0);
+      const chosen = withLevel("Deep");
+      await h.ready(chosen.id);
+      const ok = h.send(chosen.id, "hello");
+      await h.ended(ok);
+      assert.equal(h.store.turn(ok)!.status, "done", h.store.turn(ok)!.reason ?? "");
+      assert.deepEqual(sets().map((c) => c.params?.value), [effort]);
+      writeFileSync(join(h.agentHome, "fake-acp.json"), base({ levels: ["low"] }));
+      const offered = withLevel("Unoffered");
+      await h.ready(offered.id);
+      const no = h.send(offered.id, "hello");
+      await h.ended(no);
+      assert.equal(h.store.turn(no)!.status, "failed");
+      assert.ok(h.store.turn(no)!.reason!.includes(`did not offer the ${effort} thinking level`), h.store.turn(no)!.reason!);
+      writeFileSync(join(h.agentHome, "fake-acp.json"), base({ ignoreConfig: true, levels: ["low", effort] }));
+      const stuck = withLevel("Stuck");
+      await h.ready(stuck.id);
+      const ignored = h.send(stuck.id, "hello");
+      await h.ended(ignored);
+      assert.equal(h.store.turn(ignored)!.status, "failed");
+      assert.ok(h.store.turn(ignored)!.reason!.includes(`did not switch to the ${effort} thinking level`), h.store.turn(ignored)!.reason!);
+      for (const id of [offered.id, stuck.id]) assert.ok(!h.acpCalls().some((c) => c.method === "session/prompt" && c.cwd === h.store.agent(id)!.folder));
+    });
 
   test(`${v.label}: credential mode, an agent that asks to sign in is refused and never logged in${paid ? "; a key without its cap never crosses" : ""}`, async (t) => {
     const h = await acp(t, { authRequired: true });
