@@ -136,20 +136,28 @@ export class Clone {
         if (options.unresolved === "skip") return null;
         throw new GitError(`Conflict markers remain in ${marked.slice(0, 10).join(", ")}. Resolve them, and the Console commits the turn's changes.`);
       }
-      // The index goes back to HEAD and only the paths the step allows are
-      // staged, so nothing else is ever committed (nor a merge's parent).
+      // The index goes back to HEAD; everything is staged below and every
+      // path the step does not allow then goes back to HEAD, so nothing
+      // else is ever committed (nor a merge's parent). No path is named to
+      // `add`: it fails on a tracked file inside a folder the repository
+      // ignores.
       await this.git(["merge", "--quit"], "Clearing an unfinished merge");
       await this.git(["reset", "--quiet"], "Clearing the index");
-      const paths = (await this.changes()).map((c) => c.path).filter(options.only);
-      if (!paths.length) return null;
-      for (let i = 0; i < paths.length; i += 100) await this.git(["add", "--all", "--", ...paths.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Adding the changes");
-    } else await this.git(["add", "--all", "--", "."], "Adding the changes");
+    }
+    await this.git(["add", "--all", "--", "."], "Adding the changes");
     // The excluded folders' index entries go back to the last commit (an
     // exclude pathspec would make `add` fail on them where the repository
-    // ignores them): what
-    // the agent staged there is unstaged (the files stay on disk), and
-    // files the repository already tracks there are kept, never deleted.
+    // ignores them): what the agent staged there is unstaged (the files
+    // stay on disk), and files the repository already tracks there are
+    // kept, never deleted.
     await this.git(["reset", "--quiet", "--", ...CONSOLE_DIRS], "Clearing the index");
+    if (options.only) {
+      const staged = await this.git(["diff", "--cached", "--name-only", "-z", "--no-renames"], "Reading the staged changes", 16 * 1024 * 1024);
+      const paths = staged.stdout.split("\0").filter(Boolean);
+      const outside = paths.filter((p) => !options.only!(p));
+      for (let i = 0; i < outside.length; i += 100) await this.git(["reset", "--quiet", "--", ...outside.slice(i, i + 100).map((p) => `:(literal)${p}`)], "Clearing the index");
+      if (outside.length === paths.length) return null;
+    }
     await this.git([...author(name, agentId, this.email), "commit", "--quiet", "--no-verify", "-m", message], "Committing the turn");
     const sha = await this.head();
     // A tab with steps: the commit is checked against where the step's
