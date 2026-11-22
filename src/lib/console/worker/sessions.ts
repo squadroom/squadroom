@@ -88,11 +88,7 @@ export const sessions = {
             this.store.setAgentFolder(this.epoch!, agent.id, folder);
           }),
         )
-        .catch(async (error: unknown) => {
-          // Removed before the error shows, so a Try again finds no partly made clone.
-          await this.repos.discardFolder(agent).catch(() => {});
-          this.safe(() => this.store.setAgentError(this.epoch!, agent.id, this.redactor.text(message(error))));
-        })
+        .catch((error: unknown) => this.safe(() => this.store.setAgentError(this.epoch!, agent.id, this.redactor.text(message(error)))))
         .finally(() => this.creating.delete(agent.id));
     }
   },

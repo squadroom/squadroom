@@ -266,6 +266,9 @@ export class Repos {
    * The project's bundle in /opt/console-shared is made and read in turn.
    */
   async createFolder(agent: ConsoleAgent, project: ConsoleProject, epoch: number): Promise<{ folder: string; branch: string | null; base: string }> {
+    // What an earlier, failed setup left (Try again) is removed first, by
+    // the worker that holds the lease, as the rest of the setup.
+    await this.discardFolder(agent);
     const folder = this.folderFor(agent);
     const clone = new Clone(this.o.launcher, folder);
     const branch = agent.permission === "edit" && project.source !== "none" ? consoleBranch(agent.id, agent.name) : null;
@@ -312,8 +315,9 @@ export class Repos {
   }
 
   /** A failed setup's partly made clone is removed, so Try again starts
-   * from an empty folder, as the launcher's `init` requires. The agent
-   * never had a folder, so nothing of its work is in it. */
+   * from an empty folder, as the launcher's `init` requires. Only an agent
+   * being set up comes here: it never had a folder, so nothing of its work
+   * is in it. */
   async discardFolder(agent: Pick<ConsoleAgent, "projectId" | "id">): Promise<void> {
     await removeHomeFolder(this.o.launcher, this.o.paths.agentHome, `work/${agent.projectId}/${agent.id}`);
   }
