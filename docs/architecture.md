@@ -151,7 +151,9 @@ month it started too.
   CLI's ACP mode only, the launcher adds `--gemini-dir`, a folder in the
   window's temporary folder, and writes `antigravity-cli/settings.json`
   there fresh at each start (`{"modelProvider":"gemini"}`, which makes it
-  use the Gemini API key), never through a link. Antigravity CLI names its
+  use the Gemini API key), never through a link. It runs with
+  `--process-per-session`: without that flag, version 1.5.14 doesn't offer
+  MCP over HTTP, so it couldn't reach the team tools. Antigravity CLI names its
   model and thinking level as session config options, and the ACP driver
   switches both with `session/set_config_option` (the kind's
   `acpConfigOptions`), checking each answer before the first prompt.

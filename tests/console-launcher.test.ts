@@ -238,11 +238,11 @@ test("spawn --sandbox: Antigravity CLI gets its own --gemini-dir in the window's
       env: { PATH: "/usr/bin:/bin" } as unknown as NodeJS.ProcessEnv,
       encoding: "utf8",
     });
-  const r = run("acp", "--disable-telemetry");
+  const r = run("acp", "--disable-telemetry", "--process-per-session");
   assert.equal(r.status, 0, r.stderr);
   const [argv, settings] = r.stdout.trim().split("\n");
   const dir = argv.split(" ")[2];
-  assert.equal(argv, `acp --gemini-dir ${dir} --disable-telemetry`);
+  assert.equal(argv, `acp --gemini-dir ${dir} --disable-telemetry --process-per-session`);
   assert.match(dir, new RegExp(`^${s.root}/\\.tmp/[0-9a-f]{32}/antigravity$`));
   assert.deepEqual(JSON.parse(settings), { modelProvider: "gemini" });
   // A link left in place of the settings file is replaced, never written through.

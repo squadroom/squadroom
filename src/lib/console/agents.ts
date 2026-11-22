@@ -457,7 +457,9 @@ AGENT_KINDS.push({
   version: ANTIGRAVITY_CLIENT.version,
   // Never --dangerously-skip-permissions: the Console answers its
   // permission requests. The launcher adds --gemini-dir.
-  acpArgs: ["acp", "--disable-telemetry"],
+  // --process-per-session: without it 1.5.14 offers no MCP over HTTP, so
+  // the team tools cannot reach it.
+  acpArgs: ["acp", "--disable-telemetry", "--process-per-session"],
   acpConfigOptions: true,
   // It starts a language server on loopback ports and calls it, which a
   // network-off sandbox refuses (as OpenCode's server); its model calls
@@ -476,7 +478,7 @@ AGENT_KINDS.push({
     antigravity("hydrogen", "Hydrogen", [...GEMINI_4_EFFORTS, "xhigh"]),
   ],
   sources: [
-    "Offline probe of the pinned 1.5.14 with a fake key (2026-11-22): `antigravity acp` flags (--disable-telemetry, --gemini-dir); API-key mode needs <gemini-dir>/antigravity-cli/settings.json {\"modelProvider\":\"gemini\"} and GEMINI_API_KEY; --gemini-dir moves all its state; session/new offers gemini-4-{carbon,argon,neon,hydrogen} as `model` config values with `thought_level`, and starts on gemini-3.1-pro-low; it listens on loopback ports",
+    "Offline probe of the pinned 1.5.14 with a fake key (2026-11-22): `antigravity acp` flags (--disable-telemetry, --gemini-dir, --process-per-session, the only way its initialize answer offers mcpCapabilities.http); API-key mode needs <gemini-dir>/antigravity-cli/settings.json {\"modelProvider\":\"gemini\"} and GEMINI_API_KEY; --gemini-dir moves all its state; session/new offers gemini-4-{carbon,argon,neon,hydrogen} as `model` config values with `thought_level`, and starts on gemini-3.1-pro-low; it listens on loopback ports",
     "Gemini CLI 0.70.0's README (2026-11-22): \"Not tuned for the Gemini 4 series\"",
     "Antigravity CLI FAQ (2026-11-22): wrapping it in third-party apps is unsupported on consumer plans, so a Gemini API key only",
     "src/lib/console/clients.ts: Antigravity CLI pinned, with its builds' SHA-512",
