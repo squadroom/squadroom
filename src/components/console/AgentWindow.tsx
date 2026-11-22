@@ -372,7 +372,13 @@ export default function AgentWindow({
           </details>
         );
       })()}
-      {agent.state === "error" && <p className={styles.errorLine}>{agent.error}</p>}
+      {agent.state === "error" && (
+        <p className={styles.errorLine}>
+          {agent.error}{" "}
+          {/* Sets the folder up again, with the same checks. */}
+          <button onClick={() => void run({ action: "retrySetup", agentId: agent.id })}>Try again</button>
+        </p>
+      )}
       <div className={styles.transcriptArea}>
         <div className={styles.transcript} ref={scroller} onScroll={onScroll}>
           <div className={styles.transcriptBody} ref={body}>

@@ -254,6 +254,21 @@ export const projects = {
     });
   },
 
+  /** Try again: an agent whose folder setup failed (too little free disk,
+   * a failed clone) goes back to the worker, which sets its folder up
+   * again with every check, the disk floor included. */
+  retryAgentSetup(this: ConsoleStore, agentId: string) {
+    this.transaction(() => {
+      const a = this.agent(agentId);
+      if (!a) throw new Error("That agent does not exist.");
+      if (a.state !== "error" || a.folder !== "") throw new Error("Only an agent whose folder setup failed can try again.");
+      const p = this.project(a.projectId);
+      if (p?.archivedAt != null || this.tab(a.tabId)?.archivedAt != null) throw new Error("Restore its project or tab first.");
+      if (p?.state === "error") throw new Error("The project is not ready: use Check again on the project.");
+      this.run("UPDATE console_agents SET state = 'creating', error = NULL WHERE id = ? AND state = 'error' AND folder = ''", agentId);
+    });
+  },
+
   projects(this: ConsoleStore): ConsoleProject[] {
     return this.all("SELECT * FROM console_projects ORDER BY created_at, rowid").map(project);
   },

@@ -96,7 +96,8 @@ export class Clone {
     // repository starts on a placeholder that never gets a commit.
     await this.git(["init", "--quiet", "-b", "console-unborn"], "Creating the agent's clone");
     await this.git(["fetch", "--quiet", bundle, `refs/heads/${base}:refs/heads/${base}`], "Filling the clone");
-    if (branch) await this.git(["checkout", "--quiet", "-b", branch, base], "Creating the agent's branch");
+    // -B: a Try again after a failed setup may find the branch made.
+    if (branch) await this.git(["checkout", "--quiet", "-B", branch, base], "Creating the agent's branch");
     else await this.git(["checkout", "--quiet", "--detach", base], "Checking out the base branch");
     return (await this.head())!;
   }
@@ -351,7 +352,7 @@ export class Clone {
     await this.git(["checkout", "--quiet", "--detach", ...(force ? ["--force"] : []), sha], "Checking out the commit");
   }
   async checkoutNew(branch: string, from: string) {
-    await this.git(["checkout", "--quiet", "-b", branch, from], "Creating the agent's branch");
+    await this.git(["checkout", "--quiet", "-B", branch, from], "Creating the agent's branch");
   }
   /** Changes in the folder that are not committed (its temporary folder
    * aside). */

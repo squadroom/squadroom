@@ -29,7 +29,8 @@ You need:
 
 - macOS with **about 10 GB free**, which is plenty
   (`df -h /System/Volumes/Data`); the setup script warns you with less.
-  The worker makes no new agent copy when free disk would fall below 5 GB.
+  The worker makes no new agent copy when free disk would fall below 5 GB;
+  free some space, then press **Try again** in the agent's window.
 - **Node.js** 24 or newer (the version in `.nvmrc`), from Homebrew
   (`brew install node@24`) or the official installer. The setup script
   uses the first Node 24 or newer it finds in `/opt/homebrew/bin`, `/usr/local/bin`,
@@ -944,6 +945,12 @@ agent work unrecorded.
 - **Codex is not signed in**: run the Codex login in step 4.
 - **A window stays "Setting up"**: the worker is not running, or it could
   not make the folder (the window shows the launcher's message).
+- **A window shows a red error and won't send**, such as "Not enough free
+  disk for a new copy": its folder couldn't be set up. Fix the cause (free
+  some disk, for example), then press **Try again** beside the error. The
+  same agent is set up again with the same checks; if there still isn't
+  enough space, it shows the same error. If the project's GitHub check
+  failed, press **Check again** on the project instead.
 - **Git commands in an agent's folder fail because `index.lock` exists**:
   restart the worker. At its start it removes locks that a killed Git
   command left behind.
