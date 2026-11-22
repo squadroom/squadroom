@@ -2,6 +2,6 @@
   "name": "console-client-opencode",
   "private": true,
   "dependencies": {
-    "opencode-ai": "1.19.5"
+    "opencode-ai": "1.19.6"
   }
 }
