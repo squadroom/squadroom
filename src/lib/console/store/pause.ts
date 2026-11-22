@@ -4,6 +4,8 @@ import { consoleSpendPauseReason, consoleSpendRaisedReason, spendPauseReason, sp
 
 /** The flag that pauses everything (its value is the reason). */
 export const PAUSE_ALL = "pause-all";
+/** When everything was paused (ms), for Needs you. */
+const PAUSE_ALL_AT = "pause-all-at";
 /** Set ("on") when the owner wants the Needs you e-mail. */
 export const NEEDS_MAIL = "needs-mail";
 /** The Console-wide spend limit in dollars, when the owner set one; there
@@ -22,7 +24,7 @@ export interface ConsoleSpend {
   from: number;
 }
 
-type Paused = { scope: "all" | "project" | "tab"; id: string | null; name: string; projectId: string | null; reason: string };
+type Paused = { scope: "all" | "project" | "tab"; id: string | null; name: string; projectId: string | null; reason: string; at: number | null };
 
 // Pause and Resume, usage holds and spend limits, the ACP network switch,
 // worker flags and logins out of usage.
@@ -90,6 +92,8 @@ export const pause = {
         this.run(`UPDATE console_holds SET released_at = ? WHERE released_at IS NULL AND tab_id IN (SELECT id FROM console_tabs ${where})`, now, ...args);
       };
       if (scope === "all") {
+        // A pause keeps the time it began, through a new reason, until Resume.
+        this.setFlag(PAUSE_ALL_AT, paused ? (this.flag(PAUSE_ALL_AT) ?? String(now)) : null);
         this.setFlag(PAUSE_ALL, paused ? (reason ?? "") : null);
         if (!paused) {
           this.run("UPDATE console_projects SET paused = 0, pause_reason = NULL");
@@ -99,18 +103,18 @@ export const pause = {
       }
       if (scope === "project") {
         if (!this.project(id!)) throw new Error("That project does not exist.");
-        this.run("UPDATE console_projects SET paused = ?, pause_reason = ? WHERE id = ?", paused ? 1 : 0, paused ? reason : null, id!);
+        this.run("UPDATE console_projects SET paused = ?, pause_reason = ?, paused_at = CASE WHEN paused = 1 THEN paused_at ELSE ? END WHERE id = ?", paused ? 1 : 0, paused ? reason : null, now, id!);
         if (!paused) resumeTabs("WHERE project_id = ?", id!);
         return;
       }
       if (!this.tab(id!)) throw new Error("That tab does not exist.");
-      if (paused) this.run("UPDATE console_tabs SET paused = 1, pause_reason = ? WHERE id = ?", reason, id!);
+      if (paused) this.run("UPDATE console_tabs SET paused = 1, pause_reason = ?, paused_at = CASE WHEN paused = 1 THEN paused_at ELSE ? END WHERE id = ?", reason, now, id!);
       else resumeTabs("WHERE id = ?", id!);
     });
   },
   /** The worker pauses a tab (a limit, the stall check). */
   pauseTab(this: ConsoleStore, epoch: number, tabId: string, reason: string) {
-    this.write(epoch, "UPDATE console_tabs SET paused = 1, pause_reason = ? WHERE id = ? AND paused = 0", reason, tabId);
+    this.write(epoch, "UPDATE console_tabs SET paused = 1, pause_reason = ?, paused_at = ? WHERE id = ? AND paused = 0", reason, this.now(), tabId);
   },
   /** A tab's pause is lifted if its reason starts with `prefix`: the
    * worker lifts its own pause this way (with its lease epoch), and Reset
@@ -129,13 +133,15 @@ export const pause = {
   pausedList(this: ConsoleStore): Paused[] {
     const out: Paused[] = [];
     const all = this.flag(PAUSE_ALL);
-    if (all !== null) out.push({ scope: "all", id: null, name: "Everything", projectId: null, reason: all });
-    for (const r of this.all("SELECT id, name, pause_reason FROM console_projects WHERE paused = 1 AND archived_at IS NULL"))
-      out.push({ scope: "project", id: r.id as string, name: r.name as string, projectId: r.id as string, reason: (r.pause_reason as string | null) ?? "" });
+    // A pause from before these times were kept has none.
+    const at = (v: unknown) => (v == null ? null : Number(v));
+    if (all !== null) out.push({ scope: "all", id: null, name: "Everything", projectId: null, reason: all, at: at(this.flag(PAUSE_ALL_AT)) });
+    for (const r of this.all("SELECT id, name, pause_reason, paused_at FROM console_projects WHERE paused = 1 AND archived_at IS NULL"))
+      out.push({ scope: "project", id: r.id as string, name: r.name as string, projectId: r.id as string, reason: (r.pause_reason as string | null) ?? "", at: at(r.paused_at) });
     for (const r of this.all(
-      "SELECT t.id, t.name, t.project_id, t.pause_reason FROM console_tabs t JOIN console_projects p ON p.id = t.project_id WHERE t.paused = 1 AND t.archived_at IS NULL AND p.archived_at IS NULL",
+      "SELECT t.id, t.name, t.project_id, t.pause_reason, t.paused_at FROM console_tabs t JOIN console_projects p ON p.id = t.project_id WHERE t.paused = 1 AND t.archived_at IS NULL AND p.archived_at IS NULL",
     ))
-      out.push({ scope: "tab", id: r.id as string, name: r.name as string, projectId: r.project_id as string, reason: (r.pause_reason as string | null) ?? "" });
+      out.push({ scope: "tab", id: r.id as string, name: r.name as string, projectId: r.project_id as string, reason: (r.pause_reason as string | null) ?? "", at: at(r.paused_at) });
     return out;
   },
 
@@ -145,7 +151,7 @@ export const pause = {
    * again when that other pause is lifted). */
   holdForUsage(this: ConsoleStore, tabId: string, reason: string) {
     this.run("UPDATE console_tabs SET usage_hold = ? WHERE id = ?", reason, tabId);
-    this.run("UPDATE console_tabs SET paused = 1, pause_reason = ? WHERE id = ? AND paused = 0", reason, tabId);
+    this.run("UPDATE console_tabs SET paused = 1, pause_reason = ?, paused_at = ? WHERE id = ? AND paused = 0", reason, this.now(), tabId);
   },
   /** Unpaused tabs that still hold for a usage failure. */
   usageHolds(this: ConsoleStore): { tabId: string; reason: string }[] {

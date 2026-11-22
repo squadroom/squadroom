@@ -1,7 +1,7 @@
 import type { ConsoleCommand } from "./commands.ts";
 import { AGENT_KINDS, type AgentKind } from "./agents.ts";
 import type { CleanupItem } from "./cleanup.ts";
-import type { ArchiveImpact, TimelineEntry } from "./views.ts";
+import type { ArchiveImpact, needsView, TimelineEntry } from "./views.ts";
 import type { NeedsLike } from "./notify.ts";
 import type { Overview } from "./overview.ts";
 import type { SseFrame } from "./sse.ts";
@@ -14,6 +14,38 @@ import { CONSOLE_SPEND_PAUSE, SPEND_PAUSE, turnLimits, type ConsoleEvent, type C
 /** Everything waiting in Needs you. */
 export const needCount = (n: NeedsLike) =>
   n.requests.length + (n.expired?.length ?? 0) + n.interrupted.length + (n.messages?.length ?? 0) + (n.paused?.length ?? 0) + (n.notices?.length ?? 0);
+
+type NeedsView = ReturnType<typeof needsView>;
+/** One Needs you item, with its group (an index into NEED_GROUPS) and when
+ * it arrived (null: a pause made before pause times were kept has none). */
+export type NeedItem = { group: 0 | 1 | 2; at: number | null } & (
+  | { kind: "request"; item: NeedsView["requests"][number] }
+  | { kind: "expired"; item: NeedsView["expired"][number] }
+  | { kind: "notice"; item: NeedsView["notices"][number] }
+  | { kind: "paused"; item: NeedsView["paused"][number] }
+  | { kind: "message"; item: NeedsView["messages"][number] }
+  | { kind: "turn"; item: NeedsView["interrupted"][number] }
+);
+
+/** Needs you's groups, most urgent first. */
+export const NEED_GROUPS = ["Holding up work", "To decide", "For your information"] as const;
+
+/** Needs you's items in the order to deal with them: first what holds work
+ * up until the owner acts (a permission request or question, a merge to
+ * approve, a pause), then decisions (a proposed tab, a tab proposed for
+ * closing, a request that closed unanswered, an interrupted turn or
+ * message), then reports and notes. Oldest first in each group. */
+export function needsInOrder(n: NeedsView): NeedItem[] {
+  const items: NeedItem[] = [
+    ...n.requests.map((item): NeedItem => ({ kind: "request", item, group: 0, at: item.createdAt })),
+    ...n.paused.map((item): NeedItem => ({ kind: "paused", item, group: 0, at: item.at })),
+    ...n.notices.map((item): NeedItem => ({ kind: "notice", item, group: item.merge ? 0 : item.proposal || item.close ? 1 : 2, at: item.createdAt })),
+    ...n.expired.map((item): NeedItem => ({ kind: "expired", item, group: 1, at: item.expiredAt })),
+    ...n.interrupted.map((item): NeedItem => ({ kind: "turn", item, group: 1, at: item.interruptedAt })),
+    ...n.messages.map((item): NeedItem => ({ kind: "message", item, group: 1, at: item.interruptedAt })),
+  ];
+  return items.sort((a, b) => a.group - b.group || (a.at ?? 0) - (b.at ?? 0));
+}
 
 /** A Needs you request's stored input, laid out to read: indented when it
  * is whole JSON (so text inside it keeps its `\n` marks), otherwise as
@@ -38,10 +70,11 @@ export function turnLimitsHint(tab: Pick<ConsoleTab, "turnLimit" | "timeLimitMin
   return `${plural(turns, "turn")}, ${Math.round((ms / 3_600_000) * 100) / 100} h per message`;
 }
 
-/** "12s", "3m", "1h" since a time (a helpers row label). */
+/** "12s", "3m", "1h", "3d" since a time (a helpers row label, how long
+ * ago a Needs you item arrived). */
 export function elapsed(since: number, until = Date.now()): string {
   const s = Math.max(0, Math.round((until - since) / 1000));
-  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : s < 48 * 3600 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`;
 }
 
 /** What a template creates, in words (New tab and Settings › Templates). */

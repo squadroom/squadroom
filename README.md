@@ -52,7 +52,9 @@ to you in its window. With a pair you talk to the Lead. You can type into any
 agent's window at any time. Everything else that needs you goes into one
 tray, **Needs you**, which covers every project: network requests,
 questions, pushes, merges agents ask for, a push that failed (with the
-reason), notes agents leave for you (`team_report`) and paused tabs. The **Team** panel shows every message between a tab's agents, and
+reason), notes agents leave for you (`team_report`) and paused tabs. It
+puts what is holding up work first, then what you need to decide, then
+notes, and says how long ago each item arrived. The **Team** panel shows every message between a tab's agents, and
 in an agent's window a teammate's message has its own style, so you can
 tell it from yours.
 

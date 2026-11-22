@@ -195,7 +195,7 @@ test("a version-5 store gains the Network column, every agent on Ask", (t) => {
   assert.equal(store.agent(agent.id)!.networkAuto, false);
   assert.equal(store.setNetworkAuto(agent.id, true).networkAuto, true);
   const check = new DatabaseSync(path);
-  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 5);
+  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 6);
   check.close();
 });
 

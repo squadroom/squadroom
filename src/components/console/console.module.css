@@ -1924,6 +1924,16 @@
   font-size: 16px;
   font-weight: 600;
 }
+/* Its groups, most urgent first. */
+.needsPanel h3 {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.needsPanel h3.needUrgent {
+  color: var(--text);
+}
 /* Below 1200px there is no room beside the windows: it floats over their
    right side instead (still not modal). */
 @media (max-width: 1200px) {

@@ -155,6 +155,8 @@ test("interrupted turns wait for Send again or Dismiss; nothing is replayed by i
   await h.worker.stop();
   assert.equal(h.store.turn(a)!.status, "interrupted");
   assert.deepEqual(needsView(h.store).interrupted.map((x) => x.id), [a]);
+  // Needs you shows when it was interrupted.
+  assert.equal(needsView(h.store).interrupted[0].interruptedAt, h.store.turn(a)!.endedAt);
   const again = runCommand(h.store, { action: "resend", turnId: a }) as { turnId: number };
   assert.equal(h.store.turn(again.turnId)!.prompt, "hang");
   assert.equal(h.store.turn(again.turnId)!.status, "queued");

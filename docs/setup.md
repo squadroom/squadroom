@@ -371,8 +371,15 @@ Things to know while using it:
   in the tab's **Team** panel. You talk to the Orchestrator (or the pair's
   Lead), or to any agent in its window.
 - **Needs you** (top bar) collects every permission request, question, note
-  from an agent, interrupted turn and pause across projects. A permission
-  request closes when its turn ends (a time limit, a Stop, a worker
+  from an agent, interrupted turn and pause across projects. It lists them
+  in three groups, in this order: **Holding up work** (permission requests,
+  questions, merges to approve and pauses: work waits until you act), **To
+  decide** (proposed tabs, tabs suggested for closing, requests that got no
+  answer, interrupted turns and messages) and **For your information**
+  (reports and notes). Each group is oldest first. Every item says how long
+  ago it arrived ("3m ago"), and holding the pointer over that shows the
+  exact date and time. A pause made by an older version of Squadroom has no
+  time. A permission request closes when its turn ends (a time limit, a Stop, a worker
   restart), not because it waited a while for you; it then stays in Needs
   you marked "got no answer", with how
   often it was asked. **Always for this agent**, **Always for this

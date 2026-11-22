@@ -46,6 +46,8 @@ test("closing a tab closes its agents, stops a running turn, discards their mail
   store.sendTeamMessage(epoch, { turnId: turn.id, from: store.agent(lead.id)!, to: store.agent(gone.id)!, kind: "send", body: "bye", key: "k3", summary: "s" });
   runCommand(store, { action: "close", agentId: gone.id });
   assert.equal(needsView(store).messages.length, 1);
+  // Needs you shows when it was interrupted.
+  assert.equal(needsView(store).messages[0].interruptedAt, tick(0));
   // A permission question open in the Lead's turn.
   store.recordRequest(epoch, { turnId: turn.id, agentId: lead.id, tool: "Bash", input: "{}", state: "open", reason: "" });
   assert.equal(needsView(store).requests.length, 1);

@@ -46,7 +46,7 @@ export interface TurnRow extends ConsoleTurn {
 /** Raised whenever the schema below changes: a store stamped with an
  * earlier one is upgraded by MIGRATIONS where it can be, and otherwise
  * checked against it on open. */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /** Columns a store stamped with an earlier version gains: each is added
  * only where it is missing, so a store an older build opened since (and
@@ -69,6 +69,9 @@ const MIGRATIONS: { table: string; column: string; type: string }[] = [
   { table: "console_notices", column: "data", type: "TEXT" },
   // Version 5: an agent's Network setting, Ask or Auto.
   { table: "console_agents", column: "network_auto", type: "INTEGER NOT NULL DEFAULT 0" },
+  // Version 6: when a project or tab was paused, shown in Needs you.
+  { table: "console_projects", column: "paused_at", type: "INTEGER" },
+  { table: "console_tabs", column: "paused_at", type: "INTEGER" },
 ];
 
 function migrate(db: DatabaseSync) {
@@ -80,8 +83,8 @@ function migrate(db: DatabaseSync) {
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS console_lease (id INTEGER PRIMARY KEY CHECK (id = 1), epoch INTEGER NOT NULL, holder TEXT NOT NULL, renewed_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS console_projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, base_branch TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, repo TEXT, state TEXT NOT NULL DEFAULT 'ready', error TEXT, pause_reason TEXT, archived_at INTEGER, acp_network INTEGER NOT NULL DEFAULT 0, acp_network_wanted INTEGER, acp_network_now INTEGER NOT NULL DEFAULT 0, image_tools INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS console_tabs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, pause_reason TEXT, count_from INTEGER NOT NULL DEFAULT 0, resumed_at INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, circle_from INTEGER NOT NULL DEFAULT 0, usage_hold TEXT, spend_limit_usd REAL, spend_reset_seq INTEGER NOT NULL DEFAULT 0, steps TEXT, step INTEGER NOT NULL DEFAULT 0, turn_limit INTEGER, time_limit_min INTEGER, parent_agent TEXT, lead_agent TEXT, result_sent INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS console_projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, base_branch TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, repo TEXT, state TEXT NOT NULL DEFAULT 'ready', error TEXT, pause_reason TEXT, archived_at INTEGER, acp_network INTEGER NOT NULL DEFAULT 0, acp_network_wanted INTEGER, acp_network_now INTEGER NOT NULL DEFAULT 0, image_tools INTEGER NOT NULL DEFAULT 0, paused_at INTEGER);
+CREATE TABLE IF NOT EXISTS console_tabs (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, paused INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, pause_reason TEXT, count_from INTEGER NOT NULL DEFAULT 0, resumed_at INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, circle_from INTEGER NOT NULL DEFAULT 0, usage_hold TEXT, spend_limit_usd REAL, spend_reset_seq INTEGER NOT NULL DEFAULT 0, steps TEXT, step INTEGER NOT NULL DEFAULT 0, turn_limit INTEGER, time_limit_min INTEGER, parent_agent TEXT, lead_agent TEXT, result_sent INTEGER NOT NULL DEFAULT 0, paused_at INTEGER);
 CREATE INDEX IF NOT EXISTS console_tabs_project ON console_tabs (project_id);
 CREATE TABLE IF NOT EXISTS console_agents (id TEXT PRIMARY KEY, tab_id TEXT NOT NULL, project_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, model TEXT NOT NULL, effort TEXT, permission TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', branch TEXT, state TEXT NOT NULL, error TEXT, created_at INTEGER NOT NULL, base_commit TEXT, merging TEXT, start_after TEXT, ask_first INTEGER NOT NULL DEFAULT 0, carry_summary TEXT, settling INTEGER, network_auto INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS console_agents_project ON console_agents (project_id);
