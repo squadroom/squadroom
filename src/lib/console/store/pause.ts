@@ -92,8 +92,10 @@ export const pause = {
         this.run(`UPDATE console_holds SET released_at = ? WHERE released_at IS NULL AND tab_id IN (SELECT id FROM console_tabs ${where})`, now, ...args);
       };
       if (scope === "all") {
-        // A pause keeps the time it began, through a new reason, until Resume.
-        this.setFlag(PAUSE_ALL_AT, paused ? (this.flag(PAUSE_ALL_AT) ?? String(now)) : null);
+        // A pause keeps the time it began, through a new reason, until
+        // Resume; one made before these times were kept stays without one.
+        if (!paused) this.setFlag(PAUSE_ALL_AT, null);
+        else if (this.flag(PAUSE_ALL) === null) this.setFlag(PAUSE_ALL_AT, String(now));
         this.setFlag(PAUSE_ALL, paused ? (reason ?? "") : null);
         if (!paused) {
           this.run("UPDATE console_projects SET paused = 0, pause_reason = NULL");

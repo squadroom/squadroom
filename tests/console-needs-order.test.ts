@@ -96,4 +96,11 @@ test("a version-5 store gains the pause times; a pause from before has none", (t
   assert.deepEqual(store.pausedList().map((p) => [p.id, p.at]), [[project.id, null]]);
   store.setPaused("tab", store.tabs(project.id)[0].id, true, "new");
   assert.ok(store.pausedList()[1].at !== null);
+  // Everything paused before the upgrade keeps no time through a new reason.
+  store.setFlag("pause-all", "old");
+  store.setPaused("all", null, true, "new reason");
+  assert.deepEqual(store.pausedList().map((p) => [p.scope, p.at === null]), [["all", true], ["project", true], ["tab", false]]);
+  store.setPaused("all", null, false);
+  store.setPaused("all", null, true, "fresh");
+  assert.ok(store.pausedList()[0].at !== null);
 });
