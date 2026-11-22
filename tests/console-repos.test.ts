@@ -392,6 +392,32 @@ test("Try again sets up a folder that failed on the disk floor, with the floor s
   assert.throws(() => runCommand(h.store, { action: "retrySetup", agentId: lead.id }), /folder setup failed/);
 });
 
+test("Try again after a setup that failed partway starts from an empty folder", async (t) => {
+  // The first agent's branch fails once, after the project's repository was filled.
+  let failOnce = true;
+  const h = await harness(t, {}, false, {
+    launcher: (l) => {
+      const git = l.git.bind(l);
+      l.git = (repo, args, ...rest) => {
+        if (failOnce && args.includes("checkout") && args.includes("-b")) {
+          failOnce = false;
+          return Promise.resolve({ code: 1, stdout: "", stderr: "injected", truncated: false } as Awaited<ReturnType<typeof git>>);
+        }
+        return git(repo, args, ...rest);
+      };
+      return l;
+    },
+  });
+  await h.worker.start();
+  const lead = h.agent();
+  await h.until(() => h.store.agent(lead.id)!.state === "error", "failed");
+  assert.match(h.store.agent(lead.id)!.error!, /injected/);
+  runCommand(h.store, { action: "retrySetup", agentId: lead.id });
+  await h.ready(lead.id);
+  const folder = h.store.agent(lead.id)!.folder;
+  assert.equal(git(folder, "rev-parse", "--abbrev-ref", "HEAD"), consoleBranch(lead.id, "Lead"));
+});
+
 test("a GitHub project whose base branch is missing or unprotected is refused before any clone", async (t) => {
   const bare = origin(t);
   const h = await harness(t, {}, false, {

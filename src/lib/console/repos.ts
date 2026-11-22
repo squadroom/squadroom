@@ -25,6 +25,7 @@ import { CONSOLE_FILES_IN_BRANCH, Mirror } from "./mirror.ts";
 import { CODEX_REVIEW, JOB_LOG_BYTES, checksSummary, checksText, jobLogText, outcome, pullRequestReviewText, pullRequestText, wantsReview } from "./pull-request.ts";
 import { checksLine, checksRefusal, mergeCommitTitle, movedRefusal, notConsole, notFound, pullRefusal, reviewLine, unpushedRefusal, unstableRefusal, type MergeAsk, type PullState } from "./merge.ts";
 import { agentModel } from "./agents.ts";
+import { removeHomeFolder } from "./cleanup.ts";
 import type { Launcher } from "./launcher.ts";
 import { credentialValues, keyFor } from "./keys.ts";
 import { inStep, type ConsolePaths } from "./permissions.ts";
@@ -308,6 +309,13 @@ export class Repos {
       copyAgentFile(join(repo, "console-base.bundle"), bundle, this.agentUid());
       return { folder, branch, base: await clone.createFromBundle(bundle, "main", branch) };
     });
+  }
+
+  /** A failed setup's partly made clone is removed, so Try again starts
+   * from an empty folder, as the launcher's `init` requires. The agent
+   * never had a folder, so nothing of its work is in it. */
+  async discardFolder(agent: Pick<ConsoleAgent, "projectId" | "id">): Promise<void> {
+    await removeHomeFolder(this.o.launcher, this.o.paths.agentHome, `work/${agent.projectId}/${agent.id}`);
   }
 
   /** Where GitHub's base branch is now: one request with the

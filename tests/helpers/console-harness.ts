@@ -77,7 +77,10 @@ case "$1" in
   git)
     repo="$2"; shift 2
     echo "git $repo $1" >> $LOG
-    if [ "$1" = init ]; then mkdir -p "$repo"; fi
+    if [ "$1" = init ]; then
+      if [ -n "$(ls -A "$repo" 2>/dev/null)" ]; then echo "init needs a new or empty folder" >&2; exit 2; fi
+      mkdir -p "$repo"
+    fi
     cd "$repo" || exit 64
     exec /usr/bin/env -i HOME=${agentHome} PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null "$@"
     ;;
