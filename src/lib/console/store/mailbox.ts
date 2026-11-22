@@ -185,10 +185,10 @@ export const mailbox = {
     );
   },
   /** Interrupted messages (Needs you), oldest first. */
-  interruptedMessages(this: ConsoleStore): (Named & { projectId: string })[] {
+  interruptedMessages(this: ConsoleStore): (Named & { projectId: string; interruptedAt: number })[] {
     return this.all(
       "SELECT m.*, f.name AS from_name, t.name AS to_name, t.project_id FROM console_messages m LEFT JOIN console_agents f ON f.id = m.from_agent JOIN console_agents t ON t.id = m.to_agent JOIN console_tabs tb ON tb.id = t.tab_id JOIN console_projects p ON p.id = t.project_id WHERE m.state = 'interrupted' AND tb.archived_at IS NULL AND p.archived_at IS NULL ORDER BY m.id",
-    ).map((r) => ({ ...teamMessage(r), projectId: r.project_id as string }));
+    ).map((r) => ({ ...teamMessage(r), projectId: r.project_id as string, interruptedAt: (r.ended_at as number | null) ?? (r.created_at as number) }));
   },
   /** Re-send (a new attempt, told what the interrupted one already did) or
    * Discard. Never automatic. */

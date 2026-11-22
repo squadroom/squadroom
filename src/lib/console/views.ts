@@ -339,6 +339,7 @@ export function needsView(store: ConsoleStore) {
       to: m.toName,
       kind: m.kind,
       text: m.body.length > 300 ? `${m.body.slice(0, 299)}…` : m.body,
+      interruptedAt: m.interruptedAt,
     })),
     // A paused tab carries its spend, so a spend pause shows it with the
     // limit beside Reset spend.
@@ -354,6 +355,7 @@ export function needsView(store: ConsoleStore) {
       projectId: t.projectId,
       prompt: t.prompt.length > 300 ? `${t.prompt.slice(0, 299)}…` : t.prompt,
       reason: t.reason,
+      interruptedAt: t.endedAt ?? t.createdAt,
     })),
   };
 }
