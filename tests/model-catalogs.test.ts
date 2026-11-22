@@ -47,7 +47,7 @@ test("every agent kind is offered, and the ACP kinds with their pinned clients",
 
 test("Antigravity CLI's Gemini 4 models: Google's catalog prices on the Gemini key, no cache-write price, xhigh for Neon and Hydrogen only", () => {
   const agy = AGENT_KINDS.find((k) => k.kind === "antigravity-cli")!;
-  assert.deepEqual(agy.acpArgs, ["acp", "--disable-telemetry"]);
+  assert.deepEqual(agy.acpArgs, ["acp", "--disable-telemetry", "--process-per-session"]);
   assert.ok(!agy.acpArgs!.some((a) => a.includes("dangerously")));
   assert.equal(agy.needsNetwork, true);
   assert.deepEqual(agy.models.map((m) => m.id), ["gemini-4-carbon", "gemini-4-argon", "gemini-4-neon", "gemini-4-hydrogen"]);
